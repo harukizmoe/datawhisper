@@ -50,6 +50,6 @@ allowedTools: [get_schema, query_data, run_analysis, generate_chart]
 
 ## Implementation reference
 
-- 查询工具：`agent/tools/business/data.py::_tool_query_data`
-- 图表工具：`agent/tools/business/data.py::_tool_generate_chart`
+- 查询工具：`compute/tools/data.py::_tool_query_data`
+- 图表工具：`compute/tools/data.py::_tool_generate_chart`
 - 图表实现：`Function/Charts_generation/chart_generate.py`

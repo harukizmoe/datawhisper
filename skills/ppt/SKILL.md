@@ -18,6 +18,6 @@ allowedTools: [get_schema, query_data, propose_ppt_outline]
 
 ## Implementation reference
 
-- Proposal tool entry: `agent/tools/business/export.py::_tool_propose_ppt_outline`
-- Generation tool entry: `agent/tools/business/export.py::_tool_generate_ppt`
+- Proposal tool entry: `compute/tools/export.py::_tool_propose_ppt_outline`
+- Generation tool entry: `compute/tools/export.py::_tool_generate_ppt`
 - PPT implementation: `Function/Output/PPT/`

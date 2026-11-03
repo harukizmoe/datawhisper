@@ -19,6 +19,6 @@ allowedTools: [get_schema, query_data, select_chart, ask_user, generate_chart]
 
 ## Implementation reference
 
-- Tool entries: `agent/tools/business/data.py::_tool_select_chart`, `agent/tools/business/data.py::_tool_generate_chart`
+- Tool entries: `compute/tools/data.py::_tool_select_chart`, `compute/tools/data.py::_tool_generate_chart`
 - Chart implementation: `Function/Charts_generation/chart_generate.py`
 - Chart catalog: `Function/Charts_generation/charts/`

@@ -29,6 +29,6 @@ Prefer a funnel chart or a compact stage-by-stage table. If stage ordering is am
 
 ## Implementation reference
 
-- Query tool entry: `agent/tools/business/data.py::_tool_query_data`
-- Chart tool entry: `agent/tools/business/data.py::_tool_generate_chart`
+- Query tool entry: `compute/tools/data.py::_tool_query_data`
+- Chart tool entry: `compute/tools/data.py::_tool_generate_chart`
 - Chart implementation: `Function/Charts_generation/chart_generate.py`

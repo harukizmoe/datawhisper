@@ -59,7 +59,8 @@ def _execute_analysis(
 
 class DataToolsMixin:
     """All methods here rely on self.data_source, self._schema_cache,
-    self.ppt_color_scheme — defined in BusinessAgent.__init__."""
+    self.ppt_color_scheme — set by the host (``agent.agent.BusinessAgent``
+    or ``compute.host.ToolHost``)."""
 
     # ── Knowledge base lookup ─────────────────────────────────────────────────
 

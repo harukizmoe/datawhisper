@@ -302,44 +302,8 @@ class ChatSession:
         if not active:
             # Fallback: use all sources if none activated
             active = self._sources
-        if not active:
-            return ""
-        if len(active) == 1:
-            return active[0]["source"].get_schema()
-
-        # Collect all table names across sources to detect collisions.
-        all_table_names: list[str] = []
-        src_tables: list[list[str]] = []
-        for entry in active:
-            try:
-                tables = entry["source"].list_tables()
-            except Exception:
-                tables = []
-            src_tables.append(tables)
-            all_table_names.extend(tables)
-
-        collision = len(all_table_names) != len(set(all_table_names))
-
-        parts = []
-        for idx, entry in enumerate(active, start=1):
-            src = entry["source"]
-            raw_schema = src.get_schema()
-            if collision:
-                # Prefix every "Table: <name>" line with src{N}__ so the LLM
-                # (and the router) can tell tables apart across sources.
-                import re as _re
-                def _add_prefix(m):
-                    return f"Table: src{idx}__{m.group(1)}"
-                raw_schema = _re.sub(r"Table:\s+(\S+)", _add_prefix, raw_schema)
-                note = (
-                    f"  [NOTE: prefix all table names with src{idx}__ when writing SQL, "
-                    f"e.g. SELECT * FROM \"src{idx}__<table_name>\"]"
-                )
-            else:
-                note = ""
-            header = f"=== 数据源 {idx}: {getattr(src, 'name', '未命名')} ==="
-            parts.append(f"{header}{note}\n{raw_schema}")
-        return "\n\n".join(parts)
+        from compute.sources import combined_schema
+        return combined_schema([entry["source"] for entry in active])
 
     # ── Merged source (cross-source JOIN support) ──────────────────────────────
 
@@ -420,20 +384,17 @@ class ChatSession:
         if self._merged_source_cache is not None:
             return self._merged_source_cache
 
-        try:
-            from data.merged_source import MergedDataSource
-            src_list = [e["source"] for e in active]
-            ms = MergedDataSource(src_list)
+        from compute.sources import build_merged_source
+        src_list = [e["source"] for e in active]
+        ms = build_merged_source(src_list)
+        if ms is not None:
             self._merged_source_cache = ms
             log.info(
                 "[session] MergedDataSource built  session=%s  sources=%s",
                 self.session_id,
                 [getattr(s, "name", "?") for s in src_list],
             )
-            return ms
-        except Exception as exc:
-            log.warning("[session] MergedDataSource build failed: %s", exc)
-            return None
+        return ms
 
     def add_user(self, text: str):
         self.history.append({"role": "user", "content": text})

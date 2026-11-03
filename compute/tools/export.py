@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from agent.validate import normalize_report_outline_args, validate_tool_args
 from infrastructure.artifact_lifecycle import register_artifact
-from infrastructure.paths import content_data_path
+from infrastructure.paths import content_data_path, resource_root
 
 REPORT_JOB_SECTION_THRESHOLD = 6
 REPORT_JOB_CHART_THRESHOLD = 3
@@ -22,8 +22,8 @@ PPT_JOB_SLIDES_THRESHOLD = 5  # matches registry ppt_slides_gt_5
 
 class ExportToolsMixin:
     """All methods here rely on self.data_source, self._chart_store,
-    self._session_chart_ids, self.ppt_color_scheme — defined in BusinessAgent.__init__.
-    _PROJ_ROOT is imported from prompts to avoid repeating the path logic."""
+    self._session_chart_ids, self.ppt_color_scheme — set by the host
+    (``agent.agent.BusinessAgent`` or ``compute.host.ToolHost``)."""
 
     # ── A5: export directory resolution ───────────────────────────────────────
 
@@ -454,7 +454,7 @@ class ExportToolsMixin:
         Schema errors (unsupported layout) still raise immediately because
         no rendering has happened yet.
         """
-        from ...prompts import _PROJ_ROOT
+        _PROJ_ROOT = str(resource_root())
 
         try:
             from PPT import MckEngine

@@ -45,5 +45,5 @@ allowedTools: [get_schema, query_data, ask_user, propose_dashboard_outline]
   Mention it naturally: You can also download the HTML file to view offline.
 
 ## Implementation reference
-- Proposal tool entry: `agent/tools/business/export.py::_tool_propose_dashboard_outline`
-- Generation tool entry: `agent/tools/business/export.py::_tool_generate_dashboard`
+- Proposal tool entry: `compute/tools/export.py::_tool_propose_dashboard_outline`
+- Generation tool entry: `compute/tools/export.py::_tool_generate_dashboard`

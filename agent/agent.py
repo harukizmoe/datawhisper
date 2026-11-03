@@ -5,8 +5,8 @@
 The heavy lifting is split across:
   prompts.py             — base system prompt and path setup
   tools/schemas.py       — AGENT_TOOLS (JSON schemas sent to the LLM)
-  tools/business/data.py — DataToolsMixin  (schema / query / analysis / chart / clean)
-  tools/business/export.py — ExportToolsMixin (Excel / Word / PPT)
+  compute/tools/data.py   — DataToolsMixin  (schema / query / analysis / chart / clean)
+  compute/tools/export.py — ExportToolsMixin (Excel / Word / PPT)
 """
 import json
 import logging
@@ -39,7 +39,14 @@ from .commands     import (
 from dataclasses import replace
 from .skills       import SkillDef, SkillExecutor, SkillLoader
 from .tools.schemas import AGENT_TOOLS, get_tools_with_mcp
-from .tools.business import DataToolsMixin, ExportToolsMixin
+from compute.tools.data import DataToolsMixin
+from compute.tools.dispatch import (
+    BUSINESS_TOOLS,
+    as_bool_arg as _as_bool_arg,
+    normalize_chart_call_args as _normalize_chart_call_args,
+    run_business_tool,
+)
+from compute.tools.export import ExportToolsMixin
 from .tools.exposure import filter_tools_for_turn, limit_tools_for_turn
 from .tools.results import make_tool_result, read_tool_result_artifact, classify_tool_error
 from .tools.parallel import should_parallelize_batch
@@ -127,17 +134,6 @@ _PROPOSE_CMDS = (
 )
 
 
-def _as_bool_arg(value: Any) -> bool:
-    """Coerce tool-call booleans without treating the string 'False' as true."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value == 1
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes"}
-    return False
-
-
 def _parse_delegated_tool_args(raw_args: Any) -> Dict[str, Any]:
     """Parse delegated tool-call arguments into a safe JSON-serializable dict."""
     if isinstance(raw_args, dict):
@@ -201,22 +197,6 @@ def _quality_review_blocking_reason(content: str) -> str:
         if marker in text:
             return f"quality reviewer reported blocking issue: {marker}"
     return ""
-
-
-def _normalize_chart_call_args(
-    args: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Make chart execution and UI metadata use the same non-empty values."""
-    normalized = dict(args or {})
-    chart_type = str(normalized.get("chart_type") or "Bar_Chart").strip()
-    if not chart_type:
-        chart_type = "Bar_Chart"
-    title = str(normalized.get("title") or "").strip()
-    if not title:
-        title = f"数据可视化 · {chart_type.replace('_', ' ')}"
-    normalized["chart_type"] = chart_type
-    normalized["title"] = title[:120]
-    return normalized
 
 
 _REQUIRED_SUCCESSFUL_SKILL_TOOLS = {
@@ -751,21 +731,13 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         """Register extracted table grids as a new session data source and
         live-refresh this turn's source view (load_feishu_bitable pattern)."""
         from api.state import session_manager
-        from data.sources.extracted import ExtractedTableDataSource
-        from data.table_extract import normalize_grids
+        from compute.tools.ingest import (
+            NO_TABLES_TEXT, extracted_source, extracted_source_text,
+        )
 
-        tables, meta = normalize_grids(grids)
-        if not tables:
-            return json.dumps({
-                "ok": False,
-                "error_code": "FETCH-001",
-                "message": (
-                    "未发现可用表格（少于 2 行或 2 列的表已被过滤）。"
-                    "若是 JavaScript 渲染页面，请先 browser_navigate 打开页面，"
-                    "再调用 browser_extract_tables。"
-                ),
-            }, ensure_ascii=False)
-        source = ExtractedTableDataSource(source_name or origin_label, tables)
+        source, tables, meta = extracted_source(grids, source_name, origin_label)
+        if source is None:
+            return NO_TABLES_TEXT
         session = session_manager.get(self._session_id)
         if session is None:
             raise RuntimeError("当前会话已失效，请刷新页面后重试")
@@ -778,32 +750,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         self._combined_schema = session.get_combined_schema()
         self._schema_cache = self._combined_schema
         self._merged_source = session.get_merged_source()
-        previews = []
-        for entry in meta.get("tables", []):
-            frame = tables.get(entry.get("name"))
-            if frame is None:
-                continue
-            sample = [
-                ["" if v is None or v != v else str(v) for v in row]
-                for row in frame.head(3).to_numpy().tolist()
-            ]
-            previews.append({
-                "name": entry.get("name"),
-                "rows": entry.get("rows"),
-                "cols": entry.get("cols"),
-                "truncated": bool(entry.get("truncated")),
-                "columns": [str(c) for c in frame.columns],
-                "sample_rows": sample,
-            })
-        return json.dumps({
-            "ok": True,
-            "message": "表格已接入当前对话，可直接用 SQL 查询与分析。",
-            "source_id": source_id,
-            "source_name": source.name,
-            "tables": previews,
-            "dropped_tables": meta.get("dropped", 0),
-            "schema": self._combined_schema,
-        }, ensure_ascii=False)
+        return extracted_source_text(source_id, source, tables, meta, self._combined_schema)
 
     def _handle_browser_verification(self, name, args, tool_result):
         """If browser tool hit a verification page, notify user and wait."""
@@ -3107,164 +3054,31 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         _kb_checked_this_turn = True
 
                     try:
-                        if name == "select_chart":
+                        if name in BUSINESS_TOOLS:
+                            outcome = yield from run_business_tool(
+                                self, name, args, chart_offset=len(pending_charts),
+                            )
+                            tool_result = outcome.text
+                            tool_sources = outcome.refs
+                            tool_artifacts = outcome.artifacts
+                            for chart_item in outcome.charts:
+                                pending_charts.append(chart_item)
+                                yield {
+                                    "type": "chart_placeholder",
+                                    "index": len(pending_charts) - 1,
+                                }
+                        elif name == "select_chart":
                             tool_result = self._tool_select_chart(
                                 user_intent=args.get("user_intent", ""),
                                 available_columns=args.get("available_columns", []),
                             )
-                        elif name == "query_knowledge":
-                            tool_result, kb_refs = self._tool_query_knowledge_with_refs(
-                                question=args.get("question", "")
-                            )
-                            tool_sources = kb_refs
-                            yield {
-                                "type": "knowledge_refs",
-                                "refs": kb_refs,
-                                "query": args.get("question", ""),
-                            }
                         elif name == "memory_read":
                             tool_result = read_memory(
                                 args.get("name", ""), user_id=self._user_id,
                                 workspace_id=self._workspace_id,
                             )
-                        elif name == "get_schema":
-                            tool_result = self._tool_get_schema()
                         elif name == "workspace_status":
                             tool_result = self._tool_workspace_status()
-                        elif name == "get_table_detail":
-                            tool_result = self._tool_get_table_detail(
-                                table_name=args.get("table_name", "")
-                            )
-                        elif name == "create_analysis_table":
-                            tool_result, tool_sources = yield from self._tool_create_analysis_table_with_jobs(
-                                sql=args.get("sql", ""),
-                                table_name=args.get("table_name", "analysis_data"),
-                            )
-                            yield {"type": "data_refs", "refs": tool_sources}
-                        elif name == "delete_analysis_tables":
-                            tool_result = self._tool_delete_analysis_tables(
-                                table_names=args.get("table_names", []),
-                                confirm=_as_bool_arg(args.get("confirm", False)),
-                            )
-                        elif name == "query_data":
-                            tool_result, tool_sources = yield from self._tool_query_data_with_jobs(
-                                args.get("sql", "")
-                            )
-                            yield {"type": "data_refs", "refs": tool_sources}
-                        elif name == "run_analysis":
-                            tool_result = yield from self._tool_run_analysis_with_jobs(
-                                analysis_name=args.get("analysis_name", ""),
-                                sql=args.get("sql", ""),
-                                target_column=args.get("target_column", ""),
-                                groupby_column=args.get("groupby_column", ""),
-                                n_deciles=int(args.get("n_deciles", 10)),
-                                analysis_options=args.get("analysis_options", {}),
-                            )
-                            tool_sources = self._data_refs_for_sql(
-                                args.get("sql", ""), self.data_source, None
-                            )
-                            yield {"type": "data_refs", "refs": tool_sources}
-                        elif name == "generate_chart":
-                            tool_sources = self._data_refs_for_sql(
-                                args.get("sql", ""), self.data_source, None
-                            )
-                            chart = yield from self._tool_generate_chart_with_jobs(
-                                chart_type=args.get("chart_type", "Bar_Chart"),
-                                sql=args.get("sql", ""),
-                                field_mapping=args.get("field_mapping", {}),
-                                title=args.get("title", ""),
-                                highlight=args.get("highlight", ""),
-                                size=args.get("size", ""),
-                                color_scheme=args.get("color_scheme", ""),
-                            )
-                            if "html" in chart:
-                                # spec 边车：记录可复现的完整生成参数。chat.py 落盘
-                                # {cid}.spec.json，供 PNG 导出取默认尺寸、图表迭代
-                                # 与审计复现使用
-                                chart_spec = {
-                                    "chart_type": str(args.get("chart_type") or ""),
-                                    "sql": str(args.get("sql") or ""),
-                                    "field_mapping": args.get("field_mapping") or {},
-                                    "title": str(args.get("title") or ""),
-                                    "highlight": str(args.get("highlight") or ""),
-                                    "size": str(args.get("size") or "chat"),
-                                    "color_scheme": str(chart.get("color_scheme") or "mckinsey"),
-                                    "rows": chart.get("rows"),
-                                }
-                                pending_charts.append({
-                                    "html": chart["html"],
-                                    "title": args["title"],
-                                    "chart_type": args["chart_type"],
-                                    "spec": chart_spec,
-                                })
-                                yield {
-                                    "type": "chart_placeholder",
-                                    "index": len(pending_charts) - 1,
-                                }
-                                tool_result = (
-                                    f"Chart generated: {args['title']} "
-                                    f"({args['chart_type']}). "
-                                    "It is displayed to the user."
-                                )
-                                # QC 警告回传：LLM 可据此自我修正（top-N 聚合、
-                                # 过滤 NULL、重命名重复系列）并重新 generate_chart
-                                if chart.get("warnings"):
-                                    tool_result += " QC warnings (fix with a new "
-                                    "generate_chart call if meaningful): " + "; ".join(
-                                        str(w) for w in chart["warnings"]
-                                    )
-                                tool_artifacts = [{
-                                    "type": "chart",
-                                    "name": args["title"],
-                                    "chart_type": args["chart_type"],
-                                }]
-                                yield {"type": "data_refs", "refs": tool_sources}
-                            else:
-                                tool_result = f"Chart failed: {chart.get('error', 'unknown')}"
-                        elif name == "profile_data":
-                            result = yield from self._tool_profile_data_with_jobs(
-                                table_name=args.get("table_name", ""),
-                                columns=args.get("columns", []),
-                            )
-                            for html in result.get("charts", []):
-                                pending_charts.append({
-                                    "html": html,
-                                    "title": f"数据概况分布图 {len(pending_charts) + 1}",
-                                    "chart_type": "profile",
-                                    "spec": {
-                                        "chart_type": "profile",
-                                        "table_name": str(args.get("table_name") or ""),
-                                        "columns": args.get("columns") or [],
-                                    },
-                                })
-                                yield {
-                                    "type": "chart_placeholder",
-                                    "index": len(pending_charts) - 1,
-                                }
-                            tool_result = result.get("text", "数据概况生成失败。")
-                        elif name == "clean_data":
-                            tool_result = yield from self._tool_clean_data_with_jobs(
-                                operation=args.get("operation", ""),
-                                table_name=args.get("table_name", ""),
-                                columns=args.get("columns"),
-                                fill_method=args.get("fill_method", "mean"),
-                                lower_pct=float(args.get("lower_pct", 1)),
-                                upper_pct=float(args.get("upper_pct", 99)),
-                                trim_column=args.get("trim_column", ""),
-                                min_val=args.get("min_val"),
-                                max_val=args.get("max_val"),
-                                output_table=args.get("output_table", "cleaned_data"),
-                            )
-                        elif name == "export_excel":
-                            tool_result = yield from self._tool_export_excel_with_jobs(
-                                tables=args.get("tables", []),
-                                filename=args.get("filename", ""),
-                            )
-                        elif name == "export_report":
-                            tool_result = yield from self._tool_export_report_with_jobs(
-                                title=args.get("title", "分析报告"),
-                                sections=args.get("sections", []),
-                            )
                         elif name == "propose_excel_export":
                             result = self._tool_propose_excel_export(
                                 tables=args.get("tables", ["*"]),
@@ -3322,12 +3136,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                 }
                                 tool_result = "大纲已展示给用户，等待其通过按钮确认或修改。"
                                 _outline_proposed = True
-                        elif name == "generate_ppt":
-                            tool_result = yield from self._tool_generate_ppt_with_jobs(
-                                title=args.get("title", "Presentation"),
-                                slides=args.get("slides", []),
-                                filename=args.get("filename", ""),
-                            )
                         elif name == "propose_dashboard_outline":
                             _dash_widgets = args.get("widgets", [])
                             if not _dash_widgets:
@@ -3411,12 +3219,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                     }
                                     tool_result = "看板大纲已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。"
                                     _outline_proposed = True
-                        elif name == "generate_dashboard":
-                            tool_result = yield from self._tool_generate_dashboard_with_jobs(
-                                name=args.get("name", "数据看板"),
-                                widgets=args.get("widgets", []),
-                                color_scheme=args.get("color_scheme", ""),
-                            )
                         elif name == "ask_user":
                             yield {
                                 "type": "ask_user",
@@ -3493,6 +3295,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                     _has_sources = True
                         elif name == "fetch_table":
                             from data.table_extract import fetch_url_tables, TableExtractError
+                            from compute.tools.ingest import NO_GRIDS_TEXT, fetch_error_text
 
                             _url = str(args.get("url") or "").strip()
                             try:
@@ -3502,27 +3305,12 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                     timeout=int(args.get("timeout", 30) or 30),
                                 )
                             except ValueError as _exc:
-                                tool_result = json.dumps({
-                                    "ok": False,
-                                    "error_code": "FETCH-001",
-                                    "message": f"链接不可用: {_exc}",
-                                }, ensure_ascii=False)
+                                tool_result = fetch_error_text("FETCH-001", f"链接不可用: {_exc}")
                             except TableExtractError as _exc:
-                                tool_result = json.dumps({
-                                    "ok": False,
-                                    "error_code": _exc.code,
-                                    "message": _exc.message,
-                                }, ensure_ascii=False)
+                                tool_result = fetch_error_text(_exc.code, _exc.message)
                             else:
                                 if not _grids:
-                                    tool_result = json.dumps({
-                                        "ok": False,
-                                        "error_code": "FETCH-001",
-                                        "message": (
-                                            "链接内容中未检测到表格。若是 JavaScript 渲染页面，"
-                                            "请先 browser_navigate 打开页面，再调用 browser_extract_tables。"
-                                        ),
-                                    }, ensure_ascii=False)
+                                    tool_result = NO_GRIDS_TEXT
                                 else:
                                     tool_result = self._tool_register_extracted_source(
                                         _grids,
@@ -3571,18 +3359,14 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         elif name == "load_feishu_bitable":
                             from api.state import session_manager
                             from data.feishu_bitable_service import read_bitable_records
-                            from data.sources.feishu_bitable import FeishuBitableDataSource
+                            from compute.tools.ingest import bitable_loaded_text, bitable_source
 
                             result = read_bitable_records(
                                 bitable=args.get("bitable", ""),
                                 table_id=args.get("table_id", ""),
                                 max_records=args.get("max_records") or 500,
                             )
-                            source_name = str(args.get("source_name") or "").strip()
-                            source_name = source_name or f"飞书多维表格 {result['table_id']}"
-                            source = FeishuBitableDataSource(
-                                result["records"], source_name, result["table_id"],
-                            )
+                            source, source_name = bitable_source(result, args.get("source_name"))
                             session = session_manager.get(self._session_id)
                             if session is None:
                                 raise RuntimeError("当前会话已失效，请刷新页面后重试")
@@ -3597,14 +3381,9 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                             self._schema_cache = self._combined_schema
                             self._merged_source = session.get_merged_source()
                             _has_sources = True
-                            tool_result = json.dumps({
-                                "ok": True,
-                                "message": "飞书多维表格已作为 SQL 数据源接入当前对话；现在可直接查询、分析、制图或生成报告。",
-                                "source_id": source_id,
-                                "source_name": source_name,
-                                "schema": self._combined_schema,
-                                **{key: value for key, value in result.items() if key != "records"},
-                            }, ensure_ascii=False)
+                            tool_result = bitable_loaded_text(
+                                source_id, source_name, self._combined_schema, result,
+                            )
                         elif name == "append_feishu_bitable_records":
                             from data.feishu_bitable_service import append_bitable_records
 

@@ -21,6 +21,6 @@ allowedTools: [get_schema, query_data, propose_report_outline]
 
 ## Implementation reference
 
-- Proposal tool entry: `agent/tools/business/export.py::_tool_propose_report_outline`
-- Export tool entry: `agent/tools/business/export.py::_tool_export_report`
+- Proposal tool entry: `compute/tools/export.py::_tool_propose_report_outline`
+- Export tool entry: `compute/tools/export.py::_tool_export_report`
 - Report implementation: `Function/Output/report_export.py`

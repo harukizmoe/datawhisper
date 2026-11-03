@@ -12,13 +12,15 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 class Worker:
-    def __init__(self):
+    def __init__(self, module: str = "compute.tests._fake_worker", env: dict | None = None,
+                 stderr=subprocess.PIPE):
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "compute.tests._fake_worker"],
+            [sys.executable, "-m", module],
             cwd=REPO,
+            env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=stderr,
         )
         self.lines: "queue.Queue[str]" = queue.Queue()
         self.raw: list[bytes] = []
@@ -58,7 +60,8 @@ class Worker:
             self.proc.kill()
         self.proc.wait(5)
         for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
-            stream.close()
+            if stream is not None:
+                stream.close()
 
 
 def _reject_constant(name):

@@ -216,7 +216,7 @@ flowchart LR
 - [x] P0.2 行为基线：`baseline/`，23 个场景，`--check` 连续通过；`fetch_table`、`load_feishu_bitable` 无法在本地运行，只记录了报错（见 `docs/refactor/p0.2-baseline.md`）
 - [x] P0.3 技术验证原型：5 项全部 PASS（见 `docs/refactor/p0.3-findings.md`）
 - [x] P1.1 RPC 协议：`compute/rpc.py`，`python -m unittest compute.tests.test_rpc` 12 项通过（并发乱序、取消、错误码、非法输入、重复 id、stdout 隔离（含直接写 fd 1）、NaN→null、UTF-8、shutdown 等待在途请求、stdin 关闭退出）。请求并发执行，有依赖的请求由客户端按序发送
-- [ ] P1.2 数据源与 B 类方法
+- [x] P1.2 数据源与 B 类方法：`agent/tools/business/{data,export}.py` 移到 `compute/tools/`（旧 agent 直接 import，无转发层），14 个 B 类工具的参数解析与结果整形合成 `compute/tools/dispatch.py:run_business_tool`，旧 agent 循环和 compute 共用；`compute/host.py` 的 `ToolHost` 按请求 `context` 组装 mixin 所需属性，job 路径改为请求线程内联执行（阈值不变，进度走 `progress` 通知，取消返回 CANCELLED）；数据源按调用整体加锁（按 id 排序），合并 schema / `MergedDataSource` 逻辑移到 `compute/sources.py`（`data/session.py` 调用同一份），按活动 id 元组缓存，开关数据源或建删表时失效。RPC：`tool.<14 个工具>`，另有 `tool.fetch_table_parse`、`tool.load_feishu_bitable`（网络/飞书鉴权留在 TS，compute 只做解析和注册）；删除草稿 `profile.run`。`python -m unittest compute.tests.test_tools` 12 项通过：基线中全部 B 类调用逐字一致（文本与 data_refs/knowledge_refs），另含 job 进度、ARIMA 取消、同源串行、`src1__`/`src2__` 多源路由与跨源 JOIN、建表后 schema 失效、参数校验、SQL 选表要求、两个 ingest 方法；`baseline --check` 23 个场景仍通过
 - [ ] P1.3 界面侧计算
 - [x] P1.4 Bun compute 客户端：`server/src/compute/client.ts`，`cd server && bun test` 12 项通过（连跑 5 次稳定）：并发乱序、取消与进度、事件路由、错误码、崩溃时在途请求以 `ComputeCrashed` 失败且不自动重试、下次调用自动重启并按描述重开数据源、报告丢失的内存表和重开失败的数据源、30 秒内崩溃超过 3 次停止重启、启动失败、`close()` 等在途请求结束
 - [x] P2.1 Bun 服务工程：`server/src/{main,app,config}.ts`，`bun test` 共 17 项通过（含服务进程 5 项）：无令牌或错误令牌 401、`/v1/health`、就绪行（Go 通过 `DW_TOKEN` 传令牌时不在 stdout 输出令牌）、SIGTERM 和 stdin 关闭都能正常退出、同一数据目录重启后重开存储、非法端口报错。中断的运行续跑需要先有模型（P3.1），端到端验证放到 P3.5

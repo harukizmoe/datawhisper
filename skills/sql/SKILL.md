@@ -18,5 +18,5 @@ allowedTools: [get_schema, get_table_detail, query_data]
 
 ## Implementation reference
 
-- Schema/query tool entries: `agent/tools/business/data.py::_tool_get_schema`, `agent/tools/business/data.py::_tool_get_table_detail`, `agent/tools/business/data.py::_tool_query_data`
+- Schema/query tool entries: `compute/tools/data.py::_tool_get_schema`, `compute/tools/data.py::_tool_get_table_detail`, `compute/tools/data.py::_tool_query_data`
 - SQL validation: `agent/validate.py`

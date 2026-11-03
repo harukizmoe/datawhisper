@@ -242,10 +242,12 @@ def fetch_url_tables(url: str, timeout: int = 30) -> List[GridTable]:
             chunks.append(chunk)
         raw = b"".join(chunks)
         content_type = response.headers.get("Content-Type", "")
-    return _parse_body(raw, url, content_type)
+    return parse_body(raw, url, content_type)
 
 
-def _parse_body(raw: bytes, url: str, content_type: str) -> List[GridTable]:
+def parse_body(raw: bytes, url: str, content_type: str) -> List[GridTable]:
+    """Parse a fetched body (PDF / JSON / CSV / HTML, sniffed from the bytes,
+    content type and URL path) into table grids."""
     ct = (content_type or "").lower()
     path = url.split("?", 1)[0].split("#", 1)[0].lower()
     if raw[:1024].lstrip().startswith(b"%PDF-") or "pdf" in ct or path.endswith(".pdf"):

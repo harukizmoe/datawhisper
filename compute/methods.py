@@ -4,8 +4,10 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from . import host
 from .rpc import MethodContext, RpcError, INVALID_PARAMS
 from .sources import SourceRegistry
+from .tools.dispatch import BUSINESS_TOOLS
 
 _sources = SourceRegistry()
 
@@ -15,10 +17,6 @@ def _str(params: dict, key: str, required: bool = True) -> str:
     if not isinstance(value, str) or (required and not value):
         raise RpcError(f"'{key}' must be a non-empty string", INVALID_PARAMS)
     return value
-
-
-def _quote_ident(name: str) -> str:
-    return '"' + name.replace('"', '""') + '"'
 
 
 def ping(ctx: MethodContext, params: dict) -> dict:
@@ -78,29 +76,20 @@ def source_query(ctx: MethodContext, params: dict) -> dict:
         }
 
 
-def profile_run(ctx: MethodContext, params: dict) -> dict:
-    from Function.Clean.data_profile import profile
+def _tool_method(name: str):
+    def method(ctx: MethodContext, params: dict) -> dict:
+        return host.run_tool(ctx, _sources, name, params)
 
-    table = _str(params, "table")
-    columns = params.get("columns") or None
-    if columns is not None and not (isinstance(columns, list) and all(isinstance(c, str) for c in columns)):
-        raise RpcError("'columns' must be a list of strings", INVALID_PARAMS)
-    with _sources.use(_str(params, "source_id")) as source:
-        ctx.progress(10, "正在读取数据")
-        df, error = source.execute_query(f"SELECT * FROM {_quote_ident(table)}")
-    if error or df is None or df.empty:
-        raise RpcError(f"读取表 '{table}' 失败：{error or '表为空'}", data={"kind": "table_read_failed"})
-    ctx.check()
-    ctx.progress(40, "正在计算字段统计")
-    text, charts = profile(df, columns)
-    ctx.check()
-    ctx.progress(100, "数据概况生成完成")
-    return {
-        "text": f"### 数据概况 · `{table}`\n\n" + text,
-        "charts": charts,
-        "input_rows": len(df),
-        "input_columns": len(df.columns),
-    }
+    method.__name__ = f"tool_{name}"
+    return method
+
+
+def tool_fetch_table_parse(ctx: MethodContext, params: dict) -> dict:
+    return host.run_fetch_table_parse(ctx, _sources, params)
+
+
+def tool_load_feishu_bitable(ctx: MethodContext, params: dict) -> dict:
+    return host.run_load_feishu_bitable(ctx, _sources, params)
 
 
 METHODS: dict[str, Any] = {
@@ -112,5 +101,7 @@ METHODS: dict[str, Any] = {
     "source.schema": source_schema,
     "source.tableDetail": source_table_detail,
     "source.query": source_query,
-    "profile.run": profile_run,
+    **{f"tool.{name}": _tool_method(name) for name in sorted(BUSINESS_TOOLS)},
+    "tool.fetch_table_parse": tool_fetch_table_parse,
+    "tool.load_feishu_bitable": tool_load_feishu_bitable,
 }
