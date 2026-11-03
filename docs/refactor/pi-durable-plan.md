@@ -215,7 +215,7 @@ flowchart LR
 - [x] P0.1 开发环境：Go 1.27.3、Bun 1.4.4、Python 3.11.18 venv、GTK 3.24.52、WebKitGTK 4.1 2.54.2；`mygo doctor`（v0.7.4）必需项全部通过，Windows 安装器工具（makensis、osslsigncode）未装，留到 P9；`compileall Function data` 通过
 - [x] P0.2 行为基线：`baseline/`，23 个场景，`--check` 连续通过；`fetch_table`、`load_feishu_bitable` 无法在本地运行，只记录了报错（见 `docs/refactor/p0.2-baseline.md`）
 - [x] P0.3 技术验证原型：5 项全部 PASS（见 `docs/refactor/p0.3-findings.md`）
-- [ ] P1.1 RPC 协议
+- [x] P1.1 RPC 协议：`compute/rpc.py`，`python -m unittest compute.tests.test_rpc` 12 项通过（并发乱序、取消、错误码、非法输入、重复 id、stdout 隔离（含直接写 fd 1）、NaN→null、UTF-8、shutdown 等待在途请求、stdin 关闭退出）。请求并发执行，有依赖的请求由客户端按序发送
 - [ ] P1.2 数据源与 B 类方法
 - [ ] P1.3 界面侧计算
 - [ ] P1.4 Bun compute 客户端

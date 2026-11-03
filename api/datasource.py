@@ -23,6 +23,7 @@ from data.feishu_bitable_service import (
 )
 from infrastructure.artifact_lifecycle import register_artifact
 from infrastructure.paths import content_data_path
+from compute.sources import restore_source
 
 log = logging.getLogger(__name__)
 
@@ -232,65 +233,6 @@ def _serialize_source(entry: dict, active_ids: set[str]) -> dict | None:
             "db_path": str(getattr(source, "_db_path", "")),
         }
     return None
-
-
-def _restore_source(info: dict):
-    kind = str(info.get("kind") or "")
-    name = str(info.get("name") or "").strip()
-    if kind == "csv":
-        file_path = str(info.get("file_path") or "")
-        if not Path(file_path).is_file():
-            raise FileNotFoundError(file_path or "CSV 文件不存在")
-        return CSVDataSource(file_path, name or Path(file_path).name)
-    if kind == "excel":
-        file_path = str(info.get("file_path") or "")
-        if not Path(file_path).is_file():
-            raise FileNotFoundError(file_path or "Excel 文件不存在")
-        db_path = str(info.get("db_path") or "")
-        if db_path and Path(db_path).is_file():
-            return ExcelDataSource.from_database(file_path, name or Path(file_path).name, db_path)
-        return ExcelDataSource(file_path, name or Path(file_path).name)
-    if kind == "sql":
-        conn = str(info.get("connection_string") or "")
-        if not conn:
-            raise ValueError("SQL 连接字符串为空")
-        source = SQLDataSource(conn, name)
-        tables = info.get("analysis_tables") or []
-        if tables:
-            source.set_analysis_tables([str(item) for item in tables])
-        return source
-    if kind == "gsheets":
-        creds = info.get("creds_dict")
-        spreadsheet = str(info.get("spreadsheet") or "")
-        if not isinstance(creds, dict) or not spreadsheet:
-            raise ValueError("Google Sheets 凭证或表格地址为空")
-        return GoogleSheetsDataSource(creds, spreadsheet, name)
-    if kind == "http":
-        url = str(info.get("url") or "")
-        if not url:
-            raise ValueError("API URL 为空")
-        return HTTPAPIDataSource(
-            url,
-            str(info.get("auth_type") or "none"),
-            str(info.get("auth_value") or ""),
-            name,
-        )
-    if kind == "feishu":
-        app_token = str(info.get("app_token") or "")
-        table_id = str(info.get("table_id") or "")
-        if not app_token or not table_id:
-            raise ValueError("飞书多维表格 app_token 或 table_id 为空")
-        result = read_bitable_records(bitable=app_token, table_id=table_id)
-        source = FeishuBitableDataSource(result["records"], name or "飞书多维表格")
-        source._feishu_app_token = app_token
-        source._feishu_table_id = table_id
-        return source
-    if kind == "workspace_persistent":
-        db_path = str(info.get("db_path") or "")
-        if not Path(db_path).is_file():
-            raise FileNotFoundError(db_path or "工作目录 DuckDB 不存在")
-        return WorkspacePersistentSource(db_path, name or "工作目录")
-    raise ValueError(f"不支持的数据源类型：{kind or 'unknown'}")
 
 
 def _list_warehouses(user_id: str = "") -> list[dict]:
@@ -707,7 +649,7 @@ def load_data_warehouse(sid: str):
     errors = []
     for info in data.get("sources") or []:
         try:
-            source = _restore_source(info)
+            source = restore_source(info)
             source_id = sess.add_source(source)
             restored.append((source_id, bool(info.get("active", True))))
         except Exception as exc:
