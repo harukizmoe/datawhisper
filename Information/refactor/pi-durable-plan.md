@@ -27,7 +27,7 @@
 | 事项 | 决定 |
 |---|---|
 | 交付形态 | 桌面应用；不做 Web 端 |
-| 界面 | Go + MyGo 原生 UI；Plotly 图表、drawio 画布、仪表盘这类 HTML 内容用 MyGo 的 Web view 组件嵌入 |
+| 界面 | Go + MyGo 原生 UI，锁定 `github.com/egoist/mygo v0.7.4`；Plotly 图表、drawio 画布、仪表盘这类 HTML 内容用 MyGo 的 Web view 组件嵌入 |
 | 界面协议 | 新协议：界面连接或重连时先拿到对话的当前状态，之后服务只推送增量；不兼容旧 SSE 事件 |
 | 模型 | 不提供模型或 token 服务；用户自己配置提供商、模型和 API key |
 | 云端功能 | 只保留飞书机器人长连接。删除登录与用户（含邮箱验证码、找回密码、`BAA_CLOUD_AUTH_URL` 云端转发、`desktop_token`）、管理后台、每日 token 配额、平台托管模型（`HOSTED_MODEL_SPECS`）、Docker/Railway/Vercel 部署 |
@@ -196,7 +196,7 @@ flowchart LR
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| 两个底座都未到稳定版：pi-durable 标注实验性；MyGo 当前 v0.1.x | API 变化时要跟着改 | 都锁精确版本；分别封装在 `server/agent/`、`desktop/` 的一层后面；升级前重读文档 |
+| 两个底座都未到稳定版：pi-durable 标注实验性；MyGo 当前 v0.7.x（pre-1.0） | API 变化时要跟着改 | 都锁精确版本；分别封装在 `server/agent/`、`desktop/` 的一层后面；升级前重读文档 |
 | pi-durable 没在 Bun 上官方测试 | 可能遇到运行时差异 | P0.3 先验证；不行就退回 Node（Hono 两边都能跑） |
 | 原生 UI 重写 2.7 万行前端 | 工作量最大，周期最长 | P7 按功能拆分；图表等 HTML 内容复用 Web view，不重写 |
 | Linux 上 Web view 需要 WebKitGTK 4.1 | 缺少时图表无法显示 | 安装包声明依赖；用 `mygo.WebViewAvailable()` 检测并提示 |
@@ -213,7 +213,7 @@ flowchart LR
 
 进度以本文件为准，每完成一个任务在这里打勾并写上提交号。
 
-- [ ] P0.1 开发环境
+- [x] P0.1 开发环境：Go 1.27.3、Bun 1.4.4、Python 3.11.18 venv、GTK 3.24.52、WebKitGTK 4.1 2.54.2；`mygo doctor`（v0.7.4）必需项全部通过，Windows 安装器工具（makensis、osslsigncode）未装，留到 P9；`compileall Function data` 通过
 - [ ] P0.2 行为基线
 - [ ] P0.3 技术验证原型
 - [ ] P1.1 RPC 协议
