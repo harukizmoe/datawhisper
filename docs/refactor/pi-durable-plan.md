@@ -33,7 +33,7 @@
 | 云端功能 | 只保留飞书机器人长连接。删除登录与用户（含邮箱验证码、找回密码、`BAA_CLOUD_AUTH_URL` 云端转发、`desktop_token`）、管理后台、每日 token 配额、平台托管模型（`HOSTED_MODEL_SPECS`）、Docker/Railway/Vercel 部署 |
 | 用户 | 单用户应用，不需要登录；数据属于本机当前系统用户 |
 | agent 核心 | `@earendil-works/pi-durable`，锁定精确版本 `1.5.0`（同时锁 `pi-ai`、`chord` 1.5.0） |
-| agent 运行时 | Bun（pi-durable 官方只声明 Node ≥22.19，P0.3 先验证 Bun 可用） |
+| agent 运行时 | Bun（P0.3 已验证 pi-durable 1.5.0 在 Bun 1.4.4 上可用，见 `docs/refactor/p0.3-findings.md`） |
 | 服务框架 | Hono，只监听 `127.0.0.1` 随机端口，每次启动生成访问令牌，只给本机的 Go 界面调用 |
 | Python 范围 | 只保留 `Function/`（分析、清洗、图表、导出、知识库）和 `data/sources`，约 4.5 万行 |
 | Python 通信 | stdio JSON-RPC 子进程，由 Bun 服务启动和管理 |
@@ -124,7 +124,7 @@ flowchart LR
 |---|---|---|
 | P2.1 Bun 服务工程 | TS 工程（ESM、strict）、Hono、配置加载、只监听本机 + 令牌校验、启动时打开 Harness 并 `resume()` | 无令牌的请求被拒绝；重启后会话和未完成的运行都能恢复 |
 | P2.2 桌面应用骨架 | `desktop/` Go 模块：主窗口、侧边栏导航、子进程管理（启动 Bun 服务、读取端口和令牌、退出时清理、崩溃重启）、Go 端 API 客户端 | 启动应用即可连上服务；手动杀掉 Bun 进程后界面提示并自动恢复 |
-| P2.3 界面通信协议 | 定义 Go 界面与 Bun 服务之间的流式协议：订阅时先返回对话当前状态（消息、进行中的回复、运行中的工具及输出、排队消息、用量），之后只推送增量；带序号，断线后从当前状态重新开始 | 协议文档 + Go、TS 两端的类型定义；断线重连后界面状态与服务端一致 |
+| P2.3 界面通信协议 | Go 界面与 Bun 服务之间的流式协议：订阅时先发 `snapshot`（`conversation.watch()` 的当前值：消息、进行中的回复、运行中的工具及输出、排队消息、用量），之后转发 `ops` 增量，带序号；断线后重新订阅即可。Web view 资源用 URL 参数里的令牌鉴权（P0.3 已验证） | 协议文档 + Go、TS 两端的类型定义；断线重连后界面状态与服务端一致 |
 
 ### P3 agent 核心
 
@@ -133,9 +133,9 @@ flowchart LR
 | P3.1 模型 | 用户自配提供商：把 `LLM/llm_config_manager.py` 中的提供商（deepseek/openai/atlascloud/ollama/claude/minimax）转为 pi-ai 定义，Anthropic 等用 pi-ai 原生接口；支持用户添加任意 OpenAI 兼容地址和自定义模型（上下文长度、是否支持思考）；API key 用系统密钥存储；每个对话可单独切换模型和思考强度；删除 `HOSTED_MODEL_SPECS` 和配额倍率 | 每个提供商能完成一次流式对话（ollama 本地验证，其余用已配置的 key）；对话中途切换模型后下一轮生效 |
 | P3.2 系统提示 | `agent/prompts.py`、skills 目录与加载优先级、memory、instructions、命令（`commands/*.md`）改为扩展的 sections 和命令 | 同一输入下系统提示与旧版逐段对比一致 |
 | P3.3 hooks | 数字溯源核对（`number_audit.py`）、禁止输出类工具的策略、模型调用审计、文本形式工具调用解析、现有用户 hooks（`agent/hooks/*`） | 每条策略有触发用例 |
-| P3.4 工具暴露 | 每轮最多 20 个工具、阶段过滤、关键词发现（3 轮 TTL）、skill 限制工具集、`read_tool_result` 可见性 | 给定输入，工具列表与 P0.2 基线一致 |
+| P3.4 工具暴露 | 每轮最多 20 个工具、阶段过滤、关键词发现（3 轮 TTL）、skill 限制工具集、`read_tool_result` 可见性。实现方式按 P0.3 结论：一个会话文档记录发现的工具和限制，提交前和工具执行中根据它算出工具集并调用 `configure({ modelTools })`；不用 `beforeProviderRequest` 过滤（它不阻止调用未提供的工具） | 给定输入，工具列表与 P0.2 基线一致；调用未提供的工具被拒绝 |
 | P3.5 chat 接口 | 新建对话、提交（带 `requestId`）、中止、插队引导、订阅对话状态；按 P2.3 的协议推送 | 用命令行客户端能完整完成一轮带工具调用的对话；重连后状态正确 |
-| P3.6 压缩与计量 | 用 pi-durable 后台压缩替代 `compaction.py`；工作流阶段归档（`stage_compaction.py`）；prompt cache 策略；token 统计 | 长对话不中断；用量数字与提供商返回一致 |
+| P3.6 压缩与计量 | 用 pi-durable 后台压缩替代 `compaction.py`；工作流阶段归档（`stage_compaction.py`）；prompt cache 策略（P0.3 发现请求体里没有 `prompt_cache_key`，要补上）；token 统计 | 长对话不中断；用量数字与提供商返回一致 |
 
 ### P4 工具迁移
 
@@ -197,11 +197,10 @@ flowchart LR
 | 风险 | 影响 | 应对 |
 |---|---|---|
 | 两个底座都未到稳定版：pi-durable 标注实验性；MyGo 当前 v0.7.x（pre-1.0） | API 变化时要跟着改 | 都锁精确版本；分别封装在 `server/agent/`、`desktop/` 的一层后面；升级前重读文档 |
-| pi-durable 没在 Bun 上官方测试 | 可能遇到运行时差异 | P0.3 先验证；不行就退回 Node（Hono 两边都能跑） |
+| pi-durable 没在 Bun 上官方测试 | 可能遇到运行时差异 | P0.3 已验证基本对话、崩溃续跑、动态工具集、订阅协议在 Bun 上都正常；出现问题时退回 Node（Hono 两边都能跑） |
 | 原生 UI 重写 2.7 万行前端 | 工作量最大，周期最长 | P7 按功能拆分；图表等 HTML 内容复用 Web view，不重写 |
 | Linux 上 Web view 需要 WebKitGTK 4.1 | 缺少时图表无法显示 | 安装包声明依赖；用 `mygo.WebViewAvailable()` 检测并提示 |
 | 安装包内有三个运行时（Go、Bun、Python） | 体积大、启动链长 | Bun 编译成单文件；Python 只打包 compute；torch 继续作为可选依赖 |
-| 每轮动态调整工具集在 pi-durable 中的实现方式未验证 | P3.4 可能需要绕路 | P0.3 原型中先验证 |
 | 没有现成的回归测试 | 迁移后行为偏差难发现 | P0.2 先录制行为基线再动代码 |
 | 改了语言后无法再合并上游 | 上游新功能要手动移植 | 已决定独立维护 |
 
@@ -214,8 +213,8 @@ flowchart LR
 进度以本文件为准，每完成一个任务在这里打勾并写上提交号。
 
 - [x] P0.1 开发环境：Go 1.27.3、Bun 1.4.4、Python 3.11.18 venv、GTK 3.24.52、WebKitGTK 4.1 2.54.2；`mygo doctor`（v0.7.4）必需项全部通过，Windows 安装器工具（makensis、osslsigncode）未装，留到 P9；`compileall Function data` 通过
-- [ ] P0.2 行为基线
-- [ ] P0.3 技术验证原型
+- [x] P0.2 行为基线：`baseline/`，23 个场景，`--check` 连续通过；`fetch_table`、`load_feishu_bitable` 无法在本地运行，只记录了报错（见 `docs/refactor/p0.2-baseline.md`）
+- [x] P0.3 技术验证原型：5 项全部 PASS（见 `docs/refactor/p0.3-findings.md`）
 - [ ] P1.1 RPC 协议
 - [ ] P1.2 数据源与 B 类方法
 - [ ] P1.3 界面侧计算
