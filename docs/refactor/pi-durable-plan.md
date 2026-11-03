@@ -219,7 +219,7 @@ flowchart LR
 - [ ] P1.2 数据源与 B 类方法
 - [ ] P1.3 界面侧计算
 - [x] P1.4 Bun compute 客户端：`server/src/compute/client.ts`，`cd server && bun test` 12 项通过（连跑 5 次稳定）：并发乱序、取消与进度、事件路由、错误码、崩溃时在途请求以 `ComputeCrashed` 失败且不自动重试、下次调用自动重启并按描述重开数据源、报告丢失的内存表和重开失败的数据源、30 秒内崩溃超过 3 次停止重启、启动失败、`close()` 等在途请求结束
-- [ ] P2.1 Bun 服务工程
+- [x] P2.1 Bun 服务工程：`server/src/{main,app,config}.ts`，`bun test` 共 17 项通过（含服务进程 5 项）：无令牌或错误令牌 401、`/v1/health`、就绪行（Go 通过 `DW_TOKEN` 传令牌时不在 stdout 输出令牌）、SIGTERM 和 stdin 关闭都能正常退出、同一数据目录重启后重开存储、非法端口报错。中断的运行续跑需要先有模型（P3.1），端到端验证放到 P3.5
 - [ ] P2.2 桌面应用骨架
 - [ ] P2.3 界面通信协议
 - [ ] P3.1 模型
