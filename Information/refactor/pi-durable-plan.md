@@ -5,7 +5,9 @@
 
 ## 1. 目标
 
-把 datawhisper 重构为**桌面应用**：
+产品定位：**用户在本机自用的数据分析桌面工具**，使用体验类似 ChatGPT 桌面版：打开就能用，以对话为中心，会话列表、流式回复、图表和文件结果都在一个窗口里。不登录，不提供模型服务；模型提供商（OpenAI、Anthropic、DeepSeek、Ollama 本地模型、任意 OpenAI 兼容地址等）、模型和 API key 都由用户在设置里自己配置，对话中可以切换模型。
+
+技术组成：
 
 - 界面：Go + MyGo 原生 UI（`github.com/egoist/mygo/ui`），替代现有的 HTML/JS 前端。
 - agent 与业务服务：TypeScript，运行在 Bun 上，agent 核心使用 `@earendil-works/pi-durable`。
@@ -128,7 +130,7 @@ flowchart LR
 
 | 任务 | 内容 | 验收 |
 |---|---|---|
-| P3.1 模型 | 把 `LLM/llm_config_manager.py` 中用户可配置的提供商（deepseek/openai/atlascloud/ollama/claude/minimax）转为 pi-ai 的模型与提供商定义，支持用户自定义 OpenAI 兼容地址和模型；API key 用系统密钥存储；删除 `HOSTED_MODEL_SPECS` 和配额倍率 | 每个提供商能完成一次流式对话（ollama 本地验证，其余用已配置的 key） |
+| P3.1 模型 | 用户自配提供商：把 `LLM/llm_config_manager.py` 中的提供商（deepseek/openai/atlascloud/ollama/claude/minimax）转为 pi-ai 定义，Anthropic 等用 pi-ai 原生接口；支持用户添加任意 OpenAI 兼容地址和自定义模型（上下文长度、是否支持思考）；API key 用系统密钥存储；每个对话可单独切换模型和思考强度；删除 `HOSTED_MODEL_SPECS` 和配额倍率 | 每个提供商能完成一次流式对话（ollama 本地验证，其余用已配置的 key）；对话中途切换模型后下一轮生效 |
 | P3.2 系统提示 | `agent/prompts.py`、skills 目录与加载优先级、memory、instructions、命令（`commands/*.md`）改为扩展的 sections 和命令 | 同一输入下系统提示与旧版逐段对比一致 |
 | P3.3 hooks | 数字溯源核对（`number_audit.py`）、禁止输出类工具的策略、模型调用审计、文本形式工具调用解析、现有用户 hooks（`agent/hooks/*`） | 每条策略有触发用例 |
 | P3.4 工具暴露 | 每轮最多 20 个工具、阶段过滤、关键词发现（3 轮 TTL）、skill 限制工具集、`read_tool_result` 可见性 | 给定输入，工具列表与 P0.2 基线一致 |
