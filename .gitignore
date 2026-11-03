@@ -179,5 +179,6 @@ business_canvas/*.sqlite-journal
 !tests/local-services-settings.test.mjs
 !docs/24-specialist-model-compute-plan.md
 /.zvec-grep
-/docs
+/docs/*
+!/docs/refactor/
 /tests
