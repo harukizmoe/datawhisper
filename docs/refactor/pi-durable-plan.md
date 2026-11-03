@@ -218,7 +218,7 @@ flowchart LR
 - [x] P1.1 RPC 协议：`compute/rpc.py`，`python -m unittest compute.tests.test_rpc` 12 项通过（并发乱序、取消、错误码、非法输入、重复 id、stdout 隔离（含直接写 fd 1）、NaN→null、UTF-8、shutdown 等待在途请求、stdin 关闭退出）。请求并发执行，有依赖的请求由客户端按序发送
 - [ ] P1.2 数据源与 B 类方法
 - [ ] P1.3 界面侧计算
-- [ ] P1.4 Bun compute 客户端
+- [x] P1.4 Bun compute 客户端：`server/src/compute/client.ts`，`cd server && bun test` 12 项通过（连跑 5 次稳定）：并发乱序、取消与进度、事件路由、错误码、崩溃时在途请求以 `ComputeCrashed` 失败且不自动重试、下次调用自动重启并按描述重开数据源、报告丢失的内存表和重开失败的数据源、30 秒内崩溃超过 3 次停止重启、启动失败、`close()` 等在途请求结束
 - [ ] P2.1 Bun 服务工程
 - [ ] P2.2 桌面应用骨架
 - [ ] P2.3 界面通信协议

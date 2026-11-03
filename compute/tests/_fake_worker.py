@@ -54,6 +54,7 @@ def event(ctx, params):
 
 
 run({
+    "ping": lambda ctx, params: {"pid": os.getpid()},
     "echo": echo,
     "sleep": sleep,
     "loop": loop_until_cancelled,
