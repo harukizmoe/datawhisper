@@ -1,0 +1,74 @@
+{
+  "coverage": {
+    "profile_data": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "profile_data"
+  ],
+  "description": "profile_data on the sales table.",
+  "scenario": "profile",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:profile_data",
+        "end:profile_data"
+      ],
+      "final_text": "数据概况已生成。",
+      "message": "看一下 sales 表的数据概况和数据质量。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "profile_data",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "profile_data",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "table_name": "sales"
+          },
+          "content": "[TOOL_RESULT] profile_data OK: ### 数据概况 · `sales` ## 数据概况 - 总行数：**200** - 总列数：**12** - 数值列：**7** 个 - 含缺失值的列：**1** 个 - 含伪缺失字符串的列：**0** 个 - 含零值的数值列：**1** 个 ## 缺失值统计 | 列名 | 类型 | 缺失数 | 缺失占比 | |------|------|--------|----------| | order_date | str | 0 | 0....\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"### 数据概况 · `sales`\\n\\n## 数据概况\\n- 总行数：**200**\\n- 总列数：**12**\\n- 数值列：**7** 个\\n- 含缺失值的列：**1** 个\\n- 含伪缺失字符串的列：**0** 个\\n- 含零值的数值列：**1** 个\\n\\n## 缺失值统计\\n| 列名 | 类型 | 缺失数 | 缺失占比 |\\n|------|------|--------|----------|\\n| order_date | str | 0 | 0.0% |\\n| store_id | str | 0 | 0.0% |\\n| region | str | 0 | 0.0% |\\n| category | str | 0 | 0.0% |\\n| variant | str | 0 | 0.0% |\\n| units | int64 | 0 | 0.0% |\\n| unit_price | float64 | 0 | 0.0% |\\n| discount | float64 | 10 | 5.0% |\\n| ad_spend | float64 | 0 | 0.0% |\\n| visitors | int64 | 0 | 0.0% |\\n| converted | int64 | 0 | 0.0% |\\n| revenue | float64 | 0 | 0.0% |\\n\\n## 数值列零值统计\\n| 列名 | 零值数 | 零值占比 |\\n|------|--------|----------|\\n| discount | 47 | 23.5% |\\n\\n## 日期字段可解析率\\n| 列名 | 可解析率 |\\n|------|----------|\\n| order_date | 100.0% |\\n\\n## 数值列统计\\n| 列名 | 均值 | 标准差 | 最小值 | Q1 (25%) | 中位数 | Q3 (75%) | 最大值 |\\n|------|------|--------|--------|----------|--------|----------|--------|\\n| units | 38.7 | 9.016 | 20 | 32 | 37 | 45 | 61 |\\n| unit_price | 47.11 | 12.01 | 32.2 | 35.53 | 45.5 | 56.63 | 67.87 |\\n| discount | 0.07789 | 0.05691 | 0 | 0.05 | 0.1 | 0.15 | 0.15 |\\n| ad_spend | 275.9 | 110.4 | 57.81 | 172 | 290.6 | 372.3 | 456.1 |\\n| visitors | 520.8 | 88.99 | 332 | 437.8 | 535.5 | 599.2 | 682 |\\n| converted | 59.9 | 12.87 | 35 | 51 | 58.5 | 70 | 89 |\\n| revenue | 1874 | 1618 | 626.5 | 1236 | 1583 | 2066 | 1.554e+04 |\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "profile_data",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

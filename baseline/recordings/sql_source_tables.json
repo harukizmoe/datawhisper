@@ -1,0 +1,259 @@
+{
+  "coverage": {
+    "create_analysis_table": [
+      "ok"
+    ],
+    "delete_analysis_tables": [
+      "ok"
+    ],
+    "get_schema": [
+      "ok"
+    ],
+    "get_table_detail": [
+      "ok",
+      "ok"
+    ],
+    "query_data": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "get_schema",
+    "get_table_detail",
+    "create_analysis_table",
+    "query_data",
+    "delete_analysis_tables"
+  ],
+  "description": "Same table lifecycle on a SQL (SQLite) source, where get_table_detail and persistent analysis tables are implemented.",
+  "scenario": "sql_source_tables",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:get_schema",
+        "end:get_schema",
+        "start:get_table_detail",
+        "end:get_table_detail",
+        "start:create_analysis_table",
+        "end:create_analysis_table",
+        "start:get_table_detail",
+        "end:get_table_detail",
+        "start:query_data",
+        "end:query_data",
+        "start:delete_analysis_tables",
+        "end:delete_analysis_tables"
+      ],
+      "final_text": "分析表已创建、使用并删除。",
+      "message": "看一下数据库里 sales 表的字段详情，再按门店建一张分析表，用完后删除表。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "delete_analysis_tables",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "delete_analysis_tables",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 2
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "delete_analysis_tables",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 3
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "delete_analysis_tables",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 4
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "delete_analysis_tables",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 5
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "delete_analysis_tables",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 6
+        }
+      ],
+      "options": {
+        "data_context": {
+          "tables": [
+            {
+              "source_id": "<SQLITE_SOURCE_ID>",
+              "table": "sales"
+            },
+            {
+              "source_id": "<SQLITE_SOURCE_ID>",
+              "table": "stores"
+            }
+          ]
+        }
+      },
+      "tool_results": [
+        {
+          "arguments": {},
+          "content": "[TOOL_RESULT] get_schema OK: Table: sales order_date TEXT store_id TEXT region TEXT category TEXT variant TEXT units INTEGER unit_price REAL discount REAL ad_spend REAL visitors INTEGER converted INTEGER revenue REAL -- sample data (first 2 rows) --...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Table: sales\\n  order_date  TEXT\\n  store_id  TEXT\\n  region  TEXT\\n  category  TEXT\\n  variant  TEXT\\n  units  INTEGER\\n  unit_price  REAL\\n  discount  REAL\\n  ad_spend  REAL\\n  visitors  INTEGER\\n  converted  INTEGER\\n  revenue  REAL\\n  -- sample data (first 2 rows) --\\n  | 2024-01-01 | S01 | East | Electronics | A | 38 | 32.78 | 0.1 | 318.99 | 546 | 55 | 1121.08\\n  | 2024-01-02 | S02 | North | Apparel | B | 32 | 67.87 | 0.05 | 302.9 | 538 | 68 | 2063.25\\n\\nTable: stores\\n  store_id  TEXT\\n  store_name  TEXT\\n  region  TEXT\\n  opened_year  INTEGER\\n  floor_sqm  INTEGER\\n  -- sample data (first 2 rows) --\\n  | S01 | Harbor Plaza | East | 2015 | 820\\n  | S02 | Pine Street | North | 2017 | 540\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "get_schema",
+          "tool_call_id": "call_s0_t0_0"
+        },
+        {
+          "arguments": {
+            "table_name": "sales"
+          },
+          "content": "[TOOL_RESULT] get_table_detail OK: Table: sales (200 rows) order_date TEXT store_id TEXT region TEXT category TEXT variant TEXT units INTEGER unit_price REAL discount REAL ad_spend REAL visitors INTEGER converted INTEGER revenue REAL -- sample data (first...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Table: sales  (200 rows)\\n  order_date  TEXT\\n  store_id  TEXT\\n  region  TEXT\\n  category  TEXT\\n  variant  TEXT\\n  units  INTEGER\\n  unit_price  REAL\\n  discount  REAL\\n  ad_spend  REAL\\n  visitors  INTEGER\\n  converted  INTEGER\\n  revenue  REAL\\n  -- sample data (first 2 rows) --\\n  | 2024-01-01 | S01 | East | Electronics | A | 38 | 32.78 | 0.1 | 318.99 | 546 | 55 | 1121.08\\n  | 2024-01-02 | S02 | North | Apparel | B | 32 | 67.87 | 0.05 | 302.9 | 538 | 68 | 2063.25\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "get_table_detail",
+          "tool_call_id": "call_s0_t1_0"
+        },
+        {
+          "arguments": {
+            "purpose": "按门店汇总销售额",
+            "sql": "SELECT s.store_id, t.store_name, t.floor_sqm, COUNT(*) AS orders, ROUND(SUM(s.revenue), 2) AS revenue FROM sales s JOIN stores t ON s.store_id = t.store_id GROUP BY s.store_id, t.store_name, t.floor_sqm ORDER BY s.store_id",
+            "table_name": "store_summary"
+          },
+          "content": "[TOOL_RESULT] create_analysis_table OK: Table: store_summary (5 rows) store_id VARCHAR store_name VARCHAR floor_sqm BIGINT orders BIGINT revenue DOUBLE -- sample data (first 2 rows) -- | S01 | Harbor Plaza | 820 | 40 | 51356.13 | S02 | Pine Street | 540 | 40 |...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Table: store_summary  (5 rows)\\n  store_id  VARCHAR\\n  store_name  VARCHAR\\n  floor_sqm  BIGINT\\n  orders  BIGINT\\n  revenue  DOUBLE\\n  -- sample data (first 2 rows) --\\n  | S01 | Harbor Plaza | 820 | 40 | 51356.13\\n  | S02 | Pine Street | 540 | 40 | 105816.03\", \"sources\": [{\"type\": \"分析表\", \"title\": \"store_summary\", \"source\": \"baseline_sqlite\", \"snippet\": \"SELECT s.store_id, t.store_name, t.floor_sqm, COUNT(*) AS orders, ROUND(SUM(s.revenue), 2) AS revenue FROM sales s JOIN stores t ON s.store_id = t.store_id GROUP BY s.store_id, t.store_name, t.floor_sqm ORDER BY s.store_id\", \"rows\": null}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"create_analysis_table evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "create_analysis_table",
+          "tool_call_id": "call_s0_t2_0"
+        },
+        {
+          "arguments": {
+            "table_name": "store_summary"
+          },
+          "content": "[TOOL_RESULT] get_table_detail OK: Table: store_summary — error: store_summary\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Table: store_summary  — error: store_summary\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "get_table_detail",
+          "tool_call_id": "call_s0_t3_0"
+        },
+        {
+          "arguments": {
+            "purpose": "计算坪效",
+            "sql": "SELECT store_name, ROUND(revenue / floor_sqm, 2) AS revenue_per_sqm FROM store_summary ORDER BY store_name"
+          },
+          "content": "[TOOL_RESULT] query_data OK: store_name revenue_per_sqm Harbor Plaza 62.63 Old Town 119.70 Pine Street 195.96 Riverside 110.88 Sunset Mall 83.68\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"  store_name  revenue_per_sqm\\nHarbor Plaza            62.63\\n    Old Town           119.70\\n Pine Street           195.96\\n   Riverside           110.88\\n Sunset Mall            83.68\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"store_summary\", \"source\": \"baseline_sqlite\", \"snippet\": \"SELECT store_name, ROUND(revenue / floor_sqm, 2) AS revenue_per_sqm FROM store_summary ORDER BY store_name\", \"rows\": 5}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"query_data evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "query_data",
+          "tool_call_id": "call_s0_t4_0"
+        },
+        {
+          "arguments": {
+            "confirm": true,
+            "table_names": [
+              "store_summary"
+            ]
+          },
+          "content": "[TOOL_RESULT] delete_analysis_tables OK: 🗑️ 表清理结果 已删除的分析表： - `store_summary` ✅ 指定分析表已清理完成。\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"🗑️ 表清理结果\\n\\n已删除的分析表：\\n- `store_summary`\\n\\n✅ 指定分析表已清理完成。\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "delete_analysis_tables",
+          "tool_call_id": "call_s0_t5_0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "coverage": {
+    "export_report": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "export_report"
+  ],
+  "description": "Skill 'report' proposes an outline; the report_confirm fast path runs export_report.",
+  "scenario": "export_report",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:propose_report_outline",
+        "end:propose_report_outline"
+      ],
+      "final_text": "",
+      "message": "生成一份销售分析报告。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "query_data"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {
+        "skill": "report"
+      },
+      "tool_results": []
+    },
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:export_report"
+      ],
+      "final_text": "✅ 报告已生成，共 3 个章节。\n\n[📥 点击下载 销售分析报告_<TS>.docx](/api/export/销售分析报告_<TS>.docx?sid=<SID>)",
+      "message": "确认生成报告",
+      "model_requests": [],
+      "options": {
+        "internal_action": "report_confirm",
+        "report_sections": [
+          {
+            "content": "整体销售保持增长。",
+            "heading": "执行摘要"
+          },
+          {
+            "content": "北区与东区贡献最高。",
+            "heading": "区域表现"
+          },
+          {
+            "content": "加大高效门店的广告投入。",
+            "heading": "建议"
+          }
+        ],
+        "report_title": "销售分析报告"
+      },
+      "tool_results": []
+    }
+  ]
+}

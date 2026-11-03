@@ -1,0 +1,37 @@
+{
+  "coverage": {},
+  "covers": [],
+  "description": "Typical chart request; the stub only answers, capturing the visible tool list.",
+  "scenario": "plain_chart_request",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge"
+      ],
+      "final_text": "好的。",
+      "message": "帮我画一张各品类销售额的柱状图。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {},
+      "tool_results": []
+    }
+  ]
+}

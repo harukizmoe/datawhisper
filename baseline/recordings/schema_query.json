@@ -1,0 +1,139 @@
+{
+  "coverage": {
+    "get_schema": [
+      "ok"
+    ],
+    "get_table_detail": [
+      "ok"
+    ],
+    "query_data": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "get_schema",
+    "get_table_detail",
+    "query_data"
+  ],
+  "description": "Inspect schema, one table detail, then an aggregate query.",
+  "scenario": "schema_query",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:get_schema",
+        "end:get_schema",
+        "start:get_table_detail",
+        "end:get_table_detail",
+        "start:query_data",
+        "end:query_data"
+      ],
+      "final_text": "已按区域汇总销售额。",
+      "message": "先看一下数据结构，再统计各区域的销售额。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 2
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "workspace_read_file",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 3
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {},
+          "content": "[TOOL_RESULT] get_schema OK: Table: sales (200 rows) order_date VARCHAR store_id VARCHAR region VARCHAR category VARCHAR variant VARCHAR units BIGINT unit_price DOUBLE discount DOUBLE ad_spend DOUBLE visitors BIGINT converted BIGINT revenue DOUBLE -...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Table: sales  (200 rows)\\n  order_date  VARCHAR\\n  store_id  VARCHAR\\n  region  VARCHAR\\n  category  VARCHAR\\n  variant  VARCHAR\\n  units  BIGINT\\n  unit_price  DOUBLE\\n  discount  DOUBLE\\n  ad_spend  DOUBLE\\n  visitors  BIGINT\\n  converted  BIGINT\\n  revenue  DOUBLE\\n  -- sample data (first 2 rows) --\\n  | 2024-01-01 | S01 | East | Electronics | A | 38 | 32.78 | 0.1 | 318.99 | 546 | 55 | 1121.08\\n  | 2024-01-02 | S02 | North | Apparel | B | 32 | 67.87 | 0.05 | 302.9 | 538 | 68 | 2063.25\\n\\nTable: stores  (5 rows)\\n  store_id  VARCHAR\\n  store_name  VARCHAR\\n  region  VARCHAR\\n  opened_year  BIGINT\\n  floor_sqm  BIGINT\\n  -- sample data (first 2 rows) --\\n  | S01 | Harbor Plaza | East | 2015 | 820\\n  | S02 | Pine Street | North | 2017 | 540\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "get_schema",
+          "tool_call_id": "call_s0_t0_0"
+        },
+        {
+          "arguments": {
+            "table_name": "sales"
+          },
+          "content": "[TOOL_RESULT] get_table_detail OK: Table 'sales' not found in any connected data source.\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Table 'sales' not found in any connected data source.\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "get_table_detail",
+          "tool_call_id": "call_s0_t1_0"
+        },
+        {
+          "arguments": {
+            "purpose": "统计各区域销售额",
+            "sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region"
+          },
+          "content": "[TOOL_RESULT] query_data OK: region revenue East 100432.30 North 105816.03 South 76507.65 West 92046.85\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"region   revenue\\n  East 100432.30\\n North 105816.03\\n South  76507.65\\n  West  92046.85\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region\", \"rows\": 4}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"query_data evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "query_data",
+          "tool_call_id": "call_s0_t2_0"
+        }
+      ]
+    }
+  ]
+}

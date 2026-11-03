@@ -1,0 +1,75 @@
+{
+  "coverage": {
+    "run_analysis": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "run_analysis"
+  ],
+  "description": "run_analysis Regression: revenue on ad_spend/visitors/units.",
+  "scenario": "analysis_regression",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:run_analysis",
+        "end:run_analysis"
+      ],
+      "final_text": "回归分析完成。",
+      "message": "做一个回归分析，看广告投入和访客数对销售额的影响。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "analysis_name": "Regression",
+            "purpose": "回归分析销售额驱动因素",
+            "sql": "SELECT revenue, ad_spend, visitors, units FROM sales",
+            "target_column": "revenue"
+          },
+          "content": "[TOOL_RESULT] run_analysis OK: ## 线性回归分析 - `revenue` ### 模型概况 | 指标 | 值 | |------|-----| | 回归类型 | 多项式回归（阶数 5） | | 训练样本 | 140 | | 测试样本 | 60 | | 特征数量 | 15 | | Ridge λ | 0.0 | | 多项式阶数 | 5 | ### 拟合优度 | 指标 | 训练集 | 测试集 | |------|--------|--------| | **R²** |...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## 线性回归分析 - `revenue`\\n\\n### 模型概况\\n| 指标 | 值 |\\n|------|-----|\\n| 回归类型 | 多项式回归（阶数 5） |\\n| 训练样本 | 140 |\\n| 测试样本 | 60 |\\n| 特征数量 | 15 |\\n| Ridge λ  | 0.0 |\\n| 多项式阶数 | 5 |\\n\\n### 拟合优度\\n| 指标 | 训练集 | 测试集 |\\n|------|--------|--------|\\n| **R²** | **0.3920** | **-1.3009** |\\n| RMSE  | 1470.0940 | 844.7361 |\\n\\n### 特征系数（按 |t| 排序，前 10）\\n| 排名 | 特征 | 系数 | t 统计量 | p 值 | 显著 | VIF |\\n|:----:|------|-----:|--------:|-----:|:----:|----:|\\n| 1 | `visitors^4` | +939.8862 | 2.2321 | 0.0256 | ✓ | 72.3 |\\n| 2 | `visitors^5` | -515.4316 | -1.6544 | 0.0981 |  | 161.0 |\\n| 3 | `ad_spend` | -3305.8086 | -1.6270 | 0.1037 |  | 235.2 |\\n| 4 | `visitors^2` | -1959.4935 | -1.4818 | 0.1384 |  | 75.2 |\\n| 5 | `visitors` | +2568.0916 | 1.2900 | 0.1970 |  | 225.8 |\\n| 6 | `ad_spend^4` | -482.2530 | -1.0625 | 0.2880 |  | 75.0 |\\n| 7 | `units` | +400.5281 | 0.9420 | 0.3462 |  | 10.3 |\\n| 8 | `ad_spend^2` | +1089.8577 | 0.8039 | 0.4215 |  | 77.1 |\\n| 9 | `units^5` | -36.4636 | -0.5111 | 0.6093 |  | 58.5 |\\n| 10 | `visitors^3` | +678.1153 | 0.5050 | 0.6135 |  | 402.1 |\\n\\n### 核心洞察\\n- 测试集 R² = **-1.3009**，线性关系较弱，建议检查数据或尝试非线性模型。\\n- 过拟合警告：训练/测试 R² 相差 1.6929，建议增大岭回归系数（groupby_column 参数）或减少多项式阶数。\\n- 最显著特征：`visitors^4`（系数 +939.8862，p=0.0256，正向影响目标变量）。\\n- 多重共线性警告：`visitors^4`, `visitors^5`, `ad_spend`, `visitors^2`, `visitors`, `ad_spend^4`, `units`, `ad_spend^2`, `units^5`, `visitors^3` VIF > 10，建议考虑删除冗余特征或使用岭回归。\\n\\n> 系数表存储于 `analysis_result`，绘图方法：Bar_Chart，x=feature，y=coefficient。\\n> 残差诊断数据存储于 `analysis_breakdown`，绘图方法：Scatter_Plot，x=y_pred，y=std_residual。\\n> 综合指标存储于 `analysis_metrics`（metric / train_value / test_value）。\\n\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT revenue, ad_spend, visitors, units FROM sales\", \"rows\": null}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"run_analysis evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "run_analysis",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

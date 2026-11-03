@@ -1,0 +1,397 @@
+{
+  "version": 1,
+  "notes": [
+    "Protocol-independent scenario definitions. Each scenario runs in a fresh conversation. setup.upload attaches baseline/fixtures/baseline.xlsx (tables: sales, stores) as an uploaded file source; setup.sqlite attaches a private copy of baseline/fixtures/baseline.sqlite (same tables) as a SQL database source.",
+    "Each step is one user turn. 'options' are activation/payload fields of that turn (skill, internal_action, *_confirm payloads). 'script' is the ordered list of assistant turns the stub model plays for that step; confirm fast paths call no model, so their script is empty.",
+    "'{fixture_base}' is replaced by the driver with the base URL of the local fixture HTTP server; '{sqlite_source_id}' with the source id of the attached SQLite source (SQL sources require an explicit data_context table selection per turn).",
+    "'covers' lists the category-B tools whose output the scenario records. 'expected_status' documents the known outcome; the recording stores what actually happened."
+  ],
+  "knowledge_seed": {
+    "metrics": [
+      {"name": "GMV", "alias": "成交额", "definition": "订单成交总金额，等于 sales 表 revenue 字段求和（含折扣后金额）。", "sql_template": "SELECT SUM(revenue) FROM sales", "notes": "baseline fixture metric"}
+    ],
+    "rules": [
+      {"rule_id": "R-DISCOUNT", "description": "折扣率 discount 不得超过 0.3。", "condition": "discount <= 0.3", "severity": "warning"}
+    ],
+    "notes": [
+      {"topic": "AB 实验", "content": "variant 字段为实验分组，A 为对照组，B 为实验组；converted 为转化人数。", "tags": "experiment"}
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "schema_query",
+      "description": "Inspect schema, one table detail, then an aggregate query.",
+      "covers": ["get_schema", "get_table_detail", "query_data"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "先看一下数据结构，再统计各区域的销售额。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "get_schema", "arguments": {}}]},
+            {"tool_calls": [{"name": "get_table_detail", "arguments": {"table_name": "sales"}}]},
+            {"tool_calls": [{"name": "query_data", "arguments": {"sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region", "purpose": "统计各区域销售额"}}]},
+            {"text": "已按区域汇总销售额。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "knowledge",
+      "description": "Model explicitly looks up a seeded metric definition.",
+      "covers": ["query_knowledge"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "GMV 指标的口径定义是什么？",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "query_knowledge", "arguments": {"question": "GMV"}}]},
+            {"text": "已查到 GMV 的口径。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "analysis_tables",
+      "description": "Create a joined analysis table, inspect and query it, then delete it.",
+      "covers": ["create_analysis_table", "get_table_detail", "query_data", "delete_analysis_tables"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "把销售表和门店表关联建一张分析表，按门店汇总，用完后删除表。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "create_analysis_table", "arguments": {"sql": "SELECT s.store_id, t.store_name, t.floor_sqm, COUNT(*) AS orders, ROUND(SUM(s.revenue), 2) AS revenue FROM sales s JOIN stores t ON s.store_id = t.store_id GROUP BY s.store_id, t.store_name, t.floor_sqm ORDER BY s.store_id", "table_name": "store_summary", "purpose": "按门店汇总销售额"}}]},
+            {"tool_calls": [{"name": "get_table_detail", "arguments": {"table_name": "store_summary"}}]},
+            {"tool_calls": [{"name": "query_data", "arguments": {"sql": "SELECT store_name, ROUND(revenue / floor_sqm, 2) AS revenue_per_sqm FROM store_summary ORDER BY store_name", "purpose": "计算坪效"}}]},
+            {"tool_calls": [{"name": "delete_analysis_tables", "arguments": {"table_names": ["store_summary"], "confirm": true}}]},
+            {"text": "分析表已创建、使用并删除。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sql_source_tables",
+      "description": "Same table lifecycle on a SQL (SQLite) source, where get_table_detail and persistent analysis tables are implemented.",
+      "covers": ["get_schema", "get_table_detail", "create_analysis_table", "query_data", "delete_analysis_tables"],
+      "setup": {"sqlite": true},
+      "steps": [
+        {
+          "message": "看一下数据库里 sales 表的字段详情，再按门店建一张分析表，用完后删除表。",
+          "options": {"data_context": {"tables": [{"source_id": "{sqlite_source_id}", "table": "sales"}, {"source_id": "{sqlite_source_id}", "table": "stores"}]}},
+          "script": [
+            {"tool_calls": [{"name": "get_schema", "arguments": {}}]},
+            {"tool_calls": [{"name": "get_table_detail", "arguments": {"table_name": "sales"}}]},
+            {"tool_calls": [{"name": "create_analysis_table", "arguments": {"sql": "SELECT s.store_id, t.store_name, t.floor_sqm, COUNT(*) AS orders, ROUND(SUM(s.revenue), 2) AS revenue FROM sales s JOIN stores t ON s.store_id = t.store_id GROUP BY s.store_id, t.store_name, t.floor_sqm ORDER BY s.store_id", "table_name": "store_summary", "purpose": "按门店汇总销售额"}}]},
+            {"tool_calls": [{"name": "get_table_detail", "arguments": {"table_name": "store_summary"}}]},
+            {"tool_calls": [{"name": "query_data", "arguments": {"sql": "SELECT store_name, ROUND(revenue / floor_sqm, 2) AS revenue_per_sqm FROM store_summary ORDER BY store_name", "purpose": "计算坪效"}}]},
+            {"tool_calls": [{"name": "delete_analysis_tables", "arguments": {"table_names": ["store_summary"], "confirm": true}}]},
+            {"text": "分析表已创建、使用并删除。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "analysis_regression",
+      "description": "run_analysis Regression: revenue on ad_spend/visitors/units.",
+      "covers": ["run_analysis"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "做一个回归分析，看广告投入和访客数对销售额的影响。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "run_analysis", "arguments": {"analysis_name": "Regression", "sql": "SELECT revenue, ad_spend, visitors, units FROM sales", "target_column": "revenue", "purpose": "回归分析销售额驱动因素"}}]},
+            {"text": "回归分析完成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "analysis_kmeans",
+      "description": "run_analysis K_Means with K=3 on daily numeric features.",
+      "covers": ["run_analysis"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "用 K-Means 把每天的销售情况聚成三类。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "run_analysis", "arguments": {"analysis_name": "K_Means", "sql": "SELECT revenue, ad_spend, visitors, region FROM sales", "target_column": "revenue", "groupby_column": "region", "n_deciles": 3, "purpose": "按日销售特征聚类"}}]},
+            {"text": "聚类分析完成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "analysis_arima",
+      "description": "run_analysis Time_Series_ARIMA over 200 daily points, 14-step forecast.",
+      "covers": ["run_analysis"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "用 ARIMA 预测未来两周的日销售额。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "run_analysis", "arguments": {"analysis_name": "Time_Series_ARIMA", "sql": "SELECT order_date, revenue FROM sales ORDER BY order_date", "target_column": "revenue", "groupby_column": "order_date", "n_deciles": 14, "purpose": "预测未来两周日销售额"}}]},
+            {"text": "ARIMA 预测完成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "analysis_ab_test",
+      "description": "run_analysis AB_Test_Analysis on converted by variant (A = control).",
+      "covers": ["run_analysis"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "做一个 A/B 测试分析，比较 A、B 两组的转化人数。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "run_analysis", "arguments": {"analysis_name": "AB_Test_Analysis", "sql": "SELECT variant, converted FROM sales", "target_column": "converted", "groupby_column": "variant", "analysis_options": {"control_group": "A", "metric_type": "continuous"}, "purpose": "比较 AB 两组转化"}}]},
+            {"text": "A/B 测试分析完成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "chart",
+      "description": "generate_chart: monthly revenue line chart and revenue-by-region bar chart.",
+      "covers": ["generate_chart"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "画一个月度销售额趋势折线图，再画一个各区域销售额柱状图。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "generate_chart", "arguments": {"chart_type": "Line_Chart", "sql": "SELECT SUBSTR(order_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY month ORDER BY month", "field_mapping": {"x": "month", "y": "revenue"}, "title": "月度销售额趋势", "purpose": "月度销售趋势"}}]},
+            {"tool_calls": [{"name": "generate_chart", "arguments": {"chart_type": "Bar_Chart", "sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region", "field_mapping": {"x": "region", "y": "revenue"}, "title": "各区域销售额", "purpose": "区域对比"}}]},
+            {"text": "两张图表已生成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "profile",
+      "description": "profile_data on the sales table.",
+      "covers": ["profile_data"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "看一下 sales 表的数据概况和数据质量。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "profile_data", "arguments": {"table_name": "sales"}}]},
+            {"text": "数据概况已生成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "clean_fill_na",
+      "description": "clean_data fill_na (median) on discount.",
+      "covers": ["clean_data"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "清洗数据：用中位数填充 discount 的缺失值。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "clean_data", "arguments": {"operation": "fill_na", "table_name": "sales", "columns": ["discount"], "fill_method": "median", "output_table": "sales_filled"}}]},
+            {"text": "缺失值已填充。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "clean_winsorize",
+      "description": "clean_data winsorize revenue at the 5th/95th percentiles.",
+      "covers": ["clean_data"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "清洗数据：对 revenue 的异常值做 winsorize 缩尾处理。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "clean_data", "arguments": {"operation": "winsorize", "table_name": "sales", "columns": ["revenue"], "lower_pct": 5, "upper_pct": 95, "output_table": "sales_winsorized"}}]},
+            {"text": "缩尾处理完成。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "clean_trimming",
+      "description": "clean_data trimming: drop rows with revenue outside [0, 6000].",
+      "covers": ["clean_data"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "清洗数据：剔除 revenue 异常值（只保留 0 到 6000 之间的行）。",
+          "options": {},
+          "script": [
+            {"tool_calls": [{"name": "clean_data", "arguments": {"operation": "trimming", "table_name": "sales", "trim_column": "revenue", "min_val": 0, "max_val": 6000, "output_table": "sales_trimmed"}}]},
+            {"text": "异常值已剔除。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "export_excel",
+      "description": "Skill 'export' proposes an Excel export; the excel_confirm fast path runs export_excel without a model call.",
+      "covers": ["export_excel"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "把 sales 和 stores 两张表导出成 Excel。",
+          "options": {"skill": "export"},
+          "script": [
+            {"tool_calls": [{"name": "propose_excel_export", "arguments": {"tables": ["sales", "stores"], "filename": "baseline_export", "summary": "导出销售与门店两张表"}}]},
+            {"text": "请确认导出方案。"}
+          ]
+        },
+        {
+          "message": "确认导出",
+          "options": {"internal_action": "excel_confirm", "excel_tables": ["sales", "stores"], "excel_filename": "baseline_export"},
+          "script": []
+        }
+      ]
+    },
+    {
+      "name": "export_report",
+      "description": "Skill 'report' proposes an outline; the report_confirm fast path runs export_report.",
+      "covers": ["export_report"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "生成一份销售分析报告。",
+          "options": {"skill": "report"},
+          "script": [
+            {"tool_calls": [{"name": "propose_report_outline", "arguments": {"title": "销售分析报告", "sections": [{"heading": "执行摘要", "content": "整体销售保持增长。"}, {"heading": "区域表现", "content": "北区与东区贡献最高。"}, {"heading": "建议", "content": "加大高效门店的广告投入。"}]}}]},
+            {"text": "请确认报告大纲。"}
+          ]
+        },
+        {
+          "message": "确认生成报告",
+          "options": {"internal_action": "report_confirm", "report_title": "销售分析报告", "report_sections": [{"heading": "执行摘要", "content": "整体销售保持增长。"}, {"heading": "区域表现", "content": "北区与东区贡献最高。"}, {"heading": "建议", "content": "加大高效门店的广告投入。"}]},
+          "script": []
+        }
+      ]
+    },
+    {
+      "name": "generate_ppt",
+      "description": "Skill 'ppt' proposes a 3-slide outline; the ppt_confirm fast path runs generate_ppt.",
+      "covers": ["generate_ppt"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "做一份销售汇报 PPT。",
+          "options": {"skill": "ppt"},
+          "script": [
+            {"tool_calls": [{"name": "propose_ppt_outline", "arguments": {"title": "销售汇报", "slides": [{"layout": "cover", "params": {"title": "销售汇报", "subtitle": "基线数据集"}}, {"layout": "big_number", "params": {"title": "总销售额", "number": "374,802", "unit": "元", "description": "统计期内含折扣成交额"}}, {"layout": "closing", "params": {"title": "谢谢", "message": "欢迎讨论"}}]}}]},
+            {"text": "请确认 PPT 大纲。"}
+          ]
+        },
+        {
+          "message": "确认生成 PPT",
+          "options": {"internal_action": "ppt_confirm", "ppt_title": "销售汇报", "ppt_slides": [{"layout": "cover", "params": {"title": "销售汇报", "subtitle": "基线数据集"}}, {"layout": "big_number", "params": {"title": "总销售额", "number": "374,802", "unit": "元", "description": "统计期内含折扣成交额"}}, {"layout": "closing", "params": {"title": "谢谢", "message": "欢迎讨论"}}]},
+          "script": []
+        }
+      ]
+    },
+    {
+      "name": "generate_dashboard",
+      "description": "Skill 'dashboard' proposes 2 widgets; the dashboard_confirm fast path runs generate_dashboard.",
+      "covers": ["generate_dashboard"],
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "做一个销售看板。",
+          "options": {"skill": "dashboard"},
+          "script": [
+            {"tool_calls": [{"name": "propose_dashboard_outline", "arguments": {"name": "销售看板", "widgets": [{"title": "各区域销售额", "chart_type": "Bar_Chart", "sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region", "field_mapping": {"x": "region", "y": "revenue"}}, {"title": "月度销售额", "chart_type": "Line_Chart", "sql": "SELECT SUBSTR(order_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY month ORDER BY month", "field_mapping": {"x": "month", "y": "revenue"}}]}}]},
+            {"text": "请确认看板方案。"}
+          ]
+        },
+        {
+          "message": "确认生成看板",
+          "options": {"internal_action": "dashboard_confirm", "dashboard_name": "销售看板", "dashboard_widgets": [{"title": "各区域销售额", "chart_type": "Bar_Chart", "sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region", "field_mapping": {"x": "region", "y": "revenue"}}, {"title": "月度销售额", "chart_type": "Line_Chart", "sql": "SELECT SUBSTR(order_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY month ORDER BY month", "field_mapping": {"x": "month", "y": "revenue"}}]},
+          "script": []
+        }
+      ]
+    },
+    {
+      "name": "fetch_table",
+      "description": "Skill 'web-table' fetches the local fixture page. The old app's SSRF filter rejects loopback hosts, so the recorded output is the rejection, not parsed tables.",
+      "covers": ["fetch_table"],
+      "expected_status": "blocked",
+      "blocked_reason": "agent/tools/web.py:_reject_private_host rejects localhost/127.0.0.1/private IPs with no override; a public URL would make the baseline network-dependent and nondeterministic, so the compute path (data/table_extract.fetch_url_tables + source registration) is not exercised.",
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "抓取这个网页表格：{fixture_base}/stores.html",
+          "options": {"skill": "web-table"},
+          "script": [
+            {"tool_calls": [{"name": "fetch_table", "arguments": {"url": "{fixture_base}/stores.html", "source_name": "stores_web", "timeout": 10}}]},
+            {"text": "网页表格处理结束。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "load_feishu_bitable",
+      "description": "Skill 'feishu-bitable' loads a Bitable. No Feishu app credentials exist in the isolated data root, so the recorded output is the configuration error.",
+      "covers": ["load_feishu_bitable"],
+      "expected_status": "blocked",
+      "blocked_reason": "Needs a configured Feishu application bot (app_id/app_secret) and a reachable Feishu OpenAPI with a real Bitable; none is available locally, so the compute path (data/sources/feishu_bitable.py DuckDB registration) is not exercised.",
+      "setup": {"upload": true},
+      "steps": [
+        {
+          "message": "读取飞书多维表格 https://example.feishu.cn/base/bascnBaselineFixture?table=tblBaselineFixture 做分析。",
+          "options": {"skill": "feishu-bitable"},
+          "script": [
+            {"tool_calls": [{"name": "load_feishu_bitable", "arguments": {"bitable": "https://example.feishu.cn/base/bascnBaselineFixture?table=tblBaselineFixture", "source_name": "feishu_fixture", "max_records": 50}}]},
+            {"text": "飞书表格处理结束。"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plain_chart_request",
+      "description": "Typical chart request; the stub only answers, capturing the visible tool list.",
+      "covers": [],
+      "setup": {"upload": true},
+      "steps": [
+        {"message": "帮我画一张各品类销售额的柱状图。", "options": {}, "script": [{"text": "好的。"}]}
+      ]
+    },
+    {
+      "name": "plain_data_question",
+      "description": "Typical data question; the stub only answers.",
+      "covers": [],
+      "setup": {"upload": true},
+      "steps": [
+        {"message": "哪个门店的销售额最高？", "options": {}, "script": [{"text": "好的。"}]}
+      ]
+    },
+    {
+      "name": "plain_export_request",
+      "description": "Typical export request without a skill; the stub only answers.",
+      "covers": [],
+      "setup": {"upload": true},
+      "steps": [
+        {"message": "把分析结果导出成 Excel 文件。", "options": {}, "script": [{"text": "好的。"}]}
+      ]
+    },
+    {
+      "name": "plain_general_chat",
+      "description": "General chat with no data intent; the stub only answers.",
+      "covers": [],
+      "setup": {"upload": true},
+      "steps": [
+        {"message": "你好，你能做什么？", "options": {}, "script": [{"text": "你好。"}]}
+      ]
+    }
+  ]
+}

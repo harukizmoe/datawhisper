@@ -1,0 +1,80 @@
+{
+  "coverage": {
+    "generate_ppt": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "generate_ppt"
+  ],
+  "description": "Skill 'ppt' proposes a 3-slide outline; the ppt_confirm fast path runs generate_ppt.",
+  "scenario": "generate_ppt",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:propose_ppt_outline",
+        "end:propose_ppt_outline"
+      ],
+      "final_text": "",
+      "message": "做一份销售汇报 PPT。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "query_data"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {
+        "skill": "ppt"
+      },
+      "tool_results": []
+    },
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:generate_ppt"
+      ],
+      "final_text": "✅ PowerPoint 演示文稿已生成，共 **3** 张幻灯片。\n\n[📥 点击下载 销售汇报_<TS>.pptx](/api/export/销售汇报_<TS>.pptx?sid=<SID>)",
+      "message": "确认生成 PPT",
+      "model_requests": [],
+      "options": {
+        "internal_action": "ppt_confirm",
+        "ppt_slides": [
+          {
+            "layout": "cover",
+            "params": {
+              "subtitle": "基线数据集",
+              "title": "销售汇报"
+            }
+          },
+          {
+            "layout": "big_number",
+            "params": {
+              "description": "统计期内含折扣成交额",
+              "number": "374,802",
+              "title": "总销售额",
+              "unit": "元"
+            }
+          },
+          {
+            "layout": "closing",
+            "params": {
+              "message": "欢迎讨论",
+              "title": "谢谢"
+            }
+          }
+        ],
+        "ppt_title": "销售汇报"
+      },
+      "tool_results": []
+    }
+  ]
+}

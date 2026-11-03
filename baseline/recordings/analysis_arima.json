@@ -1,0 +1,77 @@
+{
+  "coverage": {
+    "run_analysis": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "run_analysis"
+  ],
+  "description": "run_analysis Time_Series_ARIMA over 200 daily points, 14-step forecast.",
+  "scenario": "analysis_arima",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:run_analysis",
+        "end:run_analysis"
+      ],
+      "final_text": "ARIMA 预测完成。",
+      "message": "用 ARIMA 预测未来两周的日销售额。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "analysis_name": "Time_Series_ARIMA",
+            "groupby_column": "order_date",
+            "n_deciles": 14,
+            "purpose": "预测未来两周日销售额",
+            "sql": "SELECT order_date, revenue FROM sales ORDER BY order_date",
+            "target_column": "revenue"
+          },
+          "content": "[TOOL_RESULT] run_analysis OK: ## ARIMA 时间序列预测 — `revenue` ### 模型概况 | 指标 | 值 | |------|-----| | 模型类型 | ARIMA(3,1,1) | | 选阶方法 | auto_arima stepwise（AIC，全量数据） | | 时间列 | `order_date` | | 训练样本数 | 200 | | 预测步数 | 14 | | ADF 检验 p值 | 0.0000（平稳 ✓） | ### 模型评估 |...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## ARIMA 时间序列预测 — `revenue`\\n\\n### 模型概况\\n| 指标 | 值 |\\n|------|-----|\\n| 模型类型 | ARIMA(3,1,1) |\\n| 选阶方法 | auto_arima stepwise（AIC，全量数据） |\\n| 时间列 | `order_date` |\\n| 训练样本数 | 200 |\\n| 预测步数 | 14 |\\n| ADF 检验 p值 | 0.0000（平稳 ✓） |\\n\\n### 模型评估\\n| 指标 | 值 |\\n|------|-----|\\n| 模型阶数 (p,d,q) | (3, 1, 1) |\\n| ADF p值（原始序列） | 0.0 |\\n| AIC | 3516.228 |\\n| BIC | 3532.6945 |\\n| MAE（训练集） | 617.6055 |\\n| RMSE（训练集） | 1612.3943 |\\n| MAPE %（训练集） | 30.49 |\\n| 训练样本数 | 200 |\\n\\n### 预测摘要（未来数据点）\\n| 时间点 | 预测值 | 95% 置信区间 |\\n|--------|-------:|-------------|\\n| 2024-07-19 00:00:00 | 2037.2181 | [-1115.7793, 5190.2156] |\\n| 2024-07-20 00:00:00 | 2165.8931 | [-987.4599, 5319.2461] |\\n| 2024-07-21 00:00:00 | 2182.4243 | [-977.5513, 5342.3999] |\\n| 2024-07-22 00:00:00 | 2117.9563 | [-1052.6951, 5288.6076] |\\n| 2024-07-23 00:00:00 | 2103.5225 | [-1068.3741, 5275.4190] |\\n| 2024-07-24 00:00:00 | 2107.5857 | [-1066.4791, 5281.6504] |\\n| 2024-07-25 00:00:00 | 2115.5946 | [-1059.8078, 5290.9971] |\\n| 2024-07-26 00:00:00 | 2116.6859 | [-1059.1624, 5292.5343] |\\n| 2024-07-27 00:00:00 | 2115.5445 | [-1060.7423, 5291.8313] |\\n| 2024-07-28 00:00:00 | 2114.6167 | [-1062.2152, 5291.4486] |\\n| … | … | … |\\n\\n### 核心洞察\\n- **趋势方向**：预测期末值（2114.8905）较历史末值（1532.6700）上升，变化幅度约 **38.0%**。\\n- 序列经过 1 阶差分后达到平稳，ARIMA 差分项 d=1。\\n\\n> **图表建议**\\n> - Line_Chart(analysis_result)：x=ds，y=[y_actual, y_pred]，展示历史拟合与未来预测\\n> - Scatter_Plot(analysis_breakdown)：x=row_num，y=std_residual — 检查残差随机性\\n>   （analysis_breakdown 含列：ds, row_num, residual, std_residual；row_num 为整数序号，必须用它作 x 轴）\\n> - analysis_metrics 表直接展示模型指标\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT order_date, revenue FROM sales ORDER BY order_date\", \"rows\": null}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"run_analysis evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "run_analysis",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}
