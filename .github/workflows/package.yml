@@ -1,0 +1,131 @@
+name: Package desktop app
+
+# 每个平台在自己的 runner 上打包：PyInstaller 不能交叉编译，macOS 的签名/dmg 也需要 macOS。
+# 不签名也能出包（macOS 是 ad-hoc 签名，Windows 无签名），签名凭据存在时才启用。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux x64
+            platform: linux/amd64
+            out: linux-amd64
+            artifact: datawhisper-linux-amd64
+          - os: windows-latest
+            name: Windows x64
+            platform: windows/amd64
+            out: windows-amd64
+            artifact: datawhisper-windows-amd64
+          - os: macos-latest
+            name: macOS arm64
+            platform: darwin/arm64
+            out: darwin-arm64
+            artifact: datawhisper-macos-arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+      - name: Install compute dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          # PyInstaller 只是打包期工具，不进 requirements.txt。
+          python -m pip install "pyinstaller==6.22.3"
+      - name: Install NSIS (Windows installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+      - name: Import the macOS certificate
+        # 只在有 secret 时导入；没有就保持 ad-hoc 签名并跳过公证。
+        # （GitHub 不允许在 if 里读 secrets，所以这里总是运行，脚本自己判断。）
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "${MACOS_CERTIFICATE}" ]]; then
+            echo "no MACOS_CERTIFICATE secret; building with ad-hoc signing"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          DW_SKIP_INSTALLER: "1"
+        run: bash scripts/build/build-app.sh -platform "${{ matrix.platform }}"
+      - name: Build (macOS, signed when the secret exists)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          DW_SIGN_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          if [[ -n "${DW_SIGN_IDENTITY}" ]]; then
+            bash scripts/build/build-app.sh -platform "${{ matrix.platform }}"
+          else
+            # 没有签名凭据：ad-hoc 签名，并跳过公证。
+            unset DW_SIGN_IDENTITY
+            DW_SKIP_NOTARIZE=1 bash scripts/build/build-app.sh -platform "${{ matrix.platform }}"
+          fi
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          DW_PYTHON: python
+        run: bash scripts/build/build-app.sh -platform "${{ matrix.platform }}"
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            desktop/build/${{ matrix.out }}/*.deb
+            desktop/build/${{ matrix.out }}/*.tar.gz
+            desktop/build/${{ matrix.out }}/PKGBUILD
+            desktop/build/${{ matrix.out }}/*.dmg
+            desktop/build/${{ matrix.out }}/*-setup-*.exe
+            desktop/build/${{ matrix.out }}/install.sh
+            desktop/build/${{ matrix.out }}/install.ps1

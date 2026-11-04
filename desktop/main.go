@@ -4,6 +4,9 @@
 //	go run .                                   # 开发模式：bun run server/src/main.ts，从当前工作目录向上查找
 //	go run . -service /opt/dw/datawhisper-server   # 已编译的服务（bun build --compile）
 //	go run . -data-dir /tmp/dw -capture /tmp/dw/frames   # 另外在每种服务状态各存一张窗口 PNG
+//
+// 打包后的应用不用 -service：它先看可执行文件旁边的 bin/（macOS 是 Contents/Resources/bin/），在那里找到
+// 随包的 datawhisper-server 和 datawhisper-compute 就使用它们，并把资源目录设为服务的工作目录。
 package main
 
 import (
@@ -87,6 +90,20 @@ func main() {
 
 // newSupervisor 配置 agent 服务的 supervisor，并把它的状态上报给 a。
 func newSupervisor(service, bun, dataDir, python, computeCwd string, a *app) (*supervisor.Supervisor, error) {
+	// 打包后的应用：可执行文件旁边的 bin/ 里有随包的服务与 compute。显式给出的 -service / -python /
+	// -compute-cwd 优先，所以开发时仍然用仓库里的 server/src/main.ts。
+	var dir string
+	if service == "" {
+		if b, ok := findBundled(); ok {
+			service, dir = b.service, b.root
+			if python == "" {
+				python = b.compute
+			}
+			if computeCwd == "" {
+				computeCwd = b.root
+			}
+		}
+	}
 	command, err := serviceCommand(service, bun)
 	if err != nil {
 		return nil, err
@@ -98,6 +115,7 @@ func newSupervisor(service, bun, dataDir, python, computeCwd string, a *app) (*s
 	}
 	sup, err := supervisor.New(supervisor.Config{
 		Command:    command,
+		Dir:        dir,
 		DataDir:    dataDir,
 		Python:     python,
 		ComputeCwd: computeCwd,

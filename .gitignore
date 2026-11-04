@@ -162,6 +162,12 @@ scripts/*
 !scripts/verify-chat-bundle.mjs
 !scripts/generate_tool_inventory.py
 !scripts/golden/
+# 打包脚本（P9）：scripts/* 默认忽略，这里显式保留。
+!scripts/build/
+!scripts/build/**
+
+# 随包的可执行文件由 scripts/build/*.sh 生成，不入库（每个约 100 MB）。
+desktop/resources/*/bin/
 # Untracked assets
 Information/assets/LOGO.png
 

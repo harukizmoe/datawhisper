@@ -1,0 +1,16 @@
+{
+  "name": "DataWhisper",
+  "slug": "datawhisper",
+  "identifier": "com.datawhisper.app",
+  "version": "0.1.0",
+  "copyright": "© 2026 DataWhisper",
+  "main": ".",
+  "out": "build",
+  "linux": {
+    "maintainer": "DataWhisper",
+    "comment": "本地数据分析 agent",
+    "categories": ["Office", "Science"],
+    "command": "datawhisper",
+    "webview": true
+  }
+}

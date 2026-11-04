@@ -18,7 +18,7 @@ import {
   turnStateFor,
   type SourceDocStore,
 } from "./ipc/source-store.ts";
-import { DEFAULT_PROJECT_ROOT, sourceMethods } from "./ipc/sources.ts";
+import { sourceMethods } from "./ipc/sources.ts";
 import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
 import { WorkExecutorRegistry } from "./jobs/work-task.ts";
 import { createWorkflows, workflowsExtension, type Workflows } from "./workflows/service.ts";
@@ -147,7 +147,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     configs: createSourceConfigStore({ dataDir: config.dataDir, credentials: sourceCredentials }),
     uploadsDir: join(config.dataDir, "uploads"),
     outputsDir: join(config.dataDir, "outputs"),
-    projectRoot: DEFAULT_PROJECT_ROOT,
+    projectRoot: config.projectRoot,
   });
 
   const workExecutors = new WorkExecutorRegistry();
