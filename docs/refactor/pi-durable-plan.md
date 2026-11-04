@@ -158,6 +158,19 @@ flowchart LR
 
 不再逐条移植 288 条路由。按界面功能重新定义 Bun 服务的内部 API，只保留界面实际要用的：数据源、工作区文件、已保存会话、知识库、模型设置、MCP、skills、命令、hooks、工作流运行、jobs、仪表盘、画布、输出文件、memory、配色、teams、本地服务、GPU 连接、飞书机器人。旧路由中只服务于 Web 页面、登录、管理后台、配额、托管模型的部分不迁移。
 
+分组落地：
+
+| 分组 | 方法前缀 | 实现位置 | 状态 |
+|---|---|---|---|
+| 会话与流 | `conversation.*`、`usage.summary` | `ipc/methods.ts`、`conversations/service.ts` | 已有 |
+| 模型与提供商 | `models.*`（含 `models.discover`） | `ipc/methods.ts`、`models/service.ts` | 已有 |
+| 编排 | `jobs.*`、`workflow.runs.*` | `ipc/orchestration.ts` | 已有 |
+| 飞书机器人 | `feishu.*` | `ipc/methods.ts` | 已有 |
+| 数据源/工作区/产物 | `source.*`、`workspace.*`、`artifact.*` | `ipc/sources.ts` + `docs/refactor/ipc-uploads.md` | 进行中 |
+| 会话库/知识库/记忆/技能/hooks/仪表盘 | `session.*`、`knowledge.*`、`memory.*`、`skill.*`、`command.*`、`hooks.*`、`dashboard.*` | `ipc/library.ts` | 进行中 |
+
+传输约束：进程 stdin/stdout 只走 JSONL，**大文件不进 JSONL**，上传/下载走数据目录里的约定路径（见 `docs/refactor/ipc-uploads.md`）。
+
 验收：每个界面功能对应的 API 有用例；P10 前列出旧路由与新 API 的对照表，未迁移的写明原因。
 
 ### P7 Go 原生界面
