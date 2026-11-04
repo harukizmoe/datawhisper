@@ -57,13 +57,13 @@ type View = ConversationView;
 type Snapshot = { seq: number; view: View };
 type Ops = { seq: number; ops: Op[] };
 
-// SSE payloads are JSON the service built from these exact types (src/protocol.ts); the tests check their contents.
+// SSE 载荷是服务用这些确切类型（src/protocol.ts）构造的 JSON；测试校验其内容。
 const snapshotOf = (event: SseEvent): Snapshot => event.data as Snapshot;
 const opsOf = (event: SseEvent): Ops => event.data as Ops;
-/** `pi.live` of a view: the Harness's own LiveState document. */
+/** view 的 `pi.live`：Harness 自己的 LiveState 文档。 */
 const liveOf = (view: View): LiveState => (view.docs["pi.live"] ?? {}) as LiveState;
 
-/** Fold snapshot + ops events with Chord's own apply, checking the sequence numbers. */
+/** 用 Chord 自己的 apply 折叠 snapshot + ops 事件，并校验序列号。 */
 function replicate(events: SseEvent[]): View {
   const [first, ...rest] = events;
   expect(first?.event).toBe("snapshot");
@@ -81,7 +81,7 @@ function replicate(events: SseEvent[]): View {
   return view;
 }
 
-/** The run ended (no `pi.live.run`) after an answer entry was committed. */
+/** 在提交答案条目之后运行时已结束（没有 `pi.live.run`）。 */
 function answered(events: SseEvent[]): boolean {
   if (events.length < 2) return false;
   const view = replicate(events);
@@ -144,16 +144,20 @@ describe("conversation routes", () => {
     expect(["queued", "placed", "done"]).toContain(status);
 
     await stream.until(answered);
-    // The reply was visible while streaming: some intermediate replica holds a partial in pi.live.generation.
+    // 回复在流式过程中已可见：某个中间副本在 pi.live.generation 中持有部分内容。
     const partials = stream.events
       .map((_, i) => liveOf(replicate(stream.events.slice(0, i + 1))).generation?.message)
       .filter((message) => message !== undefined);
     expect(partials.length).toBeGreaterThan(0);
     const replica = replicate(stream.events);
-    expect(replica.entries.map((e) => e.kind)).toEqual(["pi.user", "pi.assistant"]);
+    // 每轮提交都会写入本轮上下文并重设工具集，因此正文之前会有一条 `pi.system`（提示词/工具变更的位置标记）。
+    // 这里只断言它对模型不可见的种类安排：用户消息在前、助手回复在后，中间只允许 system 标记。
+    const kinds = replica.entries.map((e) => e.kind).filter((kind) => kind !== "pi.system");
+    expect(kinds).toEqual(["pi.user", "pi.assistant"]);
+    expect(replica.entries.some((e) => e.kind === "pi.system")).toBe(true);
     expect(stub.log).toHaveLength(1);
 
-    const fresh = await subscribe(base, "1"); // the root conversation by its numeric id
+    const fresh = await subscribe(base, "1"); // 按数字 id 订阅根会话
     await fresh.until((events) => events.length >= 1);
     expect(snapshotOf(fresh.events[0]!).view).toEqual(replica);
   });
@@ -177,7 +181,7 @@ describe("conversation routes", () => {
     expect(await refused.json()).toEqual({ error: "no_model" });
     expect(bare.stub.log).toHaveLength(0);
 
-    // Provider added later: the same conversation (created without a model) now runs on the default.
+    // 稍后再添加 provider：同一个会话（创建时未指定模型）现在改用默认 provider 运行。
     await bare.service.modelService.putProvider(stubProvider(bare.stub.url));
     expect((await call(bare.base, "POST", "/conversations/root/submit", { requestId: "r2", text: "hi" })).status).toBe(200);
     const root = await bare.service.harness.root(ctx);
@@ -196,7 +200,7 @@ describe("conversation routes", () => {
     await call(base, "POST", `/conversations/${id}/submit`, { requestId: "a", text: "first" });
     await conversation.waitForIdle(ctx);
 
-    // Unknown models and levels the model does not support are refused and change nothing.
+    // 未知模型和模型不支持的等级会被拒绝，且不改变任何状态。
     expect((await call(base, "PUT", `/conversations/${id}/model`, { model: { ...STUB_MODEL, modelId: "nope" }, thinkingLevel: null })).status).toBe(400);
     expect((await call(base, "PUT", `/conversations/${id}/model`, { model: STUB_MODEL, thinkingLevel: "high" })).status).toBe(400);
     for (const [method, path] of [
@@ -239,7 +243,7 @@ describe("conversation routes", () => {
     const { base, service } = await start({ chunkDelayMs: 200 });
     const stream = await subscribe(base, "root");
     const res = (await (await call(base, "POST", "/conversations/root/submit", { requestId: "slow", text: "take your time" })).json()) as SubmitResponse;
-    // Wait until the reply is streaming, then abort it.
+    // 等到回复开始流式输出，然后中止它。
     await stream.until((events) => liveOf(replicate(events)).generation?.message !== undefined);
     const aborted = await call(base, "POST", "/conversations/root/abort");
     expect(aborted.status).toBe(200);
@@ -247,7 +251,7 @@ describe("conversation routes", () => {
     await stream.until((events) => liveOf(replicate(events)).runFailure?.reason === "aborted");
     const view = replicate(stream.events);
     expect(liveOf(view).run).toBeUndefined();
-    // SubmissionId is pi-durable's erased integer brand; the route returned it as a plain number.
+    // SubmissionId 是 pi-durable 擦除后的整数 brand；路由把它当作普通数字返回。
     const submissionId = res.submissionId as Parameters<typeof service.harness.submission>[0];
     const submission = await service.harness.submission(submissionId, ctx);
     expect((await submission!.status(ctx)).status).toBe("unanswered");
@@ -258,7 +262,7 @@ describe("conversation routes", () => {
     const stream = await subscribe(r.base, "root");
     await stream.until((events) => events.length >= 1);
     await stream.until((_events, client) => client.comments >= 2);
-    expect(stream.events.filter((e) => e.event !== "snapshot")).toEqual([]); // comments are not events
+    expect(stream.events.filter((e) => e.event !== "snapshot")).toEqual([]); // 注释行不算事件
     await r.service.stop();
     await stream.finished;
     expect(stream.done).toBe(true);

@@ -1,16 +1,16 @@
 /**
- * Conversation routes of the UI protocol (docs/refactor/ui-protocol.md), mounted at /v1/conversations.
+ * UI 协议的会话路由（docs/refactor/ui-protocol.md），挂载在 /v1/conversations。
  *
- *   GET  /                   list ownerless conversations, newest first
- *   POST /                   create a conversation; body {model?, thinkingLevel?}, default: the settings' default model
- *   GET  /:id/subscribe      SSE: `snapshot` {seq:0, view}, then `ops` {seq, ops}; `end` when the watch ends
+ *   GET  /                  列出无主的会话，最新的在前
+ *   POST /                  创建会话；请求体 {model?, thinkingLevel?}，默认使用设置中的默认模型
+ *   GET  /:id/subscribe      SSE：先发 `snapshot` {seq:0, view}，再发 `ops` {seq, ops}；watch 结束时发 `end`
  *   POST /:id/submit         {requestId, text, whenBusy?} -> {submissionId, status}
- *                            409 {error:"no_model"} when the conversation has no model and none is available,
- *                            409 {error:"model_unavailable"} when its model's provider was removed or disabled
- *   PUT  /:id/model          {model, thinkingLevel} -> {model, thinkingLevel}; applies from the next model request
- *   POST /:id/abort          abort the current run and withdraw queued inputs
+ *                            会话没有模型且没有可用模型时返回 409 {error:"no_model"}，
+ *                            其模型所属 provider 被删除或禁用时返回 409 {error:"model_unavailable"}
+ *   PUT  /:id/model          {model, thinkingLevel} -> {model, thinkingLevel}；从下一次模型请求起生效
+ *   POST /:id/abort          中止当前运行并撤回已排队的输入
  *
- * `:id` is `root` or a conversation's numeric id.
+ * `:id` 是 `root`，或会话的数字 id。
  */
 import type { Context } from "@earendil-works/chord/context";
 import {
@@ -19,10 +19,14 @@ import {
   type ConversationRecord,
   type Harness,
   ROOT_CONVERSATION_ID,
+  type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { EMPTY_TURN_CONTEXT, type TurnContext, TurnDoc } from "../agent/turn.ts";
 import { type ModelService, SettingsError } from "../models/service.ts";
+import { MAX_VISIBLE_TOOLS, recordDiscoveredToolTurn } from "../tools/exposure.ts";
+import { toolsForTurn } from "../tools/select.ts";
 import type {
   AgentModelResponse,
   ConversationListResponse,
@@ -39,14 +43,36 @@ import type {
 export const DEFAULT_HEARTBEAT_MS = 15_000;
 const SCAN_PAGE = 256;
 
+/** 数据源/工作区状态，供每轮的工具暴露与系统提示判定。 */
+export type TurnState = {
+  hasDataSource: boolean;
+  sourceCount: number;
+  hasWorkspace: boolean;
+  hasUnnamedColumns: boolean;
+  teamsEnabled: boolean;
+};
+
+const NO_TURN_STATE: TurnState = { hasDataSource: false, sourceCount: 0, hasWorkspace: false, hasUnnamedColumns: false, teamsEnabled: false };
+
 export type ConversationRoutesDeps = {
   harness: Harness;
   modelService: ModelService;
   context: Context;
   heartbeatMs?: number;
+  /** 本轮可用的工具，由 P4 提供。 */
+  tools?: readonly ToolRegistration[];
+  /** 每轮开始时重新取一次数据源/工作区状态。 */
+  turnState?: () => TurnState;
 };
 
-export function conversationRoutes({ harness, modelService, context, heartbeatMs = DEFAULT_HEARTBEAT_MS }: ConversationRoutesDeps): Hono {
+export function conversationRoutes({
+  harness,
+  modelService,
+  context,
+  heartbeatMs = DEFAULT_HEARTBEAT_MS,
+  tools = [],
+  turnState,
+}: ConversationRoutesDeps): Hono {
   const routes = new Hono();
 
   routes.onError((error, c) => {
@@ -54,11 +80,57 @@ export function conversationRoutes({ harness, modelService, context, heartbeatMs
     throw error;
   });
 
-  /** `root` (created on first use), or an existing conversation's numeric id. */
+  /**
+   * 提交前写本轮上下文，并按它收敛本轮工具集。
+   *
+   * 顺序有讲究：先写文档（section 渲染时要读），再 `configure({ modelTools })`（下一次模型请求前生效），
+   * 最后才 submit。`configure` 是整体替换语义，所以每轮都必须重算，不能增量合并。
+   */
+  async function prepareTurn(conversation: Conversation, body: SubmitRequest): Promise<void> {
+    const previous = (await harness.snapshot(TurnDoc, conversation.id, context)) ?? EMPTY_TURN_CONTEXT;
+    const state = turnState ?? (() => NO_TURN_STATE);
+    const current = state();
+    // 命令/技能轮不参与关键词发现（旧实现传空消息，记一次空发现并推进 TTL）。
+    const discoveryMessage = body.command === undefined ? body.text : "";
+    const discovery = recordDiscoveredToolTurn(
+      { discovered: previous.discoveredTools, turns: previous.discoveryTurns },
+      discoveryMessage,
+    );
+    const next: TurnContext = {
+      ...previous,
+      message: body.text,
+      command: body.command ?? null,
+      activation:
+        body.command === undefined
+          ? { kind: "none", name: "" }
+          : { kind: "command", name: body.command },
+      ...current,
+      discoveryTurns: discovery.state.turns.map((turn) => [...turn]),
+      discoveredTools: [...discovery.state.discovered],
+      turn: previous.turn + 1,
+    };
+    await conversation.commit(async (tx) => {
+      const doc = await tx.doc(TurnDoc, conversation.id);
+      Object.assign(doc, next);
+    }, context);
+
+    const selected = toolsForTurn(tools, {
+      userMessage: body.text,
+      command: body.command,
+      hasDataSource: current.hasDataSource,
+      hasWorkspace: current.hasWorkspace,
+      teamsEnabled: current.teamsEnabled,
+      discoveredTools: next.discoveredTools,
+      maxTools: MAX_VISIBLE_TOOLS,
+    });
+    await conversation.configure({ modelTools: selected }, context);
+  }
+
+  /** `root`（首次使用时创建），或已有会话的数字 id。 */
   async function lookup(param: string): Promise<Conversation | undefined> {
     if (param === "root") return harness.root(context);
     if (!/^[1-9][0-9]{0,15}$/.test(param)) return undefined;
-    // ConversationId is an erased brand over a positive integer (pi-durable does not export idFromNumber); checked above.
+    // ConversationId 是正整数的擦除 branded 类型（pi-durable 未导出 idFromNumber）；上面已校验格式。
     return harness.conversation(Number(param) as ConversationId, context);
   }
 
@@ -130,6 +202,7 @@ export function conversationRoutes({ harness, modelService, context, heartbeatMs
     } else if (modelService.models.getModel(agent.model.provider, agent.model.modelId) === undefined) {
       return c.json({ error: "model_unavailable" }, 409);
     }
+    await prepareTurn(conversation, body as SubmitRequest);
     const submission = await conversation.submit(
       { type: "input", content: body.text, requestId: body.requestId, whenBusy: body.whenBusy ?? "followUp" },
       context,
@@ -155,10 +228,10 @@ export function conversationRoutes({ harness, modelService, context, heartbeatMs
       let seq = 0;
       const snapshot: SnapshotEvent = { seq: 0, view: watch.value };
       await sse.writeSSE({ event: "snapshot", id: "0", data: JSON.stringify(snapshot) });
-      // A comment line every heartbeatMs: a dead peer fails the write, which aborts the stream and stops the watch.
+      // 每 heartbeatMs 写一行注释：对端已死时写入会失败，从而中止流并停止 watch。
       const heartbeat = setInterval(() => void sse.write(": ping\n\n").catch(() => void watch.stop()), heartbeatMs);
       watch.start(async (call) => {
-        // A `failed` call keeps the last value; the next value call starts with ["r", value], so nothing is lost.
+        // `failed` 调用会保留最后一个值；下一次 value 调用以 ["r", value] 开始，因此不会丢失内容。
         if (call.kind !== "value" || call.ops.length === 0) return;
         seq += 1;
         const ops: OpsEvent = { seq, ops: call.ops };
