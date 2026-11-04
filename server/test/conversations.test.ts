@@ -199,6 +199,13 @@ describe("conversation routes", () => {
     // Unknown models and levels the model does not support are refused and change nothing.
     expect((await call(base, "PUT", `/conversations/${id}/model`, { model: { ...STUB_MODEL, modelId: "nope" }, thinkingLevel: null })).status).toBe(400);
     expect((await call(base, "PUT", `/conversations/${id}/model`, { model: STUB_MODEL, thinkingLevel: "high" })).status).toBe(400);
+    for (const [method, path] of [
+      ["POST", "/conversations"],
+      ["PUT", `/conversations/${id}/model`],
+    ] as const) {
+      const res = await fetch(`${base}${path}`, { method, headers: { authorization: `Bearer ${TOKEN}` }, body: "not json" });
+      expect(res.status).toBe(400);
+    }
 
     const switched = await call(base, "PUT", `/conversations/${id}/model`, { model: { ...STUB_MODEL, modelId: "stub-reasoner" }, thinkingLevel: "high" });
     expect(switched.status).toBe(200);

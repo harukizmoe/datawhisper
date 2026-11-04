@@ -50,7 +50,7 @@ export function conversationRoutes({ harness, modelService, context, heartbeatMs
   const routes = new Hono();
 
   routes.onError((error, c) => {
-    if (error instanceof SettingsError) return c.json({ error: error.message }, 400);
+    if (error instanceof SettingsError || error instanceof SyntaxError) return c.json({ error: error.message }, 400);
     throw error;
   });
 

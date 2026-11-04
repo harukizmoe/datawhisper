@@ -206,7 +206,10 @@ flowchart LR
 
 ## 7. 待确认事项
 
-无。实施中发现需要决策的问题会追加到这里。
+实施中做出的决定（不需要再确认，记录在这里备查）：
+
+- API key 存储（P3.1）：优先用系统钥匙串（`Bun.secrets`：macOS 钥匙串、Windows 凭据管理器、Linux Secret Service）。系统没有可用的钥匙串时（例如 Linux 会话里没有 Secret Service 服务，本机即如此：`ERR_SECRETS_PLATFORM_ERROR`），退回到数据目录下仅当前用户可读（0600）的 `credentials.json`；设置页显示当前用的是哪一种。`models.json` 只存提供商与模型设置，不含 key。
+- 自定义 OpenAI 兼容端点一律按 `supportsDeveloperRole: false` 发送（系统提示用 `system` 角色）：Ollama、vLLM、SGLang 和多数中转不接受 `developer`；其余兼容项仍由 pi-ai 按 baseUrl 自动识别。
 
 ## 8. 进度
 
@@ -220,8 +223,8 @@ flowchart LR
 - [ ] P1.3 界面侧计算
 - [x] P1.4 Bun compute 客户端：`server/src/compute/client.ts`，`cd server && bun test` 12 项通过（连跑 5 次稳定）：并发乱序、取消与进度、事件路由、错误码、崩溃时在途请求以 `ComputeCrashed` 失败且不自动重试、下次调用自动重启并按描述重开数据源、报告丢失的内存表和重开失败的数据源、30 秒内崩溃超过 3 次停止重启、启动失败、`close()` 等在途请求结束
 - [x] P2.1 Bun 服务工程：`server/src/{main,app,config}.ts`，`bun test` 共 17 项通过（含服务进程 5 项）：无令牌或错误令牌 401、`/v1/health`、就绪行（Go 通过 `DW_TOKEN` 传令牌时不在 stdout 输出令牌）、SIGTERM 和 stdin 关闭都能正常退出、同一数据目录重启后重开存储、非法端口报错。中断的运行续跑需要先有模型（P3.1），端到端验证放到 P3.5
-- [ ] P2.2 桌面应用骨架
-- [ ] P2.3 界面通信协议
+- [x] P2.2 桌面应用骨架：`desktop/` Go 模块（`datawhisper/desktop`，MyGo v0.7.4）。`internal/supervisor` 按 P2.1 的进程约定启动服务（`DW_TOKEN` 为 32 字节随机令牌，`DW_DATA_DIR` 与 `config.ts` 同一默认目录，开发时 `bun run server/src/main.ts`，发布时用 `-service` 指定编译后的服务），限时读取就绪行，输出写入 `<数据目录>/logs/service.log`，停止时依次关闭 stdin、SIGTERM、强杀（Windows 只关 stdin），意外退出按 0.5 秒起、翻倍到 15 秒的退避重启，2 分钟内崩溃 5 次进入失败状态（界面可重试）；主窗口（`main.go`、`app.go`）有侧边栏（会话列表、New chat、Settings 占位页）、服务状态指示和横幅（启动中、重启中、失败加 Retry、重连会话中、恢复后 5 秒内显示 Reconnected）、沿用 spike 的聊天视图（流式 Markdown、工具行、输入框、Stop），新会话在第一条消息时创建，409 `no_model`/`model_unavailable` 引导到设置页。`go vet ./...` 通过，`go test -race ./...` 21 项通过：supervisor 8 项（TestMain 编译假服务：就绪解析、超时、退避重启、崩溃上限与重试、stdin/SIGTERM/强杀三级停止）、`ui.NewTester` 视图 3 项（横幅各状态、会话与缺少模型、录制流的流式渲染）、真实服务 2 项（见 P2.3）、`internal/api` 8 项。真实窗口冒烟：启动后就绪，外部 `kill -9` Bun 进程后显示重启横幅，约 1 秒内自动恢复，退出应用时服务因 stdin 关闭正常退出；截图 `desktop/screenshot-{skeleton,restarting,reconnected}.png`（`-capture`，`win.CapturePage()`）
+- [x] P2.3 界面通信协议：协议文档 `docs/refactor/ui-protocol.md`（接口、SSE 事件与序号规则、重连、7 种 op、视图结构、鉴权含 Web view 的 `?token=`、TS/Go 类型对照、一次回复的实录）；服务端 `server/src/routes/conversations.ts`（列表、新建、订阅、提交、中止；订阅转发 `conversation.watch()`：`snapshot`、`ops`、`end`，每 15 秒一行心跳）和 `server/src/protocol.ts`，`main.ts` 拆出 `startService(config, options)` 供进程内测试；Go 端 `desktop/internal/api`（类型化客户端、SSE 解析、`ApplyOps`、`Replica` 与聊天行推导、`Follow` 断线后从新快照重新订阅，45 秒收不到数据即判定断线）。`bun test` 42 项通过，其中 `conversations.test.ts` 11 项（本任务 8 项：401、404、请求体校验、先快照后带序号的增量且重新订阅的快照等于用 chord 还原的副本、requestId 去重、中止、心跳、列表与新建；另 3 项是 P3.1 的模型用例）；`desktop/live_test.go` 对真实服务（假模型）验证 Go 副本与新快照的 JSON 逐字节相等，SIGKILL 重启后仍相等且 requestId 去重有效，界面恢复同一会话并能继续对话。Web view 资源路由在 P7.2 按 `?token=` 实现；pi-durable 1.5.0 的会话记录没有标题，标题留到 P3.5
 - [ ] P3.1 模型
 - [ ] P3.2 系统提示
 - [ ] P3.3 hooks
