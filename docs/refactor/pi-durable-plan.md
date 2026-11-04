@@ -175,7 +175,26 @@ flowchart LR
 
 ### P7 Go 原生界面
 
-用 MyGo 原生 UI 重写全部界面，这是工作量最大的阶段。按功能拆分：
+用 MyGo 原生 UI 重写全部界面，这是工作量最大的阶段。
+
+**一律使用 MyGo 官方组件库（`github.com/egoist/mygo/ui`，v0.7.4 既有）**，不要用 `Row/Column/Text` 手搓控件：
+
+| 场景 | 组件 |
+|---|---|
+| 会话/条目列表 | `ui.Sidebar`（源头列表）、`ui.List` |
+| 选择项（模型、思考强度、预设） | `ui.Select`、`ui.Segmented` |
+| 开关（启用提供商、置顶） | `ui.Switch`、`ui.Checkbox`、`ui.Radio` |
+| 表单 | `ui.Field` + `ui.TextInput` / `ui.NumberInput` / `ui.Stepper` |
+| 表格（模型清单、运行记录、表预览） | `ui.Table` + `ui.TableColumn` |
+| 设置分区 | `ui.Tabs` |
+| 确认/编辑弹窗 | `ui.Modal`、`ui.AlertDialog`、`ui.Popover`、`ui.MenuButton` |
+| 进度与加载 | `ui.Progress`、`ui.Spinner` |
+| 反馈 | `c.Toast`、`ui.Tooltip` |
+| 长内容 | `ui.Scroll`、`ui.Split`、`ui.Grid` |
+
+文档：`https://mygo.egoist.dev/docs/ui/<组件>.md`（加 `.md` 取纯 markdown）。写界面之前先查签名，不凭记忆。
+
+按功能拆分：
 
 | 任务 | 内容 |
 |---|---|
