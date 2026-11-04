@@ -63,11 +63,13 @@ func New(conn Conn) *Client {
 // Done 在读循环结束时关闭：服务进程退出，或管道断了。
 func (c *Client) Done() <-chan struct{} { return c.done }
 
-// Error 是一条 JSON-RPC 错误响应。Kind 是 error.data.kind（业务错误的细分，如 "not_found"），没有时为空。
+// Error 是一条 JSON-RPC 错误响应。Kind 是 error.data.kind（业务错误的细分，如 "not_found"），Reason 是
+// error.data.reason（更细的原因，如上传被拒时的 "file_too_large"），没有时为空。
 type Error struct {
 	Code    int
 	Message string
 	Kind    string
+	Reason  string
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("service: %d %s", e.Code, e.Message) }
@@ -201,10 +203,11 @@ func (e *rpcError) toError() *Error {
 	err := &Error{Code: e.Code, Message: e.Message}
 	if len(e.Data) > 0 {
 		var data struct {
-			Kind string `json:"kind"`
+			Kind   string `json:"kind"`
+			Reason string `json:"reason"`
 		}
 		if json.Unmarshal(e.Data, &data) == nil {
-			err.Kind = data.Kind
+			err.Kind, err.Reason = data.Kind, data.Reason
 		}
 	}
 	return err

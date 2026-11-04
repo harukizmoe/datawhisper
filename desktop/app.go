@@ -22,6 +22,9 @@ const reconnectedFor = 5 * time.Second
 // navSettings 是侧边栏的设置项；会话项为 "c<id>"（见 navOf），新对话为 ""。
 const navSettings = "settings"
 
+// navData 是侧边栏的数据入口：它不是页面，选中后展开右侧数据面板并回到聊天页。
+const navData = "data"
+
 // app 是窗口的状态。只有 UI 线程会改它：构建视图时，以及在 post 上排队的函数里。
 type app struct {
 	// post 在 UI 线程上运行 fn 并触发重绘：应用中它是 Window.Update，测试中是一个队列。
@@ -60,6 +63,8 @@ type app struct {
 
 	// st 是模型与提供商设置页的数据与编辑状态（settings.go）。
 	st settingsState
+	// src 是右侧数据面板（数据源、工作区、产物）的数据与编辑状态（sources.go）。
+	src sourcesState
 
 	list ui.ListState
 	md   markdown.Options
@@ -102,6 +107,7 @@ func (a *app) onService(st supervisor.Status) {
 	if a.nav == navSettings {
 		a.loadSettings()
 	}
+	a.sourcesReady()
 }
 
 func (a *app) cancelFollow() {
@@ -154,6 +160,16 @@ func (a *app) onChat(st api.State) {
 // navigate 跟上侧边栏的新选择。
 func (a *app) navigate() {
 	switch {
+	case a.nav == navData:
+		// 数据面板依附于聊天页：打开它，然后把侧边栏的选择还给当前会话。
+		if !a.src.open {
+			a.toggleSources()
+		}
+		if a.conv == 0 {
+			a.nav = ""
+		} else {
+			a.nav = navOf(a.conv)
+		}
 	case a.nav == navSettings:
 		a.loadSettings()
 	case strings.HasPrefix(a.nav, "c"):
@@ -167,6 +183,7 @@ func (a *app) navigate() {
 func (a *app) show(conv int) {
 	a.conv, a.chat = conv, api.State{}
 	a.sendErr, a.needModel = "", false
+	a.sourcesConversationChanged()
 	a.follow()
 }
 
@@ -283,14 +300,21 @@ func (a *app) refreshConversations() {
 	}()
 }
 
-// view 构建整个窗口：侧边栏，以及聊天页或设置页。
+// view 构建整个窗口：侧边栏，以及聊天页或设置页；聊天页可以再分出右侧的数据面板。
 func (a *app) view(c *ui.Context) {
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		a.sidebar(c)
 		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-			if a.nav == navSettings {
+			switch {
+			case a.nav == navSettings:
 				a.settings(c)
-			} else {
+			case a.src.open:
+				ui.SplitPercent(c, &a.src.split, func() {
+					ui.Column(c).Grow(1).MinWidth(0).Children(func() { a.chatPage(c) })
+				}, func() {
+					a.sourcesPanel(c)
+				}).Fill()
+			default:
 				a.chatPage(c)
 			}
 		})
@@ -319,6 +343,7 @@ func (a *app) sidebar(c *ui.Context) {
 				}
 			})
 			ui.SidebarSection(c, "App", nil, func() {
+				ui.SidebarItem(c, navData, nil, "Data")
 				ui.SidebarItem(c, navSettings, nil, "Settings")
 			})
 		}).Grow(1).Label("Navigation").Changed() {
@@ -406,9 +431,16 @@ func (a *app) chatPage(c *ui.Context) {
 			ui.Badge(c, a.chat.Model.Provider+"/"+a.chat.Model.ModelID)
 		}
 		ui.Spacer(c)
-		label, color := a.statusLabel(t)
+		label := "Data"
+		if a.src.open {
+			label = "Hide data"
+		}
+		if ui.Button(c, label).Tooltip("Data sources, workspace and artifacts of this chat").Clicked() {
+			a.toggleSources()
+		}
+		label2, color := a.statusLabel(t)
 		ui.Text(c, "●").TextColor(color)
-		ui.Text(c, label).TextColor(t.TextMuted)
+		ui.Text(c, label2).TextColor(t.TextMuted)
 	})
 	a.banner(c)
 	messages := a.chat.Messages
