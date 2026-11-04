@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// recorded reads testdata/stream.sse, a /subscribe stream recorded from the P0.3 spike server: one tool-calling
-// prompt and one plain markdown prompt.
+// recorded 读取 testdata/stream.sse，这是从 P0.3 spike 服务录下来的 /subscribe 流：一个会调用 tool 的提示，
+// 和一个纯 markdown 的提示。
 func recorded(t *testing.T) []Event {
 	t.Helper()
 	f, err := os.Open("testdata/stream.sse")
@@ -95,14 +95,14 @@ func TestApplyOps(t *testing.T) {
 	var root any
 	_ = json.Unmarshal([]byte(`{"a":{"s":"héllo😀"},"list":[1,2,3],"keep":true}`), &root)
 	root, err := ApplyOps(root, ops(t,
-		`["s",["a","n"],5]`,        // set
-		`["a",["a","s"],"!"]`,      // append text
-		`["t",["a","s"],1]`,        // drop one UTF-16 unit from the front
-		`["p",["list"],1,1,[7,8]]`, // splice: [1,7,8,3]
-		`["m",["list"],[3,2,1,0]]`, // reorder: [3,8,7,1]
-		`["d",["list",0]]`,         // delete an index: [8,7,1]
-		`["s",["list",3],9]`,       // set at the length appends
-		`["d",["keep"]]`,           // delete a key
+		`["s",["a","n"],5]`,        // 设置
+		`["a",["a","s"],"!"]`,      // 追加文本
+		`["t",["a","s"],1]`,        // 从前面丢掉一个 UTF-16 unit
+		`["p",["list"],1,1,[7,8]]`, // 拼接：[1,7,8,3]
+		`["m",["list"],[3,2,1,0]]`, // 重排：[3,8,7,1]
+		`["d",["list",0]]`,         // 删掉一个下标：[8,7,1]
+		`["s",["list",3],9]`,       // 在下标等于长度处设置即追加
+		`["d",["keep"]]`,           // 删掉一个 key
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestReadSSESkipsCommentsAndJoinsDataLines(t *testing.T) {
 }
 
 func TestClientErrorsAndAuth(t *testing.T) {
-	var bodies sync.Map // path → raw request body
+	var bodies sync.Map // path → 原始请求 body
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		bodies.Store(r.Method+" "+r.URL.Path, string(raw))
@@ -228,8 +228,7 @@ func TestClientErrorsAndAuth(t *testing.T) {
 	}
 }
 
-// sseServer serves scripted subscriptions: the n-th connection gets script(n, w, flush, gone), where gone closes
-// when the client went away.
+// sseServer 提供按脚本运行的订阅：第 n 次连接会执行 script(n, w, flush, gone)，其中 gone 在客户端离开时关闭。
 func sseServer(t *testing.T, script func(n int, w http.ResponseWriter, flush func(), gone <-chan struct{})) *httptest.Server {
 	var mu sync.Mutex
 	n := 0
@@ -249,7 +248,7 @@ func TestSubscribeDetectsAnIdleConnection(t *testing.T) {
 	srv := sseServer(t, func(_ int, w http.ResponseWriter, flush func(), gone <-chan struct{}) {
 		fmt.Fprint(w, "event: snapshot\ndata: {\"seq\":0,\"view\":{}}\n\n")
 		flush()
-		<-gone // then silence: no event, no heartbeat
+		<-gone // 之后就一直没声音：没有事件，也没有心跳
 	})
 	c := &Client{Base: srv.URL, IdleTimeout: 100 * time.Millisecond}
 	var got []string
@@ -262,17 +261,17 @@ func TestSubscribeDetectsAnIdleConnection(t *testing.T) {
 func TestFollowResubscribesFromAFreshSnapshot(t *testing.T) {
 	srv := sseServer(t, func(n int, w http.ResponseWriter, flush func(), _ <-chan struct{}) {
 		switch n {
-		case 1: // a snapshot and one op, then the connection drops
+		case 1: // 一个 snapshot 加一个 op，然后连接断开
 			fmt.Fprint(w, "event: snapshot\ndata: {\"seq\":0,\"view\":{\"conversation\":{\"id\":1},\"n\":1}}\n\n")
 			fmt.Fprint(w, "event: ops\ndata: {\"seq\":1,\"ops\":[[\"s\",[\"n\"],2]]}\n\n")
-		case 2: // an op out of sequence
+		case 2: // 一个乱序的 op
 			fmt.Fprint(w, "event: snapshot\ndata: {\"seq\":0,\"view\":{\"conversation\":{\"id\":1},\"n\":3}}\n\n")
 			fmt.Fprint(w, "event: ops\ndata: {\"seq\":2,\"ops\":[[\"s\",[\"n\"],99]]}\n\n")
-		case 3: // the service shuts the watch down
+		case 3: // 服务把 watch 关掉了
 			fmt.Fprint(w, "event: snapshot\ndata: {\"seq\":0,\"view\":{\"conversation\":{\"id\":1},\"n\":4}}\n\n")
 			fmt.Fprint(w, "event: end\ndata: {\"kind\":\"ended\"}\n\n")
 		default:
-			w.WriteHeader(http.StatusNotFound) // the conversation is gone: Follow stops
+			w.WriteHeader(http.StatusNotFound) // 会话已经没了：Follow 会停下
 		}
 		flush()
 	})
@@ -297,7 +296,7 @@ func TestFollowStopsWithItsContext(t *testing.T) {
 	srv := sseServer(t, func(_ int, w http.ResponseWriter, flush func(), gone <-chan struct{}) {
 		fmt.Fprint(w, "event: snapshot\ndata: {\"seq\":0,\"view\":{}}\n\n")
 		flush()
-		<-gone // never sends again: the client's context must end the request
+		<-gone // 之后再不发东西：必须靠客户端的 context 结束请求
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	err := Follow(ctx, &Client{Base: srv.URL}, "root", FollowHandler{OnState: func(State) { cancel() }})

@@ -7,20 +7,20 @@ import (
 	"strings"
 )
 
-// ErrSequence means an ops event did not follow the replica's seq: resubscribe for a fresh snapshot.
+// ErrSequence 表示某个 ops 事件没有接上 replica 的 seq：需要重新订阅以拿一份新的 snapshot。
 var ErrSequence = errors.New("ops out of sequence")
 
-// Replica is the client copy of one conversation's ConversationView, built from a snapshot and its ops. It is not
-// safe for concurrent use: keep it on one goroutine and hand out State values.
+// Replica 是一个会话 ConversationView 的客户端副本，由 snapshot 及其后的一串 ops 构建出来。它不是并发安全的：
+// 只在同一个 goroutine 上使用它，对外交出 State 值。
 type Replica struct {
-	// Tree is the view as decoded JSON; nil before the first snapshot.
+	// Tree 是解码成 JSON 的视图；在第一个 snapshot 之前为 nil。
 	Tree any
-	// Seq is the seq of the last event applied.
+	// Seq 是最后一个已应用事件的 seq。
 	Seq int
 }
 
-// Apply folds one event in. A snapshot replaces the replica; ops must follow in sequence (ErrSequence otherwise).
-// After an error the replica is unusable until the next snapshot.
+// Apply 折入一个事件。snapshot 会替换整个副本；ops 必须按顺序跟上（否则返回 ErrSequence）。出错之后副本不可
+// 用，直到下一个 snapshot。
 func (r *Replica) Apply(ev Event) error {
 	switch ev.Name {
 	case "snapshot":
@@ -39,35 +39,34 @@ func (r *Replica) Apply(ev Event) error {
 	return nil
 }
 
-// Message is one row of the chat.
+// Message 是聊天里的一行。
 type Message struct {
-	// Key identifies the row across updates; a streaming reply keeps its key ("g<generation task id>") when its
-	// committed entry replaces it.
+	// Key 在多次更新之间标识这一行；流式回复在它对应的已提交 entry 接替它时沿用同一个 key（"g<generation task id>"）。
 	Key  string
-	Role string // "user", "assistant" or "tool"
+	Role string // "user"、"assistant" 或 "tool"
 	Text string
-	// Done is false while the row streams: a partial reply or a running tool.
+	// Done 在行仍在流式变化时为 false：即部分回复或正在运行的 tool。
 	Done bool
 }
 
-// State is what the chat view shows of a replica: immutable, safe to hand to the UI thread.
+// State 是聊天视图会从 replica 读取的内容：不可变，可以安全地交给 UI 线程。
 type State struct {
 	Conversation int
 	Seq          int
 	Messages     []Message
-	// Busy while a run is in progress (pi.live.run).
+	// Busy 表示有运行正在进行（pi.live.run）。
 	Busy bool
-	// Failure says why the newest run ended without an answer (pi.live.runFailure): "reason" or "reason: detail".
+	// Failure 说明最新一次运行为何没有答案就结束了（pi.live.runFailure）："reason" 或 "reason: detail"。
 	Failure string
-	// Queued counts inputs waiting in pi.inbox.
+	// Queued 是 pi.inbox 中排队的输入数。
 	Queued int
-	// Model is the conversation's stored model (pi.agent.model); nil until it has one (the service then picks
-	// the default model at the first submit). ThinkingLevel is the stored level, "" when unset.
+	// Model 是会话保存的模型（pi.agent.model）；还没有时为 nil（此时服务会在第一次 submit 时选默认模型）。
+	// ThinkingLevel 是保存的级别，未设置时为 ""。
 	Model         *ModelRef
 	ThinkingLevel string
 }
 
-// State derives the chat rows and run status.
+// State 从副本推导出聊天行与运行状态。
 func (r *Replica) State() State {
 	live := field(r.Tree, "docs", "pi.live")
 	st := State{Seq: r.Seq, Messages: r.messages(), Busy: field(live, "run") != nil}
@@ -103,7 +102,7 @@ func field(node any, path ...string) any {
 	return node
 }
 
-// contentText joins the text of a pi-ai message content (a string, or blocks).
+// contentText 把 pi-ai 消息内容的文本拼起来（内容是字符串，或是一组 block）。
 func contentText(content any) string {
 	if s, ok := content.(string); ok {
 		return s
@@ -131,12 +130,12 @@ func toolCalls(content any) []string {
 	return calls
 }
 
-// messages derives chat rows: committed entries, then the live tool slots and the streaming reply.
+// messages 推导出聊天行：已提交的 entry，然后是正在运行的 tool 槽位和流式回复。
 func (r *Replica) messages() []Message {
 	var out []Message
-	// A reply streams in pi.live.generation while pi.live.run.taskId names its generation task; the pi.assistant
-	// entry it commits carries that id as byTaskId. Keying both by it keeps one list row (and the markdown view's
-	// state) across the switch from streaming to committed, however the entry window slides.
+	// 回复在 pi.live.generation 里流式生成，同时 pi.live.run.taskId 指明它的 generation task；它最终提交的
+	// pi.assistant entry 会把那个 id 记在 byTaskId 上。两边都用它做 key，就能让同一行列表（以及 markdown 视图
+	// 的状态）在从流式切到已提交时保持不变，不管 entry 窗口怎么滑动。
 	entries, _ := field(r.Tree, "entries").([]any)
 	for _, entry := range entries {
 		models, _ := field(entry, "model").([]any)

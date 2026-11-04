@@ -7,5 +7,5 @@ import (
 	"syscall"
 )
 
-// terminate asks the service to stop with SIGTERM.
+// terminate 用 SIGTERM 请服务停止。
 func terminate(p *os.Process) error { return p.Signal(syscall.SIGTERM) }

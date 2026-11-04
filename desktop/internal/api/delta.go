@@ -6,11 +6,10 @@ import (
 	"unicode/utf16"
 )
 
-// ApplyOps applies Chord delta ops (chord/delta Op: r s d a t p m) to a decoded JSON tree and
-// returns the new root. Containers are mutated in place; the root changes only for "r".
-// Semantics mirror chord's applyImmutableTrusted; "t" drops the first n UTF-16 code units,
-// as JavaScript's String.prototype.slice does. A malformed op is an error, never a panic; the tree may then be
-// partly changed, so the caller must resubscribe.
+// ApplyOps 把 Chord delta ops（chord/delta 的 Op：r s d a t p m）应用到一个已解码的 JSON 树上，并返回新的
+// 根。容器都是就地修改；只有 "r" 会换掉根。语义与 chord 的 applyImmutableTrusted 保持一致；"t" 按 JavaScript
+// 的 String.prototype.slice 那样，丢掉开头 n 个 UTF-16 code unit。畸形的 op 会返回错误，绝不 panic；但此时树
+// 可能已被部分修改，所以调用方必须重新订阅。
 func ApplyOps(root any, ops []json.RawMessage) (result any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -122,8 +121,8 @@ func getChild(node any, seg any) any {
 	return nil
 }
 
-// setChild sets parent[key] = value; a slice set at its length appends, which needs the slice
-// replaced in its own parent.
+// setChild 设置 parent[key] = value；在下标等于长度处设置 slice 相当于追加，这时需要在它自己的父节点里替换
+// 这个 slice。
 func setChild(root any, path []any, parent any, key any, value any) (any, error) {
 	switch p := parent.(type) {
 	case map[string]any:
@@ -140,7 +139,7 @@ func setChild(root any, path []any, parent any, key any, value any) (any, error)
 	return root, fmt.Errorf("set %v: parent is %T", path, parent)
 }
 
-// replaceAt puts value at path (a slice that grew or shrank needs its parent updated).
+// replaceAt 把 value 放到 path 处（变长或变短的 slice 需要更新它的父节点）。
 func replaceAt(root any, path []any, value any) (any, error) {
 	if len(path) == 0 {
 		return value, nil

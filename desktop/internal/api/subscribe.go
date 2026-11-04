@@ -13,29 +13,29 @@ import (
 	"time"
 )
 
-// Event is one event of GET /v1/conversations/:id/subscribe.
+// Event 是 GET /v1/conversations/:id/subscribe 中的一个事件。
 type Event struct {
-	// Name is "snapshot", "ops" or "end".
+	// Name 是 "snapshot"、"ops" 或 "end"。
 	Name string `json:"-"`
-	// Seq is 0 for the snapshot, then 1, 2, … for ops.
+	// Seq 对 snapshot 为 0，之后每个 ops 依次为 1、2、……
 	Seq int `json:"seq"`
-	// View is the snapshot's ConversationView, decoded as JSON (maps, slices, float64, string, bool, nil).
+	// View 是 snapshot 的 ConversationView，已解码成 JSON（map、slice、float64、string、bool、nil）。
 	View any `json:"view"`
-	// Ops are the Chord delta ops of an ops event.
+	// Ops 是 ops 事件里的 Chord delta ops。
 	Ops []json.RawMessage `json:"ops"`
-	// Kind is why an end event's watch ended: stopped, aborted, ended, listener_error or failed.
+	// Kind 是 end 事件中 watch 结束的原因：stopped、aborted、ended、listener_error 或 failed。
 	Kind string `json:"kind"`
 }
 
-// ErrEnded is returned by Subscribe when the service ended the stream with an end event.
+// ErrEnded 在服务用 end 事件结束流时由 Subscribe 返回。
 var ErrEnded = errors.New("subscription ended by the service")
 
-// ErrIdle is returned by Subscribe when nothing arrived for IdleTimeout: the connection is presumed dead.
+// ErrIdle 在 IdleTimeout 内什么都没收到时由 Subscribe 返回：可以认为连接已经死了。
 var ErrIdle = errors.New("subscription idle: no data or heartbeat")
 
-// Subscribe streams the events of conversation conv ("root" or a numeric id) to onEvent until ctx ends, the stream
-// breaks, or onEvent returns an error. It never returns nil: ctx.Err(), ErrEnded, ErrIdle, an *Error (404 for an
-// unknown conversation), a transport error, or onEvent's error.
+// Subscribe 把会话 conv（"root" 或数字 id）的事件流式送给 onEvent，直到 ctx 结束、流断开，或 onEvent 返回错误。
+// 它永远不会返回 nil：可能是 ctx.Err()、ErrEnded、ErrIdle、*Error（会话未知时为 404）、传输层错误，或
+// onEvent 返回的错误。
 func (c *Client) Subscribe(ctx context.Context, conv string, onEvent func(Event) error) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -71,7 +71,7 @@ func (c *Client) Subscribe(ctx context.Context, conv string, onEvent func(Event)
 	return orCause(ctx, err)
 }
 
-// orCause prefers the cancellation cause (ErrIdle, the caller's ctx.Err()) over the transport error it caused.
+// orCause 优先返回取消原因（ErrIdle、调用方的 ctx.Err()），而不是它引发的传输层错误。
 func orCause(ctx context.Context, err error) error {
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
@@ -79,7 +79,7 @@ func orCause(ctx context.Context, err error) error {
 	return err
 }
 
-// idleReader restarts the idle watchdog whenever bytes arrive, heartbeat comments included.
+// idleReader 每收到一些字节就重置空闲看门狗，心跳注释也算。
 type idleReader struct {
 	r     io.Reader
 	timer *time.Timer
@@ -94,8 +94,8 @@ func (r *idleReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// ReadSSE parses a text/event-stream of `event:` and `data:` lines; comment lines (`:` heartbeats) and `id:` are
-// skipped. It returns nil at EOF, or the first error of onEvent or of decoding.
+// ReadSSE 解析由 `event:` 和 `data:` 行组成的 text/event-stream；注释行（`:` 心跳）和 `id:` 会被跳过。到
+// EOF 时返回 nil；否则返回 onEvent 或解码的第一个错误。
 func ReadSSE(r io.Reader, onEvent func(Event) error) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64<<10), 64<<20)

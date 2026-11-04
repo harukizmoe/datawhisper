@@ -1,14 +1,13 @@
-// Package supervisor runs the agent service (server/, Bun) as a child process of the desktop app.
+// Package supervisor 把 agent 服务（server/，Bun）作为桌面应用的子进程运行。
 //
-// Process contract (server/src/main.ts):
-//   - environment: DW_TOKEN (bearer token, generated here), DW_PORT=0, DW_DATA_DIR, and DW_PYTHON / DW_COMPUTE_CWD
-//     when configured;
-//   - ready: a stdout line {"type":"ready","port":N,"pid":N}; every other stdout and stderr line is a log line;
-//   - stop: close the child's stdin (the service exits at EOF), then SIGTERM, then kill. Windows has no SIGTERM, so
-//     closing stdin is the stop path there;
-//   - an exit while running is a crash (exit code 1: storage failure); the service resumes interrupted work when
-//     restarted, so the supervisor restarts it with exponential backoff, and gives up (StateFailed) after
-//     CrashLimit crashes within CrashWindow.
+// 进程约定（server/src/main.ts）：
+//   - 环境变量：DW_TOKEN（bearer token，在这里生成）、DW_PORT=0、DW_DATA_DIR，以及配置了时的 DW_PYTHON /
+//     DW_COMPUTE_CWD；
+//   - ready：stdout 上的一行 {"type":"ready","port":N,"pid":N}；其余 stdout 和 stderr 的每一行都是日志；
+//   - stop：关闭子进程的 stdin（服务在 EOF 时退出），然后 SIGTERM，最后 kill。Windows 没有 SIGTERM，所以在那里
+//     关闭 stdin 就是停止路径；
+//   - 运行期间退出即崩溃（退出码 1：存储故障）；服务重启后会继续被中断的工作，所以 supervisor 用指数退避重启
+//     它，并在 CrashWindow 内崩溃达到 CrashLimit 次后放弃（StateFailed）。
 package supervisor
 
 import (
@@ -27,19 +26,19 @@ import (
 	"time"
 )
 
-// State is the supervisor's view of the service.
+// State 是 supervisor 眼中的服务状态。
 type State int
 
 const (
-	// StateStopped: not started yet, or stopped by Stop.
+	// StateStopped：还没启动，或已被 Stop 停掉。
 	StateStopped State = iota
-	// StateStarting: the first start, waiting for the ready line.
+	// StateStarting：第一次启动，正在等 ready 行。
 	StateStarting
-	// StateReady: the service listens on Status.Port.
+	// StateReady：服务在 Status.Port 上监听。
 	StateReady
-	// StateRestarting: the service exited or failed to start; waiting out the backoff or for the ready line.
+	// StateRestarting：服务退出了或启动失败；正在等退避结束或等 ready 行。
 	StateRestarting
-	// StateFailed: too many crashes in CrashWindow; Retry starts again.
+	// StateFailed：CrashWindow 内崩溃太多次；Retry 会重新开始。
 	StateFailed
 )
 
@@ -59,49 +58,48 @@ func (s State) String() string {
 	return fmt.Sprintf("State(%d)", int(s))
 }
 
-// Status is one state change.
+// Status 是一次状态变化。
 type Status struct {
 	State State
-	// Port and PID of the ready service (StateReady only).
+	// ready 状态服务的 Port 与 PID（仅 StateReady）。
 	Port int
 	PID  int
-	// Err is why the service is restarting or failed: its exit, a start failure, a missed ready deadline.
+	// Err 说明服务为何在重启或为何失败：它的退出、启动失败、ready 超时。
 	Err error
-	// Crashes counts crashes within CrashWindow.
+	// Crashes 是 CrashWindow 内的崩溃次数。
 	Crashes int
 }
 
-// Config describes how to run the service.
+// Config 描述如何运行服务。
 type Config struct {
-	// Command and its arguments: a compiled service binary, or {"bun", "run", ".../server/src/main.ts"} in development.
+	// Command 及其参数：编译好的服务可执行文件，或开发时的 {"bun", "run", ".../server/src/main.ts"}。
 	Command []string
-	// Dir is the working directory of the service; empty: the app's.
+	// Dir 是服务的工作目录；为空表示用应用的。
 	Dir string
-	// DataDir is DW_DATA_DIR; the log file goes to <DataDir>/logs/service.log.
+	// DataDir 是 DW_DATA_DIR；日志文件写到 <DataDir>/logs/service.log。
 	DataDir string
-	// Python and ComputeCwd become DW_PYTHON and DW_COMPUTE_CWD when set.
+	// Python 和 ComputeCwd 在设置时会成为 DW_PYTHON 和 DW_COMPUTE_CWD。
 	Python     string
 	ComputeCwd string
-	// Env adds variables to the app's environment ("KEY=value").
+	// Env 在应用的环境中追加变量（"KEY=value"）。
 	Env []string
 
-	// ReadyTimeout bounds the wait for the ready line. Default 30 s.
+	// ReadyTimeout 限制等待 ready 行的时长。默认 30 s。
 	ReadyTimeout time.Duration
-	// StopTimeout bounds the wait after closing stdin, and again after SIGTERM, before the next step. Default 10 s.
+	// StopTimeout 限制关闭 stdin 之后的等待，以及之后 SIGTERM 的等待，超过就进入下一步。默认 10 s。
 	StopTimeout time.Duration
-	// BackoffInitial doubles with each crash in the window, up to BackoffMax. Defaults 500 ms and 15 s.
+	// BackoffInitial 每在窗口内多一次崩溃就翻倍，直到 BackoffMax。默认 500 ms 和 15 s。
 	BackoffInitial time.Duration
 	BackoffMax     time.Duration
-	// CrashLimit crashes within CrashWindow end in StateFailed. Defaults 5 and 2 minutes.
+	// CrashWindow 内崩溃达到 CrashLimit 次就进入 StateFailed。默认 5 次和 2 分钟。
 	CrashLimit  int
 	CrashWindow time.Duration
 
-	// OnState receives every state change, in order, from the supervisor's goroutine. It must not block for long
-	// nor call Stop.
+	// OnState 按顺序收到每一次状态变化，回调在 supervisor 的 goroutine 上。它不能长时间阻塞，也不能调用 Stop。
 	OnState func(Status)
 }
 
-// Supervisor starts, watches, restarts and stops one service process.
+// Supervisor 负责启动、监视、重启并停止一个服务进程。
 type Supervisor struct {
 	cfg     Config
 	token   string
@@ -109,18 +107,18 @@ type Supervisor struct {
 
 	mu      sync.Mutex
 	status  Status
-	running bool          // the loop goroutine runs
-	stop    chan struct{} // closed by Stop
-	done    chan struct{} // closed when the loop returns
-	retry   chan struct{} // a Retry while failed
-	crashes []time.Time   // crash times within the window; the loop goroutine's
-	notify  sync.Mutex    // serializes OnState calls
+	running bool          // loop goroutine 正在运行
+	stop    chan struct{} // 由 Stop 关闭
+	done    chan struct{} // loop 返回时关闭
+	retry   chan struct{} // 处于 failed 时的一次 Retry
+	crashes []time.Time   // 窗口内的崩溃时间；只在 loop goroutine 里改
+	notify  sync.Mutex    // 串行化 OnState 调用
 
-	now   func() time.Time    // the crash window's clock
-	sleep func(time.Duration) // tests: replaces the backoff wait when set
+	now   func() time.Time    // 崩溃窗口用的时钟
+	sleep func(time.Duration) // 测试用：设置后替换退避等待
 }
 
-// New checks cfg, fills its defaults, and generates the token. It starts nothing.
+// New 校验 cfg、填入默认值并生成 token。它不启动任何东西。
 func New(cfg Config) (*Supervisor, error) {
 	if len(cfg.Command) == 0 {
 		return nil, errors.New("supervisor: no command")
@@ -154,7 +152,7 @@ func setDefault(d *time.Duration, v time.Duration) {
 	}
 }
 
-// newToken returns 32 random bytes, base64url without padding (43 characters).
+// newToken 返回 32 个随机字节，base64url 无填充（43 个字符）。
 func newToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -163,20 +161,20 @@ func newToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// Token is the bearer token of every /v1 request, and the ?token= of web-view assets.
+// Token 是每个 /v1 请求用的 bearer token，也用作 web-view 资源的 ?token=。
 func (s *Supervisor) Token() string { return s.token }
 
-// LogPath is the file the service's output goes to.
+// LogPath 是服务输出写入的文件。
 func (s *Supervisor) LogPath() string { return s.logPath }
 
-// Status is the latest state.
+// Status 是最近一次状态。
 func (s *Supervisor) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.status
 }
 
-// Start runs the service in the background. It is a no-op while running.
+// Start 在后台运行服务。已在运行时什么也不做。
 func (s *Supervisor) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,7 +189,7 @@ func (s *Supervisor) Start() {
 	go s.loop(s.stop, s.done, s.retry)
 }
 
-// Retry starts again after StateFailed, with the crash count reset. A no-op in other states.
+// Retry 在 StateFailed 之后重新开始，并重置崩溃计数。其他状态下什么也不做。
 func (s *Supervisor) Retry() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -203,7 +201,7 @@ func (s *Supervisor) Retry() {
 	}
 }
 
-// Stop stops the service (stdin close, SIGTERM, kill) and waits for the supervisor to end, or for ctx.
+// Stop 停止服务（关闭 stdin、SIGTERM、kill），并等待 supervisor 结束，或等到 ctx。
 func (s *Supervisor) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	if !s.running {
@@ -236,7 +234,7 @@ func (s *Supervisor) setState(st Status) {
 	}
 }
 
-// loop starts the service, waits for it to end, and restarts it until Stop.
+// loop 启动服务，等它结束，然后重启，直到 Stop。
 func (s *Supervisor) loop(stop, done chan struct{}, retry chan struct{}) {
 	defer func() {
 		s.mu.Lock()
@@ -253,7 +251,7 @@ func (s *Supervisor) loop(stop, done chan struct{}, retry chan struct{}) {
 	}
 	defer log.Close()
 
-	starting := true // a restart announced StateRestarting before its backoff
+	starting := true // 一次重启在退避之前已经上报过 StateRestarting
 	for {
 		if starting {
 			s.setState(Status{State: StateStarting})
@@ -295,7 +293,7 @@ func (s *Supervisor) loop(stop, done chan struct{}, retry chan struct{}) {
 	}
 }
 
-// recordCrash adds a crash now and returns the crashes within the window.
+// recordCrash 记下此刻的一次崩溃，并返回窗口内的崩溃次数。
 func (s *Supervisor) recordCrash() int {
 	now := s.now()
 	kept := s.crashes[:0]
@@ -308,7 +306,7 @@ func (s *Supervisor) recordCrash() int {
 	return len(s.crashes)
 }
 
-// backoff is BackoffInitial doubled for each earlier crash in the window, at most BackoffMax.
+// backoff 是 BackoffInitial 按窗口内更早的崩溃次数翻倍，最多 BackoffMax。
 func (s *Supervisor) backoff(crashes int) time.Duration {
 	d := s.cfg.BackoffInitial
 	for i := 1; i < crashes && d < s.cfg.BackoffMax; i++ {
@@ -317,7 +315,7 @@ func (s *Supervisor) backoff(crashes int) time.Duration {
 	return min(d, s.cfg.BackoffMax)
 }
 
-// wait sleeps d unless stopped first; it reports whether to go on.
+// wait 睡 d，除非先被停止；它报告是否继续。
 func (s *Supervisor) wait(d time.Duration, stop chan struct{}) bool {
 	if s.sleep != nil {
 		s.sleep(d)
@@ -338,14 +336,14 @@ func (s *Supervisor) wait(d time.Duration, stop chan struct{}) bool {
 	}
 }
 
-// run is one started child.
+// run 是一个已启动的子进程。
 type run struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	port   int
 	pid    int
-	exited chan struct{} // closed once Wait returned and the output was drained
-	err    error         // Wait's error, set before exited closes
+	exited chan struct{} // Wait 返回且输出已排空后关闭
+	err    error         // Wait 的错误，在 exited 关闭前设置
 }
 
 func (r *run) exitErr() error {
@@ -361,7 +359,7 @@ type readyLine struct {
 	PID  int    `json:"pid"`
 }
 
-// launch starts the child and waits for its ready line. Output lines before it go to the log too.
+// launch 启动子进程并等它的 ready 行。在此之前出现的输出行也会写进日志。
 func (s *Supervisor) launch(log io.Writer, stop chan struct{}) (*run, error) {
 	cmd := exec.Command(s.cfg.Command[0], s.cfg.Command[1:]...)
 	cmd.Dir = s.cfg.Dir
@@ -420,7 +418,7 @@ func (s *Supervisor) launch(log io.Writer, stop chan struct{}) (*run, error) {
 		}
 	}()
 	go func() {
-		output.Wait() // Wait closes the pipes: drain them first
+		output.Wait() // Wait 会关掉管道：先把它们排空
 		r.err = cmd.Wait()
 		close(r.exited)
 	}()
@@ -453,7 +451,7 @@ func errOrExit(err error) error {
 	return err
 }
 
-// shutdown closes stdin, then sends SIGTERM (not on Windows), then kills, each step after StopTimeout.
+// shutdown 先关闭 stdin，再发 SIGTERM（Windows 上没有），最后 kill，每一步都等 StopTimeout。
 func (s *Supervisor) shutdown(r *run, log io.Writer) {
 	_ = r.stdin.Close()
 	if s.waitExit(r) {
@@ -482,10 +480,10 @@ func (s *Supervisor) waitExit(r *run) bool {
 
 func stamp() string { return time.Now().Format("2006-01-02T15:04:05.000") }
 
-// logLimit: a log above it at open is kept as service.log.1 and a new one started.
+// logLimit：打开时日志超过它就把它留作 service.log.1，另开一个新的。
 const logLimit = 8 << 20
 
-// openLog opens the log file for appending; a log grown past logLimit is rotated once.
+// openLog 以追加方式打开日志文件；超过 logLimit 的日志会被轮转一次。
 func openLog(path string) (*syncWriter, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("log dir: %w", err)
@@ -500,7 +498,7 @@ func openLog(path string) (*syncWriter, error) {
 	return &syncWriter{f: f}, nil
 }
 
-// syncWriter serializes the writes of the output goroutines.
+// syncWriter 把各输出 goroutine 的写入串行化。
 type syncWriter struct {
 	mu sync.Mutex
 	f  *os.File

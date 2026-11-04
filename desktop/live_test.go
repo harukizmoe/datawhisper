@@ -2,9 +2,9 @@
 
 package main
 
-// Live tests: the real agent service (server/test/support/stub-service.ts: the service with an in-process stub model
-// as its only provider) under the real supervisor. They need bun and the server's dependencies (cd server && bun
-// install), and skip without them. Not on Windows: they kill the service with SIGKILL.
+// Live 测试：在真正的 supervisor 下跑真正的 agent 服务（server/test/support/stub-service.ts：该服务只带一个
+// 进程内 stub 模型作为提供方）。它们需要 bun 以及服务的依赖（cd server && bun install），缺了就跳过。不在
+// Windows 上跑：它们用 SIGKILL 杀服务。
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// stubService returns the command running the service with the stub model.
+// stubService 返回用 stub 模型运行该服务的命令。
 func stubService(t *testing.T) []string {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
@@ -40,13 +40,13 @@ func stubService(t *testing.T) []string {
 	return []string{bun, "run", filepath.Join(root, "server", "test", "support", "stub-service.ts")}
 }
 
-// startSupervised starts the stub service under a supervisor reporting to onState, and stops it after the test.
+// startSupervised 在 supervisor 下启动 stub 服务，状态变化上报给 onState，测试结束后把它停掉。
 func startSupervised(t *testing.T, onState func(supervisor.Status)) *supervisor.Supervisor {
 	t.Helper()
 	sup, err := supervisor.New(supervisor.Config{
 		Command: stubService(t),
 		DataDir: t.TempDir(),
-		// About 25 chunks of 20 ms: the reply streams for 500 ms, past pi-durable's 100 ms partial commits.
+		// 约 25 个 20 ms 的 chunk：回复会流式输出 500 ms，超过 pi-durable 的 100 ms partial 提交间隔。
 		Env:     []string{"STUB_CHUNK_MS=20"},
 		OnState: onState,
 	})
@@ -64,7 +64,7 @@ func startSupervised(t *testing.T, onState func(supervisor.Status)) *supervisor.
 	return sup
 }
 
-// next returns the next state in want from states; the one-minute guard only turns a hang into a failure.
+// next 从 states 中返回下一个状态 want；那一分钟的上限只是把卡死变成失败。
 func next(t *testing.T, states <-chan supervisor.Status, want supervisor.State) supervisor.Status {
 	t.Helper()
 	guard := time.NewTimer(time.Minute)
@@ -105,8 +105,8 @@ type errorString string
 
 func (e errorString) Error() string { return string(e) }
 
-// TestLiveReplicaMatchesTheService replicates a conversation from its snapshot and ops while a reply streams, and
-// checks a fresh snapshot equals the replica, also after the service was killed and restarted on the same data.
+// TestLiveReplicaMatchesTheService 在回复流式输出期间，用 snapshot 和 ops 复制一个会话，并检查新取的 snapshot
+// 与副本一致；在服务被杀掉、并用同一份数据重启之后也一样。
 func TestLiveReplicaMatchesTheService(t *testing.T) {
 	states := make(chan supervisor.Status, 64)
 	sup := startSupervised(t, func(st supervisor.Status) { states <- st })
@@ -179,9 +179,8 @@ func TestLiveReplicaMatchesTheService(t *testing.T) {
 	t.Logf("%d ops events; replica == snapshot (%d bytes), before and after a SIGKILL restart (%v)", opsEvents, len(want), restarting.Err)
 }
 
-// TestLiveAppSurvivesAServiceKill drives the app's view against the real service: a new chat's message streams a
-// reply in; killing the service shows the restart banner, and the app reconnects to the restarted service with the
-// same conversation, which keeps working.
+// TestLiveAppSurvivesAServiceKill 让 app 的视图跑在真正的服务上：新对话的消息会流式收到回复；杀掉服务会显示重启
+// 横幅，而 app 会连上重启后的服务，还是同一个会话，并且继续可用。
 func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 	q := newQueue()
 	a := newTestApp(t, q)
@@ -207,7 +206,7 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 		if a.sendErr != "" {
 			t.Errorf("send %q: %s", text, a.sendErr)
 		}
-		tt.Advance(2 * time.Second) // the reply's reveal animation runs on the tester's clock
+		tt.Advance(2 * time.Second) // 回复的浮现动画跑在 tester 的时钟上
 	}
 	sendAndWait("Summarize the data", 2)
 	expectTexts(t, tt, []string{"Summarize the data", "Hello", "streamed", "metric", "custom-stub/stub-chat", "Chat " + strconv.Itoa(a.conv)}, nil)

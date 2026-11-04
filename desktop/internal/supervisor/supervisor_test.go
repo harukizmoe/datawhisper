@@ -17,7 +17,7 @@ import (
 
 var fakeBin string
 
-// TestMain builds testdata/fakeservice once for every test.
+// TestMain 为所有测试构建一次 testdata/fakeservice。
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "dw-fakeservice-")
 	if err != nil {
@@ -37,8 +37,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// recorder collects state changes; wait blocks until one matches. Its one-minute guard only turns a hang into a
-// failure: every wait is for an event the supervisor produces.
+// recorder 收集状态变化；wait 会阻塞到某个状态匹配为止。它那一分钟的上限只是把卡死变成失败：每次等待都在
+// 等 supervisor 真正会产出的事件。
 type recorder struct {
 	mu     sync.Mutex
 	states []Status
@@ -58,7 +58,7 @@ func (r *recorder) on(st Status) {
 	r.cond.Broadcast()
 }
 
-// wait returns the first state at index >= from in want, and its index.
+// wait 返回下标 >= from 的第一个状态为 want 的记录及其下标。
 func (r *recorder) wait(t *testing.T, from int, want State) (Status, int) {
 	t.Helper()
 	timer := time.AfterFunc(time.Minute, r.cond.Broadcast)
@@ -121,7 +121,7 @@ func start(t *testing.T, env []string, tune func(*Config)) *fixture {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
-	sup.sleep = func(d time.Duration) { // record the backoff instead of waiting it out
+	sup.sleep = func(d time.Duration) { // 记录退避值，而不是真的等它
 		mu.Lock()
 		f.delays = append(f.delays, d)
 		mu.Unlock()
@@ -277,7 +277,7 @@ func TestCrashLimitFailsThenRetry(t *testing.T) {
 	if starting.Crashes != 0 {
 		t.Errorf("retry kept %d crashes", starting.Crashes)
 	}
-	f.rec.wait(t, j, StateReady) // the fourth start succeeds
+	f.rec.wait(t, j, StateReady) // 第四次启动成功
 }
 
 func TestStopFallsBackToSigtermThenKill(t *testing.T) {

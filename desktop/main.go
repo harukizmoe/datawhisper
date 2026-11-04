@@ -1,9 +1,9 @@
-// Command desktop is the DataWhisper desktop app: a MyGo native window over the agent service (server/), which it
-// starts as a child process, restarts when it dies, and stops when the app quits.
+// Command desktop 是 DataWhisper 桌面应用：在 agent 服务（server/）之上开一个 MyGo 原生窗口。它把该服务作为
+// 子进程启动，服务挂掉时重启它，应用退出时停止它。
 //
-//	go run .                                   # development: bun run server/src/main.ts, found above the cwd
-//	go run . -service /opt/dw/datawhisper-server   # a compiled service (bun build --compile)
-//	go run . -data-dir /tmp/dw -capture /tmp/dw/frames   # also write a PNG of the window at each service state
+//	go run .                                   # 开发模式：bun run server/src/main.ts，从当前工作目录向上查找
+//	go run . -service /opt/dw/datawhisper-server   # 已编译的服务（bun build --compile）
+//	go run . -data-dir /tmp/dw -capture /tmp/dw/frames   # 另外在每种服务状态各存一张窗口 PNG
 package main
 
 import (
@@ -85,7 +85,7 @@ func main() {
 	}
 }
 
-// newSupervisor configures the agent service's supervisor, reporting its states to a.
+// newSupervisor 配置 agent 服务的 supervisor，并把它的状态上报给 a。
 func newSupervisor(service, bun, dataDir, python, computeCwd string, a *app) (*supervisor.Supervisor, error) {
 	command, err := serviceCommand(service, bun)
 	if err != nil {
@@ -116,8 +116,8 @@ func newSupervisor(service, bun, dataDir, python, computeCwd string, a *app) (*s
 	return sup, nil
 }
 
-// serviceCommand runs service: a .ts entry with bun, anything else as an executable. An empty service is the
-// development entry, server/src/main.ts in or above the working directory.
+// serviceCommand 返回运行 service 的命令：.ts 入口交给 bun 跑，其他路径当作可执行文件。service 为空表示开发
+// 入口，即工作目录或其上级目录里的 server/src/main.ts。
 func serviceCommand(service, bun string) ([]string, error) {
 	if service == "" {
 		dir, err := os.Getwd()
@@ -147,7 +147,7 @@ func serviceCommand(service, bun string) ([]string, error) {
 	return []string{path}, nil
 }
 
-// logState logs a state change; the token never appears in it.
+// logState 记录一次状态变化；日志里永远不会出现 token。
 func logState(st supervisor.Status) {
 	switch st.State {
 	case supervisor.StateReady:
@@ -159,19 +159,19 @@ func logState(st supervisor.Status) {
 	}
 }
 
-// capture is set by -capture.
+// capture 由 -capture 设置。
 var capture *capturer
 
-// capturer writes the window as it shows each service state. Window.CapturePage pictures the last frame built, and
-// a frame waits for the compositor's frame callback, so the capturer first waits until the view was built after the
-// state change; a ready window is taken a moment later, once the conversation list is in.
+// capturer 在窗口显示每种服务状态时把它保存成图片。Window.CapturePage 拍到的是最后构建出的那一帧，而一帧
+// 要等合成器的 frame callback 才会出现，所以 capturer 先等状态变化之后的那次视图构建完成；对 ready 状态还会
+// 再等一小会儿，等会话列表到位后再拍。
 type capturer struct {
 	win     *mygo.Window
 	dir     string
 	n       int
 	reqs    chan supervisor.State
 	closed  atomic.Bool
-	waiting chan struct{} // closed by the next build of the view; the UI thread's
+	waiting chan struct{} // 由视图的下一次构建关闭；在 UI 线程上
 }
 
 func (cp *capturer) start(win *mygo.Window) {
@@ -182,7 +182,7 @@ func (cp *capturer) start(win *mygo.Window) {
 	go cp.run()
 }
 
-// built is called by the view after each build, on the UI thread.
+// built 由视图在每次构建后调用，运行在 UI 线程上。
 func (cp *capturer) built() {
 	if cp.waiting != nil {
 		close(cp.waiting)
@@ -190,7 +190,7 @@ func (cp *capturer) built() {
 	}
 }
 
-// request asks for a capture of the state change posted before it.
+// request 请求拍下在它之前投递的那次状态变化。
 func (cp *capturer) request(st supervisor.Status) {
 	if cp.closed.Load() {
 		return
@@ -208,7 +208,7 @@ func (cp *capturer) run() {
 		if state == supervisor.StateReady {
 			time.Sleep(800 * time.Millisecond)
 		}
-		// Update runs after the state change it follows and asks for a frame; the build of that frame closes built.
+		// Update 会在它所跟随的状态变化之后运行，并请求重绘一帧；该帧的构建过程会关闭 built。
 		built := make(chan struct{})
 		cp.win.Update(func() { cp.waiting = built })
 		select {

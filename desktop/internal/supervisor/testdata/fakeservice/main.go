@@ -1,14 +1,13 @@
-// fakeservice follows the agent service's process contract for the supervisor tests. FAKE_MODE selects how it
-// misbehaves:
+// fakeservice 遵循 agent 服务的进程约定，供 supervisor 的测试使用。FAKE_MODE 选择它怎么出问题：
 //
-//	ok            print the ready line, serve /v1/health and POST /v1/crash, exit at stdin EOF or SIGTERM
-//	noready       never print the ready line
-//	exit          exit 3 before the ready line
-//	ignore-stdin  as ok, but keep running at stdin EOF (SIGTERM still stops it)
-//	ignore-all    as ok, but ignore stdin EOF and SIGTERM (only a kill stops it)
+//	ok            打印 ready 行，提供 /v1/health 和 POST /v1/crash，在 stdin EOF 或 SIGTERM 时退出
+//	noready       永远不打印 ready 行
+//	exit          在 ready 行之前以 3 退出
+//	ignore-stdin  同 ok，但在 stdin EOF 后继续运行（SIGTERM 仍能停掉它）
+//	ignore-all    同 ok，但忽略 stdin EOF 和 SIGTERM（只有 kill 能停掉它）
 //
-// FAKE_FAIL_STARTS=n makes the first n starts exit 3 before the ready line, counted in the file FAKE_COUNT.
-// FAKE_STOPPED names a file it writes how it was stopped to: "stdin" or "sigterm".
+// FAKE_FAIL_STARTS=n 让前 n 次启动在 ready 行之前以 3 退出，次数记在 FAKE_COUNT 指向的文件里。
+// FAKE_STOPPED 指向它用来记录停止方式的文件："stdin" 或 "sigterm"。
 package main
 
 import (

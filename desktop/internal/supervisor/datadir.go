@@ -6,9 +6,9 @@ import (
 	"runtime"
 )
 
-// DefaultDataDir is the per-user data directory, the same as the service's default (server/src/config.ts):
-// ~/Library/Application Support/DataWhisper on macOS, %APPDATA%\DataWhisper on Windows, and
-// $XDG_DATA_HOME/datawhisper (default ~/.local/share/datawhisper) elsewhere.
+// DefaultDataDir 是每用户的数据目录，与服务的默认值一致（server/src/config.ts）：macOS 上是
+// ~/Library/Application Support/DataWhisper，Windows 上是 %APPDATA%\DataWhisper，其他系统上是
+// $XDG_DATA_HOME/datawhisper（默认为 ~/.local/share/datawhisper）。
 func DefaultDataDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

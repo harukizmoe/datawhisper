@@ -1,5 +1,5 @@
-// Package api is the desktop app's client of the agent service's UI protocol (docs/refactor/ui-protocol.md):
-// typed requests, and conversation subscriptions replicated from a snapshot and Chord delta ops.
+// Package api 是桌面应用访问 agent 服务 UI 协议的客户端（docs/refactor/ui-protocol.md）：带类型的请求，以及
+// 由 snapshot 加 Chord delta ops 复制出来的会话订阅。
 package api
 
 import (
@@ -14,24 +14,23 @@ import (
 	"time"
 )
 
-// Client calls one running service. A restarted service listens on a new port: make a new Client.
+// Client 调用某一个正在运行的服务。重启后的服务会监听新端口：要新建一个 Client。
 type Client struct {
-	// Base is the service's origin, as http://127.0.0.1:PORT.
+	// Base 是服务的 origin，形如 http://127.0.0.1:PORT。
 	Base  string
 	Token string
-	// HTTP defaults to a client without a timeout (subscriptions are long-lived; requests take a context).
+	// HTTP 默认是一个不设超时的 client（订阅是长连接；普通请求靠各自的 context 控制）。
 	HTTP *http.Client
-	// IdleTimeout ends a subscription that received nothing, not even a heartbeat comment (sent every 15 s),
-	// for this long. Default 45 s.
+	// IdleTimeout 结束一个这么久什么都没收到的订阅——连心跳注释（每 15 s 一次）都没有。默认 45 s。
 	IdleTimeout time.Duration
 }
 
-// New returns a client of the service on 127.0.0.1:port.
+// New 返回一个指向 127.0.0.1:port 上服务的客户端。
 func New(port int, token string) *Client {
 	return &Client{Base: fmt.Sprintf("http://127.0.0.1:%d", port), Token: token}
 }
 
-// Error is a non-2xx response; Message is the JSON body's "error" when it has one.
+// Error 表示一个非 2xx 响应；若 JSON body 里有 "error" 字段，Message 就是它。
 type Error struct {
 	Status  int
 	Message string
@@ -40,13 +39,12 @@ type Error struct {
 func (e *Error) Error() string { return fmt.Sprintf("service: %d %s", e.Status, e.Message) }
 
 var (
-	// ErrNotFound matches (errors.Is) an Error with status 404, such as an unknown conversation.
+	// ErrNotFound 匹配（errors.Is）状态码 404 的 Error，例如未知的会话。
 	ErrNotFound = errors.New("not found")
-	// ErrNoModel matches Submit's 409 "no_model": the conversation has no model and none is available. Send the
-	// user to the model settings.
+	// ErrNoModel 匹配 Submit 的 409 "no_model"：会话没有模型，也没有可用模型。应把用户引到模型设置。
 	ErrNoModel = errors.New("no model configured")
-	// ErrModelUnavailable matches Submit's 409 "model_unavailable": the conversation's model belongs to a provider
-	// that was removed or disabled. Send the user to the model settings, or SetModel.
+	// ErrModelUnavailable 匹配 Submit 的 409 "model_unavailable"：会话的模型属于一个已被移除或停用的提供方。
+	// 应把用户引到模型设置，或调用 SetModel。
 	ErrModelUnavailable = errors.New("model unavailable")
 )
 
@@ -62,7 +60,7 @@ func (e *Error) Is(target error) bool {
 	return false
 }
 
-// Health is GET /v1/health.
+// Health 是 GET /v1/health 的结果。
 type Health struct {
 	OK          bool   `json:"ok"`
 	Scheduling  string `json:"scheduling"`
@@ -71,7 +69,7 @@ type Health struct {
 	ComputePID  *int   `json:"computePid"`
 }
 
-// ConversationSummary is one item of GET /v1/conversations.
+// ConversationSummary 是 GET /v1/conversations 中的一项。
 type ConversationSummary struct {
 	ID     int  `json:"id"`
 	Root   bool `json:"root"`
@@ -79,54 +77,53 @@ type ConversationSummary struct {
 		ConversationID int `json:"conversationId"`
 		At             int `json:"at"`
 	} `json:"parent,omitempty"`
-	// LastEntryID is nil while the conversation has no entry.
+	// LastEntryID 在会话还没有 entry 时为 nil。
 	LastEntryID *int `json:"lastEntryId"`
-	// UpdatedAt is the epoch milliseconds of the newest entry's message; nil when it has none.
+	// UpdatedAt 是最新 entry 中消息的 epoch 毫秒；没有消息时为 nil。
 	UpdatedAt *int64 `json:"updatedAt"`
 }
 
-// SubmitRequest is the body of POST /v1/conversations/:id/submit.
+// SubmitRequest 是 POST /v1/conversations/:id/submit 的 body。
 type SubmitRequest struct {
-	// RequestID is the idempotency key: a retry with the same key returns the same submission.
+	// RequestID 是幂等键：用同一个键重试会返回同一个 submission。
 	RequestID string `json:"requestId"`
 	Text      string `json:"text"`
-	// WhenBusy is "steer" (join the running reply) or "followUp" (the default: run next).
+	// WhenBusy 取 "steer"（并入正在进行的回复）或 "followUp"（默认：排在后面执行）。
 	WhenBusy string `json:"whenBusy,omitempty"`
 }
 
-// SubmitResponse reports the submission's id and its pi-durable status: queued, placed, done or unanswered.
+// SubmitResponse 报告 submission 的 id 及其 pi-durable 状态：queued、placed、done 或 unanswered。
 type SubmitResponse struct {
 	SubmissionID int    `json:"submissionId"`
 	Status       string `json:"status"`
 }
 
-// ModelRef names a model: a provider id and that provider's model id (pi-durable ModelRef).
+// ModelRef 指定一个模型：提供方 id 加该提供方下的模型 id（即 pi-durable 的 ModelRef）。
 type ModelRef struct {
 	Provider string `json:"provider"`
 	ModelID  string `json:"modelId"`
 }
 
-// CreateConversationRequest is the optional body of POST /v1/conversations. Without Model the service picks its
-// default model (the /v1/models settings). ThinkingLevel is one of off, minimal, low, medium, high, xhigh, max.
+// CreateConversationRequest 是 POST /v1/conversations 的可选 body。不给 Model 时服务选自己的默认模型（即
+// /v1/models 里的设置）。ThinkingLevel 取 off、minimal、low、medium、high、xhigh、max 之一。
 type CreateConversationRequest struct {
 	Model         *ModelRef `json:"model,omitempty"`
 	ThinkingLevel string    `json:"thinkingLevel,omitempty"`
 }
 
-// SetModelRequest is the body of PUT /v1/conversations/:id/model; a nil ThinkingLevel clears it (the default).
+// SetModelRequest 是 PUT /v1/conversations/:id/model 的 body；ThinkingLevel 为 nil 表示清空（用默认值）。
 type SetModelRequest struct {
 	Model         ModelRef `json:"model"`
 	ThinkingLevel *string  `json:"thinkingLevel"`
 }
 
-// AgentModelResponse is a conversation's resolved model (nil when it has none) and effective thinking level.
+// AgentModelResponse 是会话解析出的模型（没有时为 nil）与生效的 thinking level。
 type AgentModelResponse struct {
 	Model         *ModelRef `json:"model"`
 	ThinkingLevel string    `json:"thinkingLevel"`
 }
 
-// AvailableModel is one item of GET /v1/models/available: a chat model of an enabled provider whose auth is
-// complete.
+// AvailableModel 是 GET /v1/models/available 中的一项：一个已启用、且鉴权信息完整的提供方下的聊天模型。
 type AvailableModel struct {
 	Provider       string   `json:"provider"`
 	ID             string   `json:"id"`
@@ -138,14 +135,14 @@ type AvailableModel struct {
 	ThinkingLevels []string `json:"thinkingLevels"`
 }
 
-// Health reports whether the service answers and what it runs.
+// Health 报告服务能否应答，以及它在跑什么。
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	var out Health
 	err := c.do(ctx, http.MethodGet, "/v1/health", nil, &out)
 	return out, err
 }
 
-// Conversations lists the ownerless conversations, newest first.
+// Conversations 列出无属主的会话，最新的在前。
 func (c *Client) Conversations(ctx context.Context) ([]ConversationSummary, error) {
 	var out struct {
 		Conversations []ConversationSummary `json:"conversations"`
@@ -154,8 +151,8 @@ func (c *Client) Conversations(ctx context.Context) ([]ConversationSummary, erro
 	return out.Conversations, err
 }
 
-// CreateConversation creates an empty conversation and returns its id; the zero request uses the default model.
-// An unknown model or an unsupported thinking level is a 400 *Error.
+// CreateConversation 创建一个空会话并返回其 id；零值请求表示用默认模型。未知模型或不支持的 thinking level
+// 会得到 400 *Error。
 func (c *Client) CreateConversation(ctx context.Context, req CreateConversationRequest) (int, error) {
 	var out struct {
 		ID int `json:"id"`
@@ -164,14 +161,14 @@ func (c *Client) CreateConversation(ctx context.Context, req CreateConversationR
 	return out.ID, err
 }
 
-// SetModel switches conversation conv to another model and thinking level, from its next model request on.
+// SetModel 把会话 conv 换成另一个模型和 thinking level，从它下一次模型请求开始生效。
 func (c *Client) SetModel(ctx context.Context, conv string, req SetModelRequest) (AgentModelResponse, error) {
 	var out AgentModelResponse
 	err := c.do(ctx, http.MethodPut, "/v1/conversations/"+url.PathEscape(conv)+"/model", req, &out)
 	return out, err
 }
 
-// AvailableModels lists the models a conversation can use now.
+// AvailableModels 列出会话现在可以使用的模型。
 func (c *Client) AvailableModels(ctx context.Context) ([]AvailableModel, error) {
 	var out struct {
 		Models []AvailableModel `json:"models"`
@@ -180,15 +177,14 @@ func (c *Client) AvailableModels(ctx context.Context) ([]AvailableModel, error) 
 	return out.Models, err
 }
 
-// Submit admits user input into conversation conv ("root" or a numeric id). ErrNoModel and ErrModelUnavailable
-// match its 409s.
+// Submit 把用户输入送进会话 conv（"root" 或数字 id）。ErrNoModel 和 ErrModelUnavailable 匹配它的 409。
 func (c *Client) Submit(ctx context.Context, conv string, req SubmitRequest) (SubmitResponse, error) {
 	var out SubmitResponse
 	err := c.do(ctx, http.MethodPost, "/v1/conversations/"+url.PathEscape(conv)+"/submit", req, &out)
 	return out, err
 }
 
-// Abort stops the conversation's running reply and withdraws its queued inputs.
+// Abort 停止会话正在进行的回复，并撤回已排队的输入。
 func (c *Client) Abort(ctx context.Context, conv string) error {
 	return c.do(ctx, http.MethodPost, "/v1/conversations/"+url.PathEscape(conv)+"/abort", nil, nil)
 }
@@ -243,7 +239,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	return nil
 }
 
-// responseError turns a non-2xx response into an *Error, with the JSON body's "error" when there is one.
+// responseError 把一个非 2xx 响应变成 *Error；body 里有 JSON 的 "error" 字段时用它的值。
 func responseError(res *http.Response) error {
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
 		return nil

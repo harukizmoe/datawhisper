@@ -18,8 +18,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// uiQueue stands in for Window.Update: goroutines post functions, and the test runs them on its own goroutine,
-// where the Tester builds the view.
+// uiQueue 代替 Window.Update：goroutine 把函数投递进来，测试在自己的 goroutine 上运行它们，在那里由 Tester
+// 构建视图。
 type uiQueue struct {
 	mu   sync.Mutex
 	fns  []func()
@@ -38,7 +38,7 @@ func (q *uiQueue) post(fn func()) {
 	}
 }
 
-// run runs what was posted so far and reports whether there was anything.
+// run 运行目前投递进来的函数，并报告是否有东西可运行。
 func (q *uiQueue) run() bool {
 	q.mu.Lock()
 	fns := q.fns
@@ -50,8 +50,8 @@ func (q *uiQueue) run() bool {
 	return len(fns) > 0
 }
 
-// pump runs the posted functions, drawing a frame after each batch, until cond holds. Its one-minute guard only
-// turns a hang into a failure: every wait is for something the app or the service does.
+// pump 运行投递进来的函数，每批之后重绘一帧，直到 cond 成立。它那一分钟的上限只是把卡死变成失败：每次等待
+// 都是在等应用或服务真正会做的事。
 func (q *uiQueue) pump(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
 	t.Helper()
 	guard := time.NewTimer(time.Minute)
@@ -85,8 +85,8 @@ func expectTexts(t *testing.T, tt *ui.Tester, present []string, absent []string)
 	}
 }
 
-// fakeService serves what the view tests need of the service: conversations 1 and 2 (2 has a user message and a
-// reply), a conversation 3 that POST /v1/conversations creates and whose submit has no model (409), and no models.
+// fakeService 提供视图测试需要的那部分服务：会话 1 和 2（2 里有一条用户消息和一条回复）、一个由
+// POST /v1/conversations 创建的会话 3（它的 submit 没有可用模型，返回 409），以及没有模型可用的列表。
 func fakeService(t *testing.T) (*httptest.Server, int) {
 	t.Helper()
 	view := func(id int) string {
@@ -139,7 +139,7 @@ func fakeService(t *testing.T) (*httptest.Server, int) {
 	return srv, port
 }
 
-// newTestApp is an app whose updates run when the test pumps them; its subscriptions end with the test.
+// newTestApp 返回一个 app，它的更新在测试 pump 时才运行；它的订阅随测试结束而结束。
 func newTestApp(t *testing.T, q *uiQueue) *app {
 	a := &app{post: q.post, token: "tok", logPath: "/data/logs/service.log"}
 	t.Cleanup(a.cancelFollow)
@@ -201,7 +201,7 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 	q.pump(t, tt, "conversation 2", func() bool { return a.connected && a.chat.Conversation == 2 })
 	expectTexts(t, tt, []string{"hello there", "General Kenobi", "bold", "stub/stub-chat"}, []string{"Loading the conversation"})
 
-	// A new chat's first message creates its conversation; the service has no model for it.
+	// 新对话的第一条消息会创建它的会话；服务对它没有可用的模型。
 	if err := tt.Click("New chat"); err != nil {
 		t.Fatal(err)
 	}
@@ -225,8 +225,8 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 	expectTexts(t, tt, []string{"Settings", "No model is available", "Ready: process 41 on 127.0.0.1:" + strconv.Itoa(port)}, []string{"Send"})
 }
 
-// TestChatShowsTheRecordedStream feeds the recorded subscription through a replica, as the subscription does, and
-// checks the replies stream in through markdown.Stream and end as markdown.View in the same list row.
+// TestChatShowsTheRecordedStream 像订阅那样把录制好的订阅流经 replica 喂进来，并检查回复是经由
+// markdown.Stream 流式出现、最后以 markdown.View 落在同一个列表行里的。
 func TestChatShowsTheRecordedStream(t *testing.T) {
 	f, err := os.Open("internal/api/testdata/stream.sse")
 	if err != nil {
@@ -260,7 +260,7 @@ func TestChatShowsTheRecordedStream(t *testing.T) {
 			streamingKeys[m.Key] = true
 			for _, heading := range []string{"Result", "Hello"} {
 				if strings.HasPrefix(m.Text, "## "+heading) && tt.HasText(heading) {
-					streamed[heading] = true // a partial reply is on screen before it is complete
+					streamed[heading] = true // 回复还没有写完时，片段已经在屏幕上了
 				}
 			}
 		}

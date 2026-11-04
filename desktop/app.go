@@ -16,48 +16,48 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// reconnectedFor is how long the banner saying the service came back stays.
+// reconnectedFor 是「服务已恢复」横幅的停留时长。
 const reconnectedFor = 5 * time.Second
 
-// navSettings is the sidebar's settings entry; conversations are "c<id>" (navOf), a new chat "".
+// navSettings 是侧边栏的设置项；会话项为 "c<id>"（见 navOf），新对话为 ""。
 const navSettings = "settings"
 
-// app is the window's state. Only the UI thread changes it: the view, and the functions handed to post.
+// app 是窗口的状态。只有 UI 线程会改它：构建视图时，以及在 post 上排队的函数里。
 type app struct {
-	// post runs fn on the UI thread and redraws: Window.Update in the app, a queue in tests.
+	// post 在 UI 线程上运行 fn 并触发重绘：应用中它是 Window.Update，测试中是一个队列。
 	post func(fn func())
-	// token authorizes every request to the service; retry restarts a failed service (nil: no Retry button).
+	// token 为每个发往服务的请求做鉴权；retry 重启启动失败的服务（为 nil 时不显示 Retry 按钮）。
 	token   string
 	retry   func()
 	logPath string
 
 	service   supervisor.Status
-	client    *api.Client // of the ready service; nil while it is not ready
+	client    *api.Client // 指向 ready 状态的服务；未就绪时为 nil
 	everReady bool
-	// recovered: the service came back after it stopped. The banner saying so shows for reconnectedFor from
-	// recoveredAt, a time of the UI's clock taken by the first frame that shows it.
+	// recovered：服务停止后又回来了。提示这一点的横幅从 recoveredAt 起显示 reconnectedFor 这么久，
+	// 而 recoveredAt 是 UI 时钟上、由第一帧显示该横幅时记下的时间。
 	recovered   bool
 	recoveredAt time.Time
 
-	nav           string // the sidebar's choice: "" (a new chat), navOf(id) or navSettings
+	nav           string // 侧边栏的选择：""（新对话）、navOf(id) 或 navSettings
 	conversations []api.ConversationSummary
 	listLoaded    bool
 	listErr       string
-	listGen       int // orders list loads, so an older answer never replaces a newer one
+	listGen       int // 给会话列表的加载排序，避免旧结果覆盖新结果
 
-	conv           int       // the conversation shown; 0 for a new chat, which its first message creates
-	chat           api.State // its replicated state
-	connected      bool      // its subscription delivered a snapshot and has not dropped since
-	streamErr      string    // why the subscription dropped, or why it could not be opened
-	streamRetrying bool      // api.Follow resubscribes after streamErr; false: it gave up (unknown conversation)
+	conv           int       // 当前显示的会话；0 表示新对话，由它的第一条消息创建
+	chat           api.State // 该会话复制出的状态
+	connected      bool      // 它的订阅已送来 snapshot，且此后没有再断开
+	streamErr      string    // 订阅为何断开，或为何无法打开
+	streamRetrying bool      // api.Follow 在 streamErr 之后会重新订阅；false 表示它放弃了（未知会话）
 	stopFollow     context.CancelFunc
-	followGen      int // tells the updates of the current subscription from those of earlier ones
+	followGen      int // 用来区分当前订阅的更新与更早订阅的更新
 
 	input     string
-	pending   *pendingSend // the message being sent, with its request id, until the service admits it
+	pending   *pendingSend // 正在发送的消息及其 requestId，直到服务受理为止
 	sending   bool
 	sendErr   string
-	needModel bool // the service has no usable model for the conversation: offer the settings
+	needModel bool // 服务没有可用于该会话的模型：引导用户去设置
 
 	models       []api.AvailableModel
 	modelsLoaded bool
@@ -67,23 +67,23 @@ type app struct {
 	md   markdown.Options
 }
 
-// pendingSend keeps the request id of a message until it is admitted: sending the same text again after a failure
-// reuses it, so a message the service admitted before the failure is not admitted twice.
+// pendingSend 保存一条消息的 requestId 直到它被受理：失败后重发同样的文本会复用它，这样服务在失败前已经
+// 受理的消息不会被受理两次。
 type pendingSend struct{ requestID, text string }
 
 func navOf(conv int) string { return "c" + strconv.Itoa(conv) }
 
-// conversationTitle names a conversation until titles exist (P3.5).
+// conversationTitle 给会话起个名字，直到有真正的标题（P3.5）。
 func conversationTitle(id int) string { return "Chat " + strconv.Itoa(id) }
 
 func newRequestID() string {
 	b := make([]byte, 12)
-	_, _ = rand.Read(b) // crypto/rand.Read does not fail
+	_, _ = rand.Read(b) // crypto/rand.Read 不会失败
 	return "ui-" + hex.EncodeToString(b)
 }
 
-// onService applies a state change of the supervisor: a ready service gets a new client (its port changes with
-// every start), the conversation list, and the shown conversation's subscription; any other state drops them.
+// onService 应用 supervisor 的一次状态变化：ready 的服务会换上新 client（端口在每次启动时都不同）、重新拉
+// 会话列表，并订阅当前显示的会话；其他状态则把这些都丢掉。
 func (a *app) onService(st supervisor.Status) {
 	wasReady := a.service.State == supervisor.StateReady
 	a.service = st
@@ -114,8 +114,8 @@ func (a *app) cancelFollow() {
 	a.followGen++
 }
 
-// follow subscribes to the shown conversation on the ready service. api.Follow resubscribes after a drop, each
-// time from a fresh snapshot, so the replica matches the service again once a snapshot arrives.
+// follow 在 ready 的服务上订阅当前显示的会话。api.Follow 在断开后会重新订阅，每次都从新的 snapshot 开始，
+// 所以只要 snapshot 到达，副本就又能和服务对上。
 func (a *app) follow() {
 	a.cancelFollow()
 	a.connected, a.streamErr = false, ""
@@ -149,11 +149,11 @@ func (a *app) onChat(st api.State) {
 	finished := a.chat.Busy && !st.Busy && a.chat.Conversation == st.Conversation
 	a.chat, a.connected, a.streamErr = st, true, ""
 	if finished {
-		a.refreshConversations() // its newest entry changed
+		a.refreshConversations() // 它的最新条目变了
 	}
 }
 
-// navigate follows a new choice of the sidebar.
+// navigate 跟上侧边栏的新选择。
 func (a *app) navigate() {
 	switch {
 	case a.nav == navSettings:
@@ -165,7 +165,7 @@ func (a *app) navigate() {
 	}
 }
 
-// show switches the chat to conversation conv; 0 is a new chat.
+// show 把聊天切到会话 conv；0 表示新对话。
 func (a *app) show(conv int) {
 	a.conv, a.chat = conv, api.State{}
 	a.sendErr, a.needModel = "", false
@@ -186,8 +186,7 @@ func (a *app) canSend() bool {
 	return a.client != nil && !a.sending && strings.TrimSpace(a.input) != ""
 }
 
-// send submits the input to the shown conversation, creating it first for a new chat. While a reply runs, the
-// service queues the message as a follow-up.
+// send 把输入框的内容提交到当前显示的会话，新对话则先创建会话。回复进行中时，服务会把消息排成后续消息。
 func (a *app) send() {
 	if !a.canSend() {
 		return
@@ -210,7 +209,7 @@ func (a *app) send() {
 			}
 			conv = id
 			a.post(func() {
-				if a.conv == 0 { // still on the new chat: show the conversation its message created
+				if a.conv == 0 { // 仍停在新对话上：显示这条消息创建出来的会话
 					a.nav = navOf(id)
 					a.show(id)
 				}
@@ -231,7 +230,7 @@ func (a *app) send() {
 	}()
 }
 
-// sendFailed puts an unsent message back into an empty input; a model problem offers the settings.
+// sendFailed 把没发出去的消息放回输入框（输入框为空时）；模型方面的问题则引导用户去设置。
 func (a *app) sendFailed(p pendingSend, what string, err error) {
 	a.sending = false
 	if a.input == "" {
@@ -247,7 +246,7 @@ func (a *app) sendFailed(p pendingSend, what string, err error) {
 	}
 }
 
-// abort stops the running reply and withdraws the queued messages.
+// abort 停止正在进行的回复，并撤回已排队的消息。
 func (a *app) abort() {
 	if a.client == nil || a.conv == 0 {
 		return
@@ -275,7 +274,7 @@ func (a *app) refreshConversations() {
 		list, err := client.Conversations(ctx)
 		a.post(func() {
 			if client != a.client || gen != a.listGen {
-				return // the service restarted, or a newer load is under way
+				return // 服务重启了，或者有更新的加载正在进行
 			}
 			if err != nil {
 				a.listErr = err.Error()
@@ -307,7 +306,7 @@ func (a *app) loadModels() {
 	}()
 }
 
-// view builds the window: the sidebar, and the chat or the settings page.
+// view 构建整个窗口：侧边栏，以及聊天页或设置页。
 func (a *app) view(c *ui.Context) {
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		a.sidebar(c)
@@ -351,7 +350,7 @@ func (a *app) sidebar(c *ui.Context) {
 	})
 }
 
-// statusLabel names the service state and its color for the status indicator.
+// statusLabel 给状态指示器返回服务状态的名称及其颜色。
 func (a *app) statusLabel(t *ui.Theme) (string, ui.Color) {
 	switch a.service.State {
 	case supervisor.StateReady:
@@ -366,8 +365,8 @@ func (a *app) statusLabel(t *ui.Theme) (string, ui.Color) {
 	return "Stopped", t.TextMuted
 }
 
-// banner shows what keeps the chat from working, if anything: the service starting, restarting or failed, or the
-// conversation's subscription down; and for a while after a restart, that the service is back.
+// banner 在有东西妨碍聊天时说明原因：服务正在启动、重启或已失败，或者会话的订阅断了；另外在重启之后的一小
+// 段时间里，提示服务已经回来。
 func (a *app) banner(c *ui.Context) {
 	t := c.Theme()
 	var text string
@@ -472,8 +471,8 @@ func (a *app) chatPage(c *ui.Context) {
 	})
 }
 
-// message builds one chat row: the user's in a bubble on the right, a tool step in small print, a reply as
-// Markdown: markdown.Stream while it streams, markdown.View once committed, in the same list row (same key).
+// message 构建一行聊天内容：用户的消息放在右侧气泡里，tool 步骤用小号字，回复则用 Markdown：流式时用
+// markdown.Stream，落定后用 markdown.View，且都放在同一个列表行里（同一个 key）。
 func (a *app) message(c *ui.Context, m api.Message) {
 	t := c.Theme()
 	switch m.Role {
@@ -495,7 +494,7 @@ func (a *app) message(c *ui.Context, m api.Message) {
 	}
 }
 
-// settings is a placeholder page until P7.4: the service's state, and the models conversations can use.
+// settings 在 P7.4 之前只是一个占位页：显示服务状态，以及会话可用的模型。
 func (a *app) settings(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).MinWidth(0).Padding(24, 32).Gap(10).Children(func() {
