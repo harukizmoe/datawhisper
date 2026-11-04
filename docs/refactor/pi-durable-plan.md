@@ -265,17 +265,17 @@ flowchart LR
 - [x] P3.5 chat 接口
 - [x] P4.1 A 类工具（36/40，飞书写入并入 P4.3）
 - [x] P4.2 B 类工具
-- [ ] P4.3 C 类工具（MCP 客户端、飞书写入；浏览器交互本轮不做）
+- [x] P4.3 C 类工具（MCP 客户端、飞书写入已完成；浏览器交互本轮不做）
 - [x] P4.4 结果与确认
-- [ ] P5.1 jobs
-- [ ] P5.2 workflows
-- [ ] P5.3 teams
-- [ ] P6 内部 API
-- [ ] P7.1 聊天
-- [ ] P7.2 图表与富内容
-- [ ] P7.3 数据
-- [ ] P7.4 管理页面
-- [ ] P7.5 应用外壳
-- [ ] P8 数据迁移
-- [ ] P9 打包与发布
-- [ ] P10 切换与清理
+- [x] P5.1 jobs
+- [x] P5.2 workflows
+- [x] P5.3 teams
+- [x] P6 内部 API（方法表见 §「P6 内部 API」分组表）
+- [x] P7.1 聊天
+- [x] P7.2 图表与富内容
+- [x] P7.3 数据
+- [x] P7.4 管理页面
+- [x] P7.5 应用外壳
+- [x] P8 数据迁移（`server/scripts/migrate-old-data.ts`）
+- [x] P9 打包与发布（`scripts/build/` + `.github/workflows/`）
+- [x] P10 切换与清理（旧代码已删除，见 `docs/refactor/cleanup.md`；旧实现可从标签 `pre-cleanup` 取回）

@@ -398,8 +398,11 @@ class KnowledgeBase:
         )
         scope_dir.mkdir(parents=True, exist_ok=True)
         self._path = Path(db_path) if db_path is not None else scope_dir / "knowledge.db"
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
+        # busy_timeout 必须先于 journal_mode：切到 WAL 需要短暂的独占锁，而界面侧的聚合会并行打开
+        # 多个连接——没有等待窗口时第二条连接直接抛 "database is locked"。
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute("PRAGMA journal_mode=WAL")
         _init_db(self._conn)
 

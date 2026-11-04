@@ -7,7 +7,6 @@ ingest 方法。
 """
 import base64
 import csv
-import importlib.util
 import itertools
 import json
 import os
@@ -30,9 +29,7 @@ USER_ID = "local-default"
 CANCELLED = -32800
 TOOL_TIMEOUT = 300
 
-_spec = importlib.util.spec_from_file_location("run_baseline", BASELINE / "run_baseline.py")
-run_baseline = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(run_baseline)
+from compute.tests.normalizer import Normalizer
 
 # 对应旧 agent（agent/agent.py 的 "Confirm fast-paths"）的快速路径：
 # 输出工具不经过模型回合就直接运行，其文本即为该步骤的 final_text。
@@ -196,12 +193,12 @@ class BaselineParityTest(ToolsTestBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        seed = json.loads((BASELINE / "scenarios.json").read_text(encoding="utf-8"))["knowledge_seed"]
+        seed = json.loads((Path(__file__).resolve().parent / "knowledge_seed.json").read_text(encoding="utf-8"))["knowledge_seed"]
         subprocess.run(
             [sys.executable, "-c", _SEED_SCRIPT, USER_ID], input=json.dumps(seed), text=True,
             cwd=REPO, env=cls.env, check=True, capture_output=True,
         )
-        cls.normalize = run_baseline.Normalizer(cls.data_root, [SESSION_ID], {})
+        cls.normalize = Normalizer(cls.data_root, [SESSION_ID], {})
 
     def test_recorded_calls_match(self):
         compared = {name: 0 for name in BUSINESS_TOOLS}

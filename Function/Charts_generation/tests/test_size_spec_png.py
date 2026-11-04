@@ -8,7 +8,7 @@
 3. parse_plotly_figures 只读解析（含非 plotly 空返回）
 4. plotly_figure_objects 从真实模块产出重构 Figure
 5. render_png_bytes 的错误路径（非 plotly / 多子图 / 缺 kaleido）
-6. _ChartStore 的 spec 边车读写往返（含坏 JSON 容错）
+6. 图表 spec 边车由 Rust/Go 侧维护，此处不再覆盖
 
 可直接 pytest 运行，也可 ``python tests/test_size_spec_png.py`` 裸跑。
 """
@@ -134,38 +134,3 @@ def test_render_png_bytes_kaleido_gate():
 
 # ── 6. spec 边车 ────────────────────────────────────────────────────────────
 
-def test_chart_store_spec_roundtrip():
-    from api.state import _ChartStore
-    with tempfile.TemporaryDirectory() as d:
-        store = _ChartStore(Path(d))
-        assert store.get_spec("c1") is None          # 无 spec 返回 None
-        store["c1"] = "<html>hi</html>"
-        store.save_spec("c1", {
-            "chart_type": "Bar_Chart", "sql": "SELECT 1",
-            "size": "slide", "中文键": "值",
-        })
-        spec = store.get_spec("c1")
-        assert spec["chart_type"] == "Bar_Chart"
-        assert spec["size"] == "slide"
-        assert spec["中文键"] == "值"                 # ensure_ascii=False 可读落盘
-        assert store["c1"] == "<html>hi</html>"       # spec 不影响 HTML 读取
-        # 坏 JSON 容错 → None（不让一张坏边车打挂出图链路）
-        (store._dir / "c2.spec.json").write_text("{broken", encoding="utf-8")
-        assert store.get_spec("c2") is None
-
-
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"PASS {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"FAIL {fn.__name__}: {e}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"ERROR {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(fns) - failed}/{len(fns)} passed")
-    sys.exit(1 if failed else 0)

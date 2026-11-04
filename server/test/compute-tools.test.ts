@@ -321,7 +321,7 @@ beforeAll(async () => {
   tools = createComputeTools({ compute });
   byName = new Map(tools.map((tool) => [tool.name, tool]));
   // 与 Python parity 测试相同：知识库种子决定 query_knowledge 的输出。
-  const seed = JSON.parse(readFileSync(join(REPO, "baseline", "scenarios.json"), "utf8")) as {
+  const seed = JSON.parse(readFileSync(join(REPO, "compute", "tests", "knowledge_seed.json"), "utf8")) as {
     knowledge_seed?: { metrics?: Json[]; rules?: Json[]; notes?: Json[] };
   };
   for (const [kind, key] of [

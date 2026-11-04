@@ -980,7 +980,7 @@ class DataToolsMixin:
     def _tool_select_chart(self, user_intent: str, available_columns: list = None) -> str:
         """查询内置的图表注册表，返回排序后的候选及其精确的 field_mapping 规格。"""
         try:
-            from LLM.chart_selector import select_charts, format_selection_result
+            from compute.chart_selector import select_charts, format_selection_result
             cols = list(available_columns or [])
             # 调用方没给列名时，用 schema 中的列名自动补齐
             if not cols and self.data_source:

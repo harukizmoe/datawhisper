@@ -1,8 +1,0 @@
-{
-  "frontend/entries/dashboard.js": {
-    "file": "dashboard.js",
-    "name": "dashboard",
-    "src": "frontend/entries/dashboard.js",
-    "isEntry": true
-  }
-}

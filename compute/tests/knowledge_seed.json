@@ -1,0 +1,28 @@
+{
+  "knowledge_seed": {
+    "metrics": [
+      {
+        "name": "GMV",
+        "alias": "成交额",
+        "definition": "订单成交总金额，等于 sales 表 revenue 字段求和（含折扣后金额）。",
+        "sql_template": "SELECT SUM(revenue) FROM sales",
+        "notes": "baseline fixture metric"
+      }
+    ],
+    "rules": [
+      {
+        "rule_id": "R-DISCOUNT",
+        "description": "折扣率 discount 不得超过 0.3。",
+        "condition": "discount <= 0.3",
+        "severity": "warning"
+      }
+    ],
+    "notes": [
+      {
+        "topic": "AB 实验",
+        "content": "variant 字段为实验分组，A 为对照组，B 为实验组；converted 为转化人数。",
+        "tags": "experiment"
+      }
+    ]
+  }
+}
