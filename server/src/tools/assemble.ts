@@ -5,6 +5,9 @@ import type { Config } from "../config.ts";
 import { createAppTools } from "../tools/app/index.ts";
 import { NodeWorkspaceFs } from "../tools/app/workspace/fs.ts";
 import { createComputeTools } from "../tools/compute/index.ts";
+import { withConversationSources } from "../tools/compute/inject.ts";
+import { withChartPersistence } from "../tools/compute/persist.ts";
+import type { SourceDocStore } from "../ipc/source-store.ts";
 import { createToolResultStore, type ToolResultStore } from "../tools/guard/spill.ts";
 import { createConversationDocs } from "../tools/app/docs.ts";
 import type { AppDocHosts, TeamDelegationPort } from "../tools/app/types.ts";
@@ -35,6 +38,11 @@ export type AssembleOptions = {
    * 所以这里用一个迟绑定的转发器：装配时给对象，会话服务就绪后再填 `current`。
    */
   readonly teamDelegation?: { current?: TeamDelegationPort };
+  /**
+   * 会话的来源文档：B 类工具每次调用都要知道本会话在用哪些来源（compute worker 是跨会话共享的）。
+   * 省略时 B 类工具不带数据上下文，只会得到 compute 原文的「no data source」。
+   */
+  readonly sources?: () => SourceDocStore;
 };
 
 export function assembleTools(config: Config, compute: ComputeClient, sessionId: string, options: AssembleOptions): ToolAssembly {
@@ -76,5 +84,21 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
     fetch: globalThis.fetch,
   });
   const computeTools = createComputeTools({ compute });
-  return { tools: [...appTools, ...computeTools], toolResults };
+  const readSources = options.sources;
+  const scopedComputeTools =
+    readSources === undefined
+      ? computeTools
+      : withConversationSources(computeTools, async (conversationId) => {
+          const doc = await readSources().read(conversationId).catch(() => undefined);
+          if (doc === undefined) return undefined;
+          const active = doc.sources.filter((source) => source.active);
+          if (active.length === 0) return undefined;
+          // 主来源取第一个参与分析的来源；表清单按来源聚合，供 SQL 校验与提示使用。
+          const tables: Record<string, string[]> = {};
+          for (const source of active) tables[source.id] = [...(source.tables ?? [])];
+          return { sources: active.map((source) => source.id), primary: active[0]!.id, tables };
+        });
+  // 图表 HTML 只在单次调用内存在于 worker 里，必须由这里落盘（界面的 web view 读文件）。
+  const persisted = withChartPersistence(scopedComputeTools, join(config.dataDir, "outputs", "charts"));
+  return { tools: [...appTools, ...persisted], toolResults };
 }

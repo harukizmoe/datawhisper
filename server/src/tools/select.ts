@@ -1,4 +1,5 @@
 import type { ToolRegistration } from "@earendil-works/pi-durable";
+import { messageNeedsChartRules } from "../agent/prompts.ts";
 import {
   type ActivationContext,
   filterToolsForStage,
@@ -34,6 +35,10 @@ export type TurnToolInput = {
   discoveredTools?: readonly string[];
   /** 本轮之前已经调用过的工具名，用于推断工作流阶段。 */
   completedTools?: readonly string[];
+  /** 本轮是否要出图（默认按消息关键词判定）；显式传入可覆盖。 */
+  needsChart?: boolean;
+  /** 本轮是否要出报表/导出类产物。 */
+  needsOutput?: boolean;
   /** 未超长时不再截断，显式指定的工具（命令/技能要求）永远保留。 */
   requiredTools?: ReadonlySet<string> | null;
   includeMcp?: boolean;
@@ -61,10 +66,15 @@ export function toolsForTurn(allTools: readonly ToolRegistration[], input: TurnT
   });
 
   // 阶段只由「已经完成的工具调用」推断：同一轮里模型后续请求会看到更窄的集合，和旧实现一致。
+  // 图/报表意图来自本轮用户消息（旧实现 `message_needs_chart_rules`）：不传的话，模型永远拿不到
+  // `generate_chart` 这类工具——它会直接回答「可视化工具未连接」。
+  const needsChart = input.needsChart ?? messageNeedsChartRules(input.userMessage);
   const stage = inferWorkflowStage({
     activation: input.activation ?? null,
     userMessage: input.userMessage,
     hasDataSource: input.hasDataSource,
+    needsChart,
+    needsOutput: input.needsOutput,
     completedTools: input.completedTools ?? [],
   });
   const staged = filterToolsForStage(exposed, stage);

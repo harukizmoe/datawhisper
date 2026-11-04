@@ -107,6 +107,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
           harness: () => harness,
           context,
           teamDelegation: delegationPort,
+          // 来源文档同样是执行期才需要（会话服务建好之后）。
+          sources: () => sourceState,
         })
       : undefined;
   const tools = options.tools ?? assembled!.tools;
