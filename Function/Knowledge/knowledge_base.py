@@ -175,8 +175,10 @@ def _init_db(conn: sqlite3.Connection) -> None:
     """)
     now = time.time()
     if not had_categories_table:
+        # 用 OR IGNORE：界面侧会并行聚合多个知识类型，两条连接同时打开新库时都会看到
+        # 「表是刚建的」，普通 INSERT 会撞 UNIQUE(id) 把整个聚合请求打成 500。
         conn.execute(
-            "INSERT INTO knowledge_categories (id, name, enabled, updated_at) VALUES (1, ?, 1, ?)",
+            "INSERT OR IGNORE INTO knowledge_categories (id, name, enabled, updated_at) VALUES (1, ?, 1, ?)",
             (DEFAULT_CATEGORY_NAME, now),
         )
     # Add enabled/category columns to existing tables if upgrading from old schema
@@ -203,6 +205,14 @@ def _init_db(conn: sqlite3.Connection) -> None:
             log.debug("[knowledge_base] 列已存在，跳过 DDL: %s", e)
     conn.execute("UPDATE rag_chunks SET category_id=1 WHERE category_id IS NULL")
     conn.commit()
+    # 复核默认分类：并行打开时另一条连接可能刚建表还没提交，本连接就会因为「表已存在」而跳过插入，
+    # 于是它读到的分类列表是空的。这里在提交后补一次，保证任何一条连接收尾时默认分类都在。
+    if conn.execute("SELECT 1 FROM knowledge_categories WHERE id=1").fetchone() is None:
+        conn.execute(
+            "INSERT OR IGNORE INTO knowledge_categories (id, name, enabled, updated_at) VALUES (1, ?, 1, ?)",
+            (DEFAULT_CATEGORY_NAME, now),
+        )
+        conn.commit()
 
 
 # ── Local vectorizer ──────────────────────────────────────────────────────────

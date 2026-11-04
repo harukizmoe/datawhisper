@@ -47,6 +47,8 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
       context: service.context,
       publish: (event) => notify("conversation.event", event),
       feishu,
+      dataDir: options.dataDir ?? loadConfig().dataDir,
+      sourceMethods: service.sourceMethods,
     }),
     send: (record) => writer.send(record),
     mapError: mapSettingsError,

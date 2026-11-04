@@ -10,19 +10,28 @@ import { assembleTools } from "./tools/assemble.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
 import { type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
+import { SecretCredentialStore } from "./models/credentials.ts";
+import {
+  createConversationSourceStore,
+  createSourceConfigStore,
+  turnStateFor,
+  type SourceDocStore,
+} from "./ipc/source-store.ts";
+import { DEFAULT_PROJECT_ROOT, sourceMethods } from "./ipc/sources.ts";
 import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
 import { WorkExecutorRegistry } from "./jobs/work-task.ts";
 import { createWorkflows, workflowsExtension, type Workflows } from "./workflows/service.ts";
 import { createAgentNodeExecutor } from "./workflows/agent-node.ts";
 import { ModelService } from "./models/service.ts";
 import type { SubmitResponse } from "./protocol.ts";
+import type { RpcMethod } from "./ipc/rpc.ts";
 
 export type ServiceOptions = {
   registry?: Registry;
   /** 本轮可用的工具（P4 提供；为空表示还没有工具，模型只能纯对话）。 */
   tools?: readonly ToolRegistration[];
-  /** 数据源/工作区状态，供每轮的工具暴露与系统提示判定使用。 */
-  turnState?: () => TurnState;
+  /** 数据源/工作区状态，供每轮的工具暴露与系统提示判定使用；默认从会话的来源文档推导。 */
+  turnState?: (conversationId: number) => TurnState | Promise<TurnState>;
   /** 把 API key 保存在 `<dataDir>/credentials.json`，而不是探测操作系统钥匙串（测试用）。 */
   forceFileCredentials?: boolean;
 };
@@ -38,6 +47,8 @@ export type Service = {
   readonly jobs: Jobs;
   /** 工作流运行：运行 task + 节点子 task，节点由 agent 执行器跑在一轮独立会话里。 */
   readonly workflows: Workflows;
+  /** 数据源、工作区与产物（`source.*` / `workspace.*` / `artifact.*`）的 IPC 方法表。 */
+  readonly sourceMethods: Record<string, RpcMethod>;
   /** `conversations.submitTurn` 的便捷入口（测试里常用）。 */
   submitTurn(id: string | number, body: unknown): Promise<SubmitResponse>;
   /** Harness 关闭时落定：`stop()` 之后，或存储失败之后（`kind: "failed"`）。 */
@@ -56,6 +67,15 @@ function serviceSettings(modelService: ModelService) {
   });
 }
 
+/** 读会话的来源文档并推导本轮状态；会话不存在或还什么都没挂时就是空状态。 */
+async function readTurnState(state: SourceDocStore, conversationId: number): Promise<TurnState> {
+  try {
+    return turnStateFor(await state.read(conversationId));
+  } catch {
+    return { hasDataSource: false, sourceCount: 0, hasWorkspace: false, hasUnnamedColumns: false, teamsEnabled: false };
+  }
+}
+
 export async function startService(config: Config, options: ServiceOptions = {}): Promise<Service> {
   const context = BACKGROUND_CONTEXT;
   mkdirSync(config.dataDir, { recursive: true });
@@ -66,6 +86,9 @@ export async function startService(config: Config, options: ServiceOptions = {})
   const compute = new ComputeClient({
     python: config.python,
     cwd: config.computeCwd,
+    // Python 侧的数据根（`infrastructure/paths.py::data_root`）必须与 Bun 的 `dataDir` 相同：
+    // 否则仪表盘、图表、上传文件会写进仓库目录而不是应用数据目录。
+    env: { BAA_DATA_DIR: config.dataDir },
     onStderr: (line) => console.error(`[compute] ${line}`),
   });
   // 生产工具集：A 类纯 TS + B 类 compute 外壳。测试可以用 `options.tools` 覆盖（桩工具）。
@@ -95,15 +118,31 @@ export async function startService(config: Config, options: ServiceOptions = {})
   );
   harness.resume();
 
+  // 数据来源：会话级来源/工作区文档 + 数据源配置（密钥只进不出）。
+  const sourceState = createConversationSourceStore({ harness, context });
+  const sourceCredentials = await SecretCredentialStore.open(
+    join(config.dataDir, "datasource-credentials.json"),
+    join(config.dataDir, "datasource-credentials.index.json"),
+    { forceFile: options.forceFileCredentials },
+  );
+  const sourceApis = sourceMethods({
+    compute,
+    state: sourceState,
+    configs: createSourceConfigStore({ dataDir: config.dataDir, credentials: sourceCredentials }),
+    uploadsDir: join(config.dataDir, "uploads"),
+    outputsDir: join(config.dataDir, "outputs"),
+    projectRoot: DEFAULT_PROJECT_ROOT,
+  });
+
   const workExecutors = new WorkExecutorRegistry();
   const jobs = createJobs({ harness, context, executors: workExecutors });
   const conversations = createConversations({
     harness,
     modelService,
     context,
-    // 暴露层在这一份全量工具上做过滤；`options.turnState` 决定数据源/工作区/团队相关的门是否打开。
+    // 暴露层在这一份全量工具上做过滤；`turnState` 决定数据源/工作区/团队相关的门是否打开。
     tools,
-    turnState: options.turnState,
+    turnState: options.turnState ?? ((conversationId) => readTurnState(sourceState, conversationId)),
   });
 
   // 工作流：节点跑在独立会话里；扩展装进同一个 registry，下一次调度即可见（必须在 `resume()` 之后装，
@@ -129,6 +168,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     context,
     jobs,
     workflows,
+    sourceMethods: sourceApis,
     conversations,
     submitTurn: (id, body) => conversations.submitTurn(id, body),
     closed,

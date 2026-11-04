@@ -12,6 +12,7 @@ import { CUSTOM_PRESETS, type ModelService, type ProviderSettings, SettingsError
 import type { Jobs } from "../jobs/service.ts";
 import type { Workflows } from "../workflows/service.ts";
 import { appError, INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
+import { libraryMethods } from "./library.ts";
 import { orchestrationMethods } from "./orchestration.ts";
 import type { MapError, MethodParams, RpcMethod } from "./rpc.ts";
 
@@ -31,6 +32,10 @@ export type MethodDeps = {
   workflows?: Workflows;
   /** 飞书机器人；省略时 `feishu.*` 方法不注册（进程内测试的轻量装配）。 */
   feishu?: FeishuService;
+  /** agent 服务的数据目录（`library.sqlite` 等）；省略时取 `loadConfig()`。 */
+  dataDir?: string;
+  /** 数据源/工作区/产物方法表（`service.ts` 里连同凭据存储一起装配）；省略时不注册。 */
+  sourceMethods?: Record<string, RpcMethod>;
 };
 
 function idParam(params: MethodParams, key = "id"): string | number {
@@ -149,6 +154,10 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
     ...modelMethods(modelService),
     ...orchestrationMethods({ jobs, workflows }),
     ...(feishu === undefined ? {} : feishuMethods(feishu, harness, context)),
+    ...(deps.sourceMethods ?? {}),
+    // 会话库/知识库/记忆/技能/hooks/仪表盘：compute 侧的数据根必须与这里一致，
+    // 因此共用 `dataDir`（service.ts 给 compute 子进程设的 `BAA_DATA_DIR` 也是它）。
+    ...libraryMethods({ harness, context, conversations, compute, dataDir: deps.dataDir }),
 
     async health() {
       const inspection = await harness.inspect(context);

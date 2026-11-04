@@ -59,8 +59,11 @@ export type ConversationsDeps = {
   context: Context;
   /** 本轮可用的工具，由 P4 提供。 */
   tools?: readonly ToolRegistration[];
-  /** 每轮开始时重新取一次数据源/工作区状态。 */
-  turnState?: () => TurnState;
+  /**
+   * 每轮开始时重新取一次数据源/工作区状态。参数是会话 id：来源和工作区都是会话级的，
+   * 全局单一状态会让 A 会话的数据源决定 B 会话的工具暴露。
+   */
+  turnState?: (conversationId: number) => TurnState | Promise<TurnState>;
 };
 
 /** 一条订阅通知：与旧 SSE 的 `snapshot`/`ops`/`end` 一一对应，加上订阅号。 */
@@ -148,7 +151,7 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
   }
 
   const previous = (await harness.snapshot(TurnDoc, conversation.id, context)) ?? EMPTY_TURN_CONTEXT;
-  const current = (deps.turnState ?? (() => NO_TURN_STATE))();
+  const current = await (deps.turnState ?? (() => NO_TURN_STATE))(conversation.id as unknown as number);
   // 命令/技能轮不参与关键词发现（旧实现传空消息，记一次空发现并推进 TTL）。
   const discoveryMessage = command === undefined ? text : "";
   const discovery = recordDiscoveredToolTurn(
