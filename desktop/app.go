@@ -58,9 +58,8 @@ type app struct {
 	sendErr   string
 	needModel bool // 服务没有可用于该会话的模型：引导用户去设置
 
-	models       []api.AvailableModel
-	modelsLoaded bool
-	modelsErr    string
+	// st 是模型与提供商设置页的数据与编辑状态（settings.go）。
+	st settingsState
 
 	list ui.ListState
 	md   markdown.Options
@@ -101,7 +100,7 @@ func (a *app) onService(st supervisor.Status) {
 	a.refreshConversations()
 	a.follow()
 	if a.nav == navSettings {
-		a.loadModels()
+		a.loadSettings()
 	}
 }
 
@@ -156,7 +155,7 @@ func (a *app) onChat(st api.State) {
 func (a *app) navigate() {
 	switch {
 	case a.nav == navSettings:
-		a.loadModels()
+		a.loadSettings()
 	case strings.HasPrefix(a.nav, "c"):
 		if id, err := strconv.Atoi(a.nav[1:]); err == nil && id != a.conv {
 			a.show(id)
@@ -178,7 +177,7 @@ func (a *app) newChat() {
 
 func (a *app) openSettings() {
 	a.nav = navSettings
-	a.loadModels()
+	a.loadSettings()
 }
 
 func (a *app) canSend() bool {
@@ -280,27 +279,6 @@ func (a *app) refreshConversations() {
 				return
 			}
 			a.conversations, a.listLoaded, a.listErr = list, true, ""
-		})
-	}()
-}
-
-func (a *app) loadModels() {
-	client := a.client
-	if client == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		models, err := client.AvailableModels(ctx)
-		a.post(func() {
-			if client != a.client {
-				return
-			}
-			a.models, a.modelsErr, a.modelsLoaded = models, "", true
-			if err != nil {
-				a.models, a.modelsErr = nil, err.Error()
-			}
 		})
 	}()
 }
@@ -491,41 +469,4 @@ func (a *app) message(c *ui.Context, m api.Message) {
 			}
 		})
 	}
-}
-
-// settings 在 P7.4 之前只是一个占位页：显示服务状态，以及会话可用的模型。
-func (a *app) settings(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Grow(1).MinWidth(0).Padding(24, 32).Gap(10).Children(func() {
-		ui.Text(c, "Settings").Bold().FontSize(20)
-		ui.Text(c, "Model providers, API keys and the other settings arrive with P7.4.").TextColor(t.TextMuted)
-		ui.Text(c, "Agent service").Bold().Margin(12, 0, 0, 0)
-		label, _ := a.statusLabel(t)
-		if a.service.State == supervisor.StateReady {
-			ui.Textf(c, "%s: process %d", label, a.service.PID)
-		} else {
-			ui.Text(c, label)
-		}
-		if a.logPath != "" {
-			ui.Text(c, "Log: "+a.logPath).FontSize(12).TextColor(t.TextMuted).Selectable()
-		}
-		ui.Text(c, "Models").Bold().Margin(12, 0, 0, 0)
-		switch {
-		case a.client == nil:
-			ui.Text(c, "Available once the service is ready.").TextColor(t.TextMuted)
-		case a.modelsErr != "":
-			ui.Text(c, "Could not load the models: "+a.modelsErr).TextColor(t.Danger)
-		case !a.modelsLoaded:
-			ui.Text(c, "Loading…").TextColor(t.TextMuted)
-		case len(a.models) == 0:
-			ui.Text(c, "No model is available: no provider is enabled with a key.").TextColor(t.TextMuted)
-		default:
-			for _, m := range a.models {
-				ui.Textf(c, "%s/%s · %s", m.Provider, m.ID, m.Name)
-			}
-		}
-		if a.client != nil && ui.Button(c, "Refresh").Clicked() {
-			a.loadModels()
-		}
-	})
 }

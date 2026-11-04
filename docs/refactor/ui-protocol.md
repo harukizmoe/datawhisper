@@ -188,12 +188,13 @@ Go 端的 `api.Follow` 实现了上述重连：退避从 250 毫秒开始，每�
 |---|---|---|
 | `models.view` | — | 设置视图（提供商、默认模型、各提供商认证来源）、内置提供商 id、自定义地址预设 |
 | `models.available` | — | `{models: [{provider, id, name, contextWindow, maxTokens, reasoning, vision, thinkingLevels}]}` |
-| `models.putProvider` / `models.deleteProvider` | `{provider: ProviderSettings}` / `{providerId}` | 设置视图 |
+| `models.discover` | `{baseUrl, apiKey?}` | `{models: [{id, name, contextWindow, maxTokens, reasoning, vision?, inferred?}]}`：读 `<baseUrl>/models`；端点不报告上限时填保守默认值并标 `inferred` |
+| `models.putProvider` / `models.deleteProvider` | `ProviderSettings`（顶层字段，不是嵌套的 `provider`）/ `{id}` | 设置视图 |
 | `models.setKey` / `models.clearKey` | `{providerId, apiKey}` / `{providerId}` | 设置视图 |
 | `models.setDefault` | `{model: ModelRef \| null, thinkingLevel: <强度> \| null}` | 设置视图 |
 | `models.test` | `{model, provider?, apiKey?}` | 通过真实提供商发一次很小的请求，可测未保存的设置 → `{ok: true, text}` 或 `{ok: false, error}` |
 
-参数不合法报 `-32602`。Go 客户端目前只封装了 `AvailableModels`（设置页的占位内容用到），其余在 P7.4 做设置界面时补上。
+参数不合法报 `-32602`。Go 客户端（`desktop/internal/api/models.go`）已经封装上述全部方法，供 P7.4 的设置页使用；密钥只写在 `models.setKey` 的参数里，任何响应的 Go 类型都没有存放密钥的字段。
 
 ## 7. 类型对照
 

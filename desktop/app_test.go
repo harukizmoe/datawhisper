@@ -239,6 +239,18 @@ func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
 			respond(req.ID, map[string]any{"submissionId": 1, "status": "queued"})
 		case "models.available":
 			respond(req.ID, map[string]any{"models": []any{}})
+		case "models.view":
+			respond(req.ID, map[string]any{
+				"providers": []any{},
+				"presets": []any{
+					map[string]any{"presetId": "ollama", "name": "Ollama", "baseUrl": "http://localhost:11434/v1", "requiresKey": false},
+				},
+				"defaultModel":      nil,
+				"defaultThinking":   nil,
+				"credentialBackend": "file",
+			})
+		case "usage.summary":
+			respond(req.ID, map[string]any{"models": map[string]any{}, "tools": map[string]any{}})
 		default:
 			write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
 				"code": -32601, "message": "method not found: " + req.Method,
@@ -329,8 +341,8 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 	if err := tt.Click("Open settings"); err != nil {
 		t.Fatal(err)
 	}
-	q.pump(t, tt, "the models", func() bool { return a.modelsLoaded })
-	expectTexts(t, tt, []string{"Settings", "No model is available", "Ready: process 41"}, []string{"Send"})
+	q.pump(t, tt, "the settings", func() bool { return a.st.loaded && a.st.view != nil })
+	expectTexts(t, tt, []string{"Settings", "No provider is configured", "Add provider"}, []string{"Send"})
 }
 
 // TestChatShowsTheRecordedStream 像订阅那样把录制好的订阅流经 replica 喂进来，并检查回复是经由
