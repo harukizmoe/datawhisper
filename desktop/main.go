@@ -55,13 +55,23 @@ func main() {
 				capture.built()
 			}
 		}
+		// 图表与产物预览由应用自己的 scheme 提供：旧网页的 /static/vendor/* 因此能指向
+		// 随包的 plotly/echarts，而文件只通过一次性 token 暴露。scheme 必须在建窗口之前注册。
+		if err := mygo.Protocol.Handle(previewScheme, a.rich.mediaServer()); err != nil {
+			log.Printf("preview scheme: %v", err)
+		}
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:   "DataWhisper",
 			Width:   *width,
 			Height:  *height,
 			Content: ui.View(view),
 		})
+		a.win = win
 		a.post = win.Update
+		a.rich.post = win.Update
+		a.rich.host = windowHost{win: win, changed: win.Update}
+		// 窗口关闭会带走它自己的 web view；这里显式释放一遍，删掉媒体登记项。
+		win.OnClosed(func() { a.rich.releaseAll() })
 		if capture != nil {
 			capture.start(win)
 		}
@@ -190,6 +200,9 @@ var capture *capturer
 // capturer 在窗口显示每种服务状态时把它保存成图片。Window.CapturePage 拍到的是最后构建出的那一帧，而一帧
 // 要等合成器的 frame callback 才会出现，所以 capturer 先等状态变化之后的那次视图构建完成；对 ready 状态还会
 // 再等一小会儿，等会话列表到位后再拍。
+//
+// 注意：Window.CapturePage 只渲染原生内容，web view（图表、HTML 产物）在截图里是一个白洞。要证明图表真的
+// 画出来了，用桌面合成器截图（niri/gnome 的 screenshot、grim），或另拍 WebView.CapturePage。
 type capturer struct {
 	win     *mygo.Window
 	dir     string

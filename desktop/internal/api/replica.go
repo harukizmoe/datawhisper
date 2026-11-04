@@ -67,6 +67,21 @@ type ToolCall struct {
 	DurationMS int64
 	// Ask 是 ask_user 的参数（优先取工具结果里的规范化 details，其次取调用参数）。
 	Ask *AskRequest
+	// Charts 是工具结果里的图表（compute 的 generate_chart 与 profile_data）。界面用 web view
+	// 画它们，而不是只留一句“Chart generated”。
+	Charts []Chart
+	// DashboardID 是工具新建的仪表盘 id（dashboard_id）；界面据此提供查看入口。
+	DashboardID string
+}
+
+// Chart 是工具结果里的一张图表。服务端把图表 HTML 落盘后，details 里给的是 path；
+// 落盘失败或旧消息里还可能是内联的 html，两者都保留，界面优先用 path。
+type Chart struct {
+	ID    string
+	Title string
+	Type  string
+	Path  string
+	HTML  string
 }
 
 // AskRequest 是 ask_user 交给界面展示的问题；选项来自工具本身，界面不自行编造。
@@ -252,6 +267,46 @@ func askRequestOf(node any) *AskRequest {
 	return &AskRequest{Question: question, Options: options, MultiSelect: multi}
 }
 
+// chartsOf 从工具结果的 details 里读出图表记录。每张图有 id、标题、类型，以及落盘后的
+// path（或旧消息里内联的 html）；两者都没有的记录跳过，界面不画空图。
+func chartsOf(details any) []Chart {
+	m, ok := details.(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, _ := m["charts"].([]any)
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]Chart, 0, len(items))
+	for _, item := range items {
+		chart := Chart{}
+		chart.ID, _ = field(item, "id").(string)
+		if chart.ID == "" {
+			chart.ID, _ = field(item, "chart_id").(string)
+		}
+		chart.Title, _ = field(item, "title").(string)
+		chart.Type, _ = field(item, "chart_type").(string)
+		chart.Path, _ = field(item, "path").(string)
+		chart.HTML, _ = field(item, "html").(string)
+		if chart.Path == "" && chart.HTML == "" {
+			continue
+		}
+		out = append(out, chart)
+	}
+	return out
+}
+
+// dashboardIDOf 读出工具结果里的仪表盘 id（compute 的 generate_dashboard 会带上它）。
+func dashboardIDOf(details any) string {
+	m, ok := details.(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := m["dashboard_id"].(string)
+	return id
+}
+
 // callOf 把一个 toolCall block 变成工具行，参数摘要与 ask_user 问题都从这里取。
 func callOf(block any) *ToolCall {
 	name, _ := field(block, "name").(string)
@@ -283,6 +338,8 @@ func mergeResult(out []Message, index map[string]int, callID, output string, dur
 	if ask := askRequestOf(details); ask != nil {
 		tool.Ask = ask
 	}
+	tool.Charts = chartsOf(details)
+	tool.DashboardID = dashboardIDOf(details)
 	return true
 }
 
@@ -366,7 +423,7 @@ func (r *Replica) messages() []Message {
 			if failed {
 				status = "error"
 			}
-			call := &ToolCall{CallID: callID, Name: name, Output: output, DurationMS: int64(duration), Status: status, Ask: askRequestOf(details)}
+			call := &ToolCall{CallID: callID, Name: name, Output: output, DurationMS: int64(duration), Status: status, Ask: askRequestOf(details), Charts: chartsOf(details), DashboardID: dashboardIDOf(details)}
 			out = append(out, Message{Key: "e" + id, Role: "tool", Text: name, Done: true, Tool: call})
 			if callID != "" {
 				index[callID] = len(out) - 1

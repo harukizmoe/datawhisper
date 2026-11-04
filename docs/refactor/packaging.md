@@ -7,6 +7,7 @@
 | 桌面外壳 | `desktop/`（Go + MyGo，无 cgo） | 应用本体 | `mygo build` |
 | agent 服务 | `server/`（Bun + TS） | `resources/bin/datawhisper-server[.exe]` | `bun build --compile`，单文件 |
 | compute | `compute/` + `Function/` + `Information/` | `resources/bin/datawhisper-compute[.exe]` | PyInstaller `--onefile` |
+| 图表静态库 | `static/vendor/`（plotly、echarts、d3） | `resources/static/vendor/` | `bundle-static.sh` 复制三个文件 |
 
 `desktop/resources/<goos>-<goarch>/bin/` 是 mygo 的[平台资源目录](https://github.com/egoist/mygo/blob/main/docs/distribution.md#platform-resources)：
 打包时只合并目标平台的那一份，Linux 应用里不会混进 Windows 的 `.exe`。用平台目录而不是共享的
@@ -34,7 +35,11 @@ scripts/build/build-app.sh                    # 本机平台
 scripts/build/build-app.sh -platform windows/amd64   # 交叉编译（需要 bun；compute 不能交叉）
 ```
 
-脚本顺序：`bundle-server.sh` → `bundle-compute.sh` → `go run github.com/egoist/mygo/cmd/mygo@v0.7.4 build ./desktop`。
+脚本顺序：`bundle-server.sh` → `bundle-compute.sh` → `bundle-static.sh` → `go run github.com/egoist/mygo/cmd/mygo@v0.7.4 build ./desktop`。
+`bundle-static.sh` 把仓库的 `static/vendor/{plotly,echarts,d3}` 复制到
+`desktop/resources/<goos>-<goarch>/static/vendor/`：图表 HTML 引用旧网页的 `/static/vendor/*`，桌面应用的
+`dw-preview://` 处理器从这里取，离线也能画图。开发时没有这一步，`findStaticDir()` 会从可执行文件与工作目录
+向上找仓库里的 `static/`；也可以用 `DW_STATIC_DIR` 显式指定。
 环境变量：`DW_RESOURCES_DIR`（资源根，默认 `desktop/resources`）、`DW_SKIP_COMPUTE=1`（不打包 compute，
 安装包要求用户自备 Python）、`DW_SKIP_INSTALLER=1`、`DW_SKIP_NOTARIZE=1`、`DW_SIGN_IDENTITY`。
 

@@ -1617,11 +1617,17 @@ func permissionLabel(permission string) string {
 	return "read only"
 }
 
-// artifactsTab 是「产物」页签：列出导出文件，文本产物就地预览。
+// artifactsTab 是「产物」页签：列出导出文件，文本产物就地预览，HTML/SVG 用 web view 预览。
 func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "Artifacts").Bold().FontSize(16)
 		ui.Spacer(c)
+		if ui.Button(c, "Dashboards").Tooltip("View this machine's dashboards read-only").Clicked() {
+			a.openDashboards()
+		}
+		if ui.Button(c, "Canvas").Tooltip("Open diagram files from this chat's artifacts").Clicked() {
+			a.openCanvas()
+		}
 		if ui.Button(c, "Refresh").Tooltip("Reload the artifact list").Clicked() {
 			a.loadSources()
 		}
@@ -1642,27 +1648,40 @@ func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 			ui.Textf(c, "%s · %s", formatBytes(art.Size), art.Modified).FontSize(12).TextColor(t.TextMuted)
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Spacer(c)
-				if textArtifact(art.Name) {
+				switch {
+				case htmlArtifact(art.Name):
+					if ui.Button(c, "Preview").Tooltip("Show " + art.Name + " here").Clicked() {
+						a.showHTMLArtifact(art)
+					}
+				case diagramFile(art.Name):
+					if ui.Button(c, "Open").Tooltip("Open " + art.Name + " with the system's draw.io").Clicked() {
+						c.OpenURL(fileURL(art.Path))
+					}
+				case textArtifact(art.Name):
 					if ui.Button(c, "Preview").Tooltip("Read " + art.Name + " here").Clicked() {
 						a.previewArtifact(art)
 					}
-				} else {
+				default:
 					ui.Text(c, "Open the path to view it").FontSize(12).TextColor(t.TextMuted)
 				}
 			})
 			if a.src.artifactName == art.Name {
-				switch {
-				case a.src.artifactErr != "":
-					ui.Text(c, a.src.artifactErr).FontSize(12).TextColor(t.Danger)
-				case !a.src.artifactLoaded:
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Spinner(c)
-						ui.Text(c, "Reading…").FontSize(12).TextColor(t.TextMuted)
-					})
-				default:
-					text := ui.Text(c, a.src.artifactText).FontSize(12).Selectable()
-					if mono := a.monoFont(); mono != "" {
-						text.Font(mono)
+				if htmlArtifact(art.Name) {
+					a.artifactPreviewCard(c, art)
+				} else {
+					switch {
+					case a.src.artifactErr != "":
+						ui.Text(c, a.src.artifactErr).FontSize(12).TextColor(t.Danger)
+					case !a.src.artifactLoaded:
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							ui.Spinner(c)
+							ui.Text(c, "Reading…").FontSize(12).TextColor(t.TextMuted)
+						})
+					default:
+						text := ui.Text(c, a.src.artifactText).FontSize(12).Selectable()
+						if mono := a.monoFont(); mono != "" {
+							text.Font(mono)
+						}
 					}
 				}
 			}

@@ -254,36 +254,51 @@ func (a *app) toolRow(c *ui.Context, m api.Message) {
 	if tool.Name != "ask_user" {
 		output = tool.Output
 	}
-	ui.Column(c).MaxWidth(760).Padding(4, 8).Radius(8).Background(t.Surface).BorderWidth(0, 0, 0, 2).BorderColor(t.Border).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, tool.Name).FontSize(12)
-			if tool.Args != "" {
-				ui.Text(c, tool.Args).FontSize(11).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
-			} else {
-				ui.Spacer(c)
-			}
-			if tool.Status == "running" && !m.Done {
-				ui.Spinner(c)
-			}
-			ui.Text(c, toolMeta(tool)).FontSize(11).TextColor(toolStatusColor(t, tool.Status))
-			if output != "" {
-				label := "Details"
-				if open {
-					label = "Hide"
+	ui.Column(c).MaxWidth(760).Gap(8).Children(func() {
+		ui.Column(c).Padding(4, 8).Radius(8).Background(t.Surface).BorderWidth(0, 0, 0, 2).BorderColor(t.Border).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, tool.Name).FontSize(12)
+				if tool.Args != "" {
+					ui.Text(c, tool.Args).FontSize(11).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+				} else {
+					ui.Spacer(c)
 				}
-				if ui.Button(c, label).FontSize(11).Tooltip("Show the full tool output").Clicked() {
-					if a.cv.openTools == nil {
-						a.cv.openTools = map[string]bool{}
+				if tool.Status == "running" && !m.Done {
+					ui.Spinner(c)
+				}
+				ui.Text(c, toolMeta(tool)).FontSize(11).TextColor(toolStatusColor(t, tool.Status))
+				if output != "" {
+					label := "Details"
+					if open {
+						label = "Hide"
 					}
-					a.cv.openTools[m.Key] = !open
+					if ui.Button(c, label).FontSize(11).Tooltip("Show the full tool output").Clicked() {
+						if a.cv.openTools == nil {
+							a.cv.openTools = map[string]bool{}
+						}
+						a.cv.openTools[m.Key] = !open
+					}
 				}
+			})
+			if open && output != "" {
+				// 长结果限高并滚动：展开后信息不丢，也不会把消息流撑到看不见正文。Scroll 需要一个确定的
+				// 高度才会给内容可见的窗口，所以按输出长度估一个高度（上限 240 DIP）。
+				ui.Scroll(c).Height(outputHeight(output, 240)).Children(func() {
+					ui.Text(c, output).FontSize(12).Selectable()
+				})
 			}
 		})
-		if open && output != "" {
-			// 长结果限高并滚动：展开后信息不丢，也不会把消息流撑到看不见正文。Scroll 需要一个确定的
-			// 高度才会给内容可见的窗口，所以按输出长度估一个高度（上限 240 DIP）。
-			ui.Scroll(c).Height(outputHeight(output, 240)).Children(func() {
-				ui.Text(c, output).FontSize(12).Selectable()
+		// 图表与仪表盘：结果里带了就画出来，而不是只留一句 “Chart generated”。图表用
+		// ui.WebView（richcontent.go），尺寸随窗口与数据面板变化。
+		for _, chart := range tool.Charts {
+			a.chartCard(c, chart)
+		}
+		if tool.DashboardID != "" {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "Dashboard "+tool.DashboardID).FontSize(11).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+				if ui.Button(c, "View dashboard").FontSize(11).Tooltip("Open this chat's dashboard read-only").Clicked() {
+					a.openDashboard(tool.DashboardID)
+				}
 			})
 		}
 	})

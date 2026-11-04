@@ -12,6 +12,7 @@ import (
 
 	"datawhisper/desktop/internal/api"
 	"datawhisper/desktop/internal/supervisor"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -72,6 +73,11 @@ type app struct {
 
 	list ui.ListState
 	md   markdown.Options
+
+	// win 是主窗口。没有窗口（测试）时内容宽度用默认值，图表按它定高度。
+	win *mygo.Window
+	// rich 是图表与富内容的网页层（图表、HTML 产物、仪表盘、画布），见 richcontent.go。
+	rich richContent
 }
 
 // pendingSend 保存一条消息的 requestId 直到它被受理：失败后重发同样的文本会复用它，这样服务在失败前已经
@@ -79,6 +85,16 @@ type app struct {
 type pendingSend struct{ requestID, text string }
 
 func navOf(conv int) string { return "c" + strconv.Itoa(conv) }
+
+// contentWidth 返回窗口内容区宽度；没有窗口（测试、服务未就绪）时用默认窗口宽度。
+func (a *app) contentWidth() float32 {
+	if a.win != nil {
+		if width, _ := a.win.ContentSize(); width > 0 {
+			return float32(width)
+		}
+	}
+	return 1180
+}
 
 func newRequestID() string {
 	b := make([]byte, 12)
@@ -194,6 +210,10 @@ func (a *app) show(conv int) {
 	a.conv, a.chat = conv, api.State{}
 	a.sendErr, a.needModel = "", false
 	a.cv.resetConversation()
+	// 聊天里的图表与面板里的产物预览都属于上一个会话：切换时把它们的 web view 释放掉，
+	// 不留下看不见的页面。
+	a.rich.releaseChat()
+	a.rich.releasePanel()
 	a.sourcesConversationChanged()
 	a.follow()
 }
@@ -338,6 +358,7 @@ func (a *app) view(c *ui.Context) {
 	})
 	// 弹窗画在窗口根上，不被数据面板的分割线裁掉。
 	a.chatModals(c)
+	a.richModals(c)
 }
 
 func (a *app) sidebar(c *ui.Context) {

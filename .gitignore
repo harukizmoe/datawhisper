@@ -168,6 +168,8 @@ scripts/*
 
 # 随包的可执行文件由 scripts/build/*.sh 生成，不入库（每个约 100 MB）。
 desktop/resources/*/bin/
+# 随包的图表静态库（plotly/echarts/d3）同样由 bundle-static.sh 复制，不入库。
+desktop/resources/*/static/
 # Untracked assets
 Information/assets/LOGO.png
 

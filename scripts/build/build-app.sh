@@ -54,6 +54,17 @@ else
   echo "==> bundle compute: skipped (DW_SKIP_COMPUTE=1)"
 fi
 
+echo "==> bundle static"
+# 图表 HTML 引用旧网页的 /static/vendor/*；它们随包，图表在离线机器上也能画。
+if [[ "$PLATFORM" == "darwin/universal" ]]; then
+  "$ROOT/scripts/build/bundle-static.sh" darwin/arm64
+  "$ROOT/scripts/build/bundle-static.sh" darwin/amd64
+elif [[ -n "$PLATFORM" ]]; then
+  "$ROOT/scripts/build/bundle-static.sh" "$PLATFORM"
+else
+  "$ROOT/scripts/build/bundle-static.sh"
+fi
+
 echo "==> mygo build"
 BUILD_ARGS=(build "$ROOT/desktop")
 if [[ -n "$PLATFORM" ]]; then
