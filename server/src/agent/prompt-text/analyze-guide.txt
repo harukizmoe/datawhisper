@@ -1,0 +1,32 @@
+  AB_Test_Analysis               — 比较两组单位级实验数据，输出 SRM、显著性检验、95% 置信区间与提升幅度。
+    必填参数: target_column, groupby_column │ 可选参数: analysis_options.control_group, analysis_options.metric_type, analysis_options.expected_allocation
+  Data_Decile_Analysis           — 将数值指标按大小等频分桶，计算每桶的 count/sum/mean/median/std/min/max/值域范围/占比/累计占比，验证 Pareto 效应，适用于客户价值分层、销售分布剖析、ESG 
+    必填参数: target_column │ 可选参数: groupby_column, n_deciles
+  Decision_Tree                  — 使用 ID3 / C4.5 / CART 决策树对数据进行分类分析。输出特征重要性、训练/测试准确率、混淆矩阵及 ROC 曲线（含 AUC）。通过 groupby_column 参数指定算法（ID3/
+    必填参数: target_column │ 可选参数: groupby_column (algorithm: ID3 / C4.5 / CART, default C4.5), n_deciles (max_depth: 0=unlimited, default 0)
+  K_Means                        — 对数值型特征执行 K-Means 聚类（K-Means++ 初始化，Z-score 标准化）。自动计算肘部曲线（SSE）和轮廓系数，辅助选择最优 K。通过 n_deciles 参数指定簇数 K（默认 
+    必填参数: target_column │ 可选参数: groupby_column (optional label column for cluster purity), n_deciles (K: number of clusters, default 3)
+  Logistic_Regression            — 使用逻辑回归对数据进行二分类或多分类分析（OvR 策略）。输出特征系数与重要性、训练/测试准确率、混淆矩阵及 ROC 曲线（含 AUC）。通过 groupby_column 参数传入正则化强度（lam
+    必填参数: target_column │ 可选参数: groupby_column (L2 regularization lambda, default 0.01), n_deciles (max_iter: default 1000)
+  Regression                     — 使用最小二乘法（OLS）进行线性回归或多项式回归，支持多元特征与岭回归正则化。输出系数表（含 t 统计量与 p 值）、残差诊断表及 R² / RMSE / MAE 等评估指标。通过 groupby_c
+    必填参数: target_column │ 可选参数: groupby_column (ridge lambda, default 0 = plain OLS), n_deciles (polynomial degree, default 1 = linear)
+  Sklearn_Model                  — 使用 scikit-learn 进行通用机器学习建模：分类（随机森林/逻辑回归）、回归（随机森林/线性/岭回归）、聚类（KMeans），自动预处理缺失值与类别特征，输出评估指标、特征重要性或聚类结果及
+    必填参数: target_column │ 可选参数: groupby_column (model: rf / lr / lm / ridge / kmeans, default rf), n_deciles (kmeans 聚类数 或 随机种子, default 42)
+  Torch_MLP                      — 使用可选 PyTorch 训练 MLP 分类或回归模型，自动选择可用 CUDA 或 CPU。groupby_column 使用 mlp_cls（默认）或 mlp_reg；n_deciles 为训练 e
+    必填参数: target_column │ 可选参数: groupby_column (mlp_cls / mlp_reg), n_deciles (训练 epoch, default 60)
+  Torch_RNN                      — 使用可选 PyTorch 训练 GRU 或 LSTM 时间序列预测模型，自动选择可用 CUDA 或 CPU，支持多步滚动预测与 MC Dropout 置信区间估计。groupby_column 为时间
+    必填参数: target_column │ 可选参数: groupby_column (时间列名，默认自动探测；传 lstm 切换 LSTM 单元), n_deciles (预测步数, default 12)
+  Time_Series_TimesFM3           — 通过已配置的本地预测服务进行单/多商品预测；默认不下载模型。analysis_options 指定 time_column、series_column、horizon。
+    必填参数: target_column, analysis_options.time_column │ 可选参数: analysis_options.series_column, analysis_options.target_columns, analysis_options.horizon, analysis_options.frequency, analysis_options.backtest_steps, analysis_options.make_positive
+  Univariate_Screening           — 对每个候选自变量分别与目标变量做简单 OLS 回归，输出系数、标准误、t 统计量、p 值、R²，并按显著性（默认 p<0.05）分类汇总。适用于多元建模前的变量预筛选。
+    必填参数: target_column │ 可选参数: groupby_column (significance threshold, default '0.05')
+  Time_Series_ARIMA              — 使用 ARIMA 模型对单变量时间序列进行建模与预测。pmdarima auto_arima stepwise 在全量数据上搜索最优阶数，输出预测值、置信区间与残差诊断。通过 groupby_colu
+    必填参数: target_column │ 可选参数: groupby_column (时间列名，或手动阶数 'p,d,q'，默认自动), n_deciles (预测步数，默认 12)
+  Time_Series_SARIMA             — 使用 SARIMA 模型对含季节性波动的单变量时间序列建模预测。自动推断季节周期、执行 ADF 检验、AIC 选阶，输出预测值与季节分解结果。通过 groupby_column 指定时间列名或季节周期
+    必填参数: target_column │ 可选参数: groupby_column (时间列名，或季节周期数字如 '12'/'4'/'7'，默认自动推断), n_deciles (预测步数，默认 12)
+  Time_Series_VAR                — 使用向量自回归（VAR）对多个相关时间序列变量联合建模，捕捉变量间动态依赖关系。自动选择滞后阶数，输出各变量预测值与格兰杰因果检验结果。通过 groupby_column 指定时间列名（或逗号分隔的多
+    必填参数: target_column │ 可选参数: groupby_column (时间列名；或逗号分隔的多个变量列名如 'sales,cost'), n_deciles (预测步数，默认 6)
+  Time_Series_Prophet            — 使用 Prophet 加法分解框架（趋势 + 季节性 + 残差）预测时间序列，纯 numpy+pandas 实现，无需安装 prophet/fbprophet 包。自动识别年度 / 周度 / 日内季节
+    必填参数: target_column │ 可选参数: groupby_column (时间列名，默认自动探测), n_deciles (预测步数，默认 30)
+  Time_Series_GRU                — 使用门控循环单元（GRU）神经网络预测时间序列，纯 numpy 从零实现，无需 keras/tensorflow。支持多步滚动预测与置信区间估计（蒙特卡洛 dropout 近似）。通过 groupby
+    必填参数: target_column │ 可选参数: groupby_column (时间列名，默认自动探测), n_deciles (预测步数，默认 12)

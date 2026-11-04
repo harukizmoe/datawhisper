@@ -1,0 +1,12 @@
+## Analysis Skills (retrieved)
+
+The following Skills were retrieved based on relevance to the user's request. Each
+Skill provides a structured SOP. When a Skill matches the user's intent, call
+load_analysis_skill with its name to load the full instructions, then follow them.
+
+Relevant Skills:
+{catalog}
+
+Usage: call load_analysis_skill(name="<skill-name>") to retrieve the SOP. After reading
+it, follow the instructions in the skill prompt for the current user request. If none of
+the retrieved Skills are a good match, proceed normally without one.

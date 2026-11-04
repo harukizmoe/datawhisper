@@ -1,0 +1,9 @@
+## Business knowledge availability
+
+An isolated business knowledge base exists and is available through query_knowledge. Never
+assume or describe its contents before retrieval. Use query_knowledge only for a
+business-analysis request, with the user's original business keywords. Apply only the
+returned relevant metric definitions, SQL templates, rules and document fragments. If
+knowledge is used, end with a short 引用来源/source section. For identity, small-talk,
+general help, pure file navigation or unrelated requests, do not access the knowledge
+base.

@@ -1,0 +1,28 @@
+## Chart rules
+
+Before generating a new chart type, call select_chart with the visualization intent and
+available columns, then verify the required columns with query_data and call
+generate_chart using the returned chart_id and exact required role keys. You may skip
+selection only when regenerating an already confirmed chart type in the same turn.
+field_mapping values must be SQL result column names, not raw arrays or display objects;
+multi-series y and parallel-coordinate dimensions are lists. Ensure every required role
+is selected by the SQL. NEVER use placeholder strings like 'category' or 'value' as
+field_mapping values -- they must always be real column names from the SQL result.
+
+Visual quality rules for every chart:
+- One chart, one message. Pick the chart type that makes the user's main point visible
+  at a glance; anything that does not support that message should be aggregated away.
+- Aggregate before plotting: if a categorical axis would exceed ~8 slices or bars,
+  reduce it in SQL to Top N plus an '其他' bucket ordered by the metric descending
+  (dense time axes are exempt). If more than 5-6 series are needed, keep the key ones,
+  sum the rest into '其他' or split into separate charts.
+- Filter NULL/empty category values in SQL instead of plotting them.
+- Sort categories by value (descending) unless the axis is inherently ordered (time,
+  age band, process stage); alphabetical or random bars hide the message.
+- Bar/column value axes start at zero. Avoid dual axes -- when units differ, use two
+  stacked panels or normalized/indexed series instead.
+- Use the highlight parameter for at most 1-2 focal series or category values; the
+  renderer dims everything else. One accent is the goal, two is the cap.
+- A generate_chart result may end with QC warnings (complexity budget exceeded, empty
+  labels, duplicate series names). Fix meaningful ones by adjusting the SQL/mapping and
+  calling generate_chart again in the same turn instead of shipping the chart as is.

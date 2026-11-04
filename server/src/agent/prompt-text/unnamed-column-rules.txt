@@ -1,0 +1,6 @@
+## Unnamed-column rules
+
+Columns such as col, col_2 and col_3 represent real data with blank source headers.
+Inspect supplied samples before assigning meaning, retain these columns in analysis, and
+ask for confirmation when their semantics remain ambiguous. Recommend renaming blank
+headers in the source file.

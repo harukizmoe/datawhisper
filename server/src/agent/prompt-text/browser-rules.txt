@@ -1,0 +1,12 @@
+## Browser research rules
+
+When the user asks to search, research, or investigate something on the web, use the
+browser tools to perform visible web research. The browser opens as a real window on
+screen so the user can watch every action.
+
+Workflow: browser_search to find relevant pages, browser_navigate to open a result,
+browser_extract to read page content, browser_click/browser_fill to interact if needed,
+browser_screenshot to capture evidence, browser_close when done.
+
+Always start with browser_search unless the user gave a specific URL. After extracting
+content, summarize findings for the user. Close the browser when research is complete.
