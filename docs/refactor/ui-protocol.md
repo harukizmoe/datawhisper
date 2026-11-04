@@ -1,55 +1,62 @@
-# 界面通信协议（P2.3）
+# 界面通信协议（P2.3，传输已改为 stdio）
 
-Go 桌面应用（`desktop/`）与 Bun agent 服务（`server/`）之间的协议。服务只给本机的 Go 界面用。界面连接或重连时先拿到对话的完整当前状态（快照），之后只收增量（ops）；不兼容旧版一次 POST 返回的 28 种 SSE 事件。
+Go 桌面应用（`desktop/`）与 Bun agent 服务（`server/`）之间的协议。服务是 Go 启动的子进程，两侧通过**子进程的 stdin/stdout 上 JSONL 分帧的 JSON-RPC 2.0** 通信：没有端口、没有令牌、没有网络面。界面连接或重连时先拿到对话的完整当前状态（快照），之后只收增量（ops）；不兼容旧版一次 POST 返回的 28 种 SSE 事件。
 
-版本：`@earendil-works/pi-durable` / `pi-ai` / `chord` 1.5.0，`hono` 4.13.16，`github.com/egoist/mygo` v0.7.4。
+传输决策与理由见 `docs/refactor/ui-transport.md`；本文只写语义。
+
+版本：`@earendil-works/pi-durable` / `pi-ai` / `chord` 1.5.0，`github.com/egoist/mygo` v0.7.4。
 
 | 内容 | TS（服务） | Go（界面） |
 |---|---|---|
+| 分帧与分发 | `server/src/ipc/{framing,rpc,methods,attach}.ts` | `desktop/internal/api/client.go`、`subscribe.go` |
 | 线上类型 | `server/src/protocol.ts` | `desktop/internal/api/client.go`、`subscribe.go` |
-| 路由 | `server/src/routes/conversations.ts`、`server/src/routes/models.ts` | — |
+| 业务 | `server/src/conversations/service.ts`、`server/src/models/service.ts` | — |
 | 由快照和 ops 还原视图 | chord `applyImmutable`（测试中使用） | `desktop/internal/api/delta.go`（`ApplyOps`）、`replica.go`（`Replica`、`State`） |
-| 订阅与重连 | — | `desktop/internal/api/follow.go`（`Follow`） |
+| 重连 | — | `desktop/internal/api/follow.go`（`Follow`） |
 | 子进程 | `server/src/main.ts`（进程约定） | `desktop/internal/supervisor` |
 
-## 1. 进程与鉴权
+## 1. 进程、分帧与生命周期
 
 Go 应用把服务作为子进程启动：开发时是 `bun run server/src/main.ts`（从工作目录向上查找），发布时是 `bun build --compile` 编出的单文件，用 `-service` 参数或 `DW_SERVICE` 指定。
 
 | 项 | 约定 |
 |---|---|
-| 环境变量 | `DW_TOKEN`：令牌，Go 每次启动应用时生成 32 字节随机数，base64url 编码（43 个字符），不写日志；`DW_PORT=0`；`DW_DATA_DIR`：与 `server/src/config.ts` 的默认目录相同（macOS `~/Library/Application Support/DataWhisper`，Windows `%APPDATA%\DataWhisper`，其他系统 `$XDG_DATA_HOME/datawhisper`，默认 `~/.local/share/datawhisper`）；可选 `DW_PYTHON`、`DW_COMPUTE_CWD` |
-| 就绪 | stdout 第一行是 `{"type":"ready","port":N,"pid":N}`；其余 stdout、stderr 行都是日志，Go 端写入 `<数据目录>/logs/service.log` |
+| 环境变量 | `DW_DATA_DIR`（macOS `~/Library/Application Support/DataWhisper`，Windows `%APPDATA%\DataWhisper`，其他系统 `$XDG_DATA_HOME/datawhisper`，默认 `~/.local/share/datawhisper`）；可选 `DW_PYTHON`、`DW_COMPUTE_CWD` |
+| 就绪 | stdout 第一行是 `{"type":"ready","pid":N}`，之后 stdout 只有 JSON-RPC 记录 |
+| 日志 | stderr 与其余诊断行都是日志，Go 端写入 `<数据目录>/logs/service.log` |
+| 分帧 | 一条记录一个 JSON 对象 + `\n`。只按 LF 切分：`U+2028`/`U+2029` 在 JSON 字符串里合法，不能当记录边界（Node 的 `readline` 不适用） |
+| 背压 | 写方串行写出并等写完再写下一行；读方必须持续消费，否则服务端阻塞 |
+| 关联 | 请求可带 `id`，响应原样回带；处理是异步的，客户端按 `id` 关联，不依赖顺序 |
 | 停止 | 关闭子进程的 stdin（服务读到 EOF 后正常退出），10 秒后仍未退出发 SIGTERM，再过 10 秒强杀。Windows 没有 SIGTERM，关闭 stdin 就是停止的办法 |
-| 崩溃 | 运行中退出都算崩溃（退出码 1 表示存储失败）。Go 端退避后重启：0.5 秒起，每次翻倍，最多 15 秒；2 分钟内崩溃 5 次后不再重启，进入失败状态，界面提供“Retry”。重启后端口会变，令牌不变 |
+| 崩溃 | 运行中退出都算崩溃（退出码 1 表示存储失败）。Go 端退避后重启：0.5 秒起，每次翻倍，最多 15 秒；2 分钟内崩溃 5 次后不再重启，进入失败状态，界面提供"Retry"。重启后是新的管道，客户端重建连接并重新订阅 |
 
-鉴权：
+错误码沿用 JSON-RPC：`-32700` 解析失败、`-32600` 请求非法、`-32601` 未知方法、`-32602` 参数非法、`-32603` 内部错误；业务错误用 `-32000`，细分在 `data.kind`。
 
-- `/v1/*` 的请求都要带 `Authorization: Bearer <令牌>`，缺少或不对返回 401。
-- Web view 资源（P7.2 的图表、画布、仪表盘页面和它们的脚本）不放在 `/v1` 下。WebKit 加载页面时不能带请求头，所以这些资源用 URL 参数 `?token=<令牌>` 鉴权；只带 Bearer 头、不带参数的请求返回 401；页面里引用的子资源也要带上参数。P0.3 已验证（`server/spike/src/spike4-server.ts` 的 `/chart.html` 和 `/static/plotly.min.js`）。`server/src` 目前还没有资源路由，P7.2 加第一个时按这条实现。
-- 错误响应的 body 是 `{"error": string}`。
+## 2. 方法
 
-## 2. 接口
+`:id` 是 `root` 或会话的数字 id（正整数）。`root` 是 pi-durable 保留的根会话（id 1，第一次访问时创建），新建的会话 id 从 2 开始。不存在或格式不对的 id 报 `-32000` `data.kind = "not_found"`。
 
-`:id` 是 `root` 或会话的数字 id（正整数）。`root` 是 pi-durable 保留的根会话（id 1，第一次访问时创建），新建的会话 id 从 2 开始。不存在或格式不对的 id 返回 404 `{"error":"not_found"}`。
-
-| 方法 | 路径 | 请求 | 成功响应 | 错误 |
-|---|---|---|---|---|
-| GET | `/v1/health` | — | `{ok, scheduling, tasks, submissions, computePid}` | — |
-| GET | `/v1/conversations` | — | `{conversations: ConversationSummary[]}`，新的在前 | — |
-| POST | `/v1/conversations` | 可选：`{model?: {provider, modelId}, thinkingLevel?}` | 201 `{id}` | 400：未知模型，或模型不支持该思考强度 |
-| GET | `/v1/conversations/:id/subscribe` | — | SSE，见第 3 节 | 404 |
-| POST | `/v1/conversations/:id/submit` | `{requestId, text, whenBusy?: "steer" \| "followUp"}` | `{submissionId, status}` | 400、404、409 `no_model`、409 `model_unavailable` |
-| PUT | `/v1/conversations/:id/model` | `{model: {provider, modelId}, thinkingLevel: <强度> \| null}` | `{model, thinkingLevel}` | 400、404 |
-| POST | `/v1/conversations/:id/abort` | — | `{ok: true}` | 404 |
-| — | `/v1/models/*` | 模型设置，见第 6 节 | | |
+| 方法 | 参数 | 结果 | 错误 |
+|---|---|---|---|
+| `health` | — | `{ok, scheduling, tasks, submissions, computePid}` | — |
+| `conversation.list` | — | `{conversations: ConversationSummary[]}`，新的在前 | — |
+| `conversation.create` | 可选 `{model?, thinkingLevel?}` | `{id}` | `-32602`：未知模型，或模型不支持该思考强度 |
+| `conversation.subscribe` | `{id}` | `{subscriptionId}`，随后推送通知（第 3 节） | `not_found` |
+| `conversation.unsubscribe` | `{subscriptionId}` | `{ok: true}` | `-32602` |
+| `conversation.submit` | `{id, requestId, text, command?, whenBusy?}` | `{submissionId, status}` | `-32602`、`not_found`、`no_model`、`model_unavailable` |
+| `conversation.setModel` | `{id, model: {provider, modelId}, thinkingLevel: <强度> \| null}` | `{model, thinkingLevel}` | `-32602`、`not_found` |
+| `conversation.abort` | `{id}` | `{ok: true}` | `not_found` |
+| `usage.summary` | — | `harness.usage()` 的汇总 | — |
+| `models.*` | 见第 6 节 | | |
 
 ### 提交（submit）
 
 - `requestId`：客户端生成的幂等键，在一个会话内唯一。同一个 `requestId` 再提交，返回同一个提交；它存在 SQLite 里，服务重启后也成立。Go 界面发送失败后，用同样的文本重发时沿用原来的 `requestId`，所以服务已收下的消息不会被收两次。
+- `command`：斜杠命令名（不含 `/`）。给出时本轮按命令执行，并解锁该命令的输出类工具。
 - `whenBusy`：对话正在运行时，`followUp`（默认）排到这一轮之后，`steer` 在下一个边界插入当前这一轮。
 - `status` 即 pi-durable 的 `SubmissionRecord.status`：`queued`（在 `pi.inbox` 里排队）、`placed`（已写入对话，等待回答）、`done`（已回答）、`unanswered`（运行结束但没有回答，原因见 `pi.live.runFailure`）。
-- 会话还没有模型时，服务在第一次提交时给它配上默认模型；一个可用模型都没有时返回 409 `{"error":"no_model"}`。会话的模型所属的提供商被删除或停用时返回 409 `{"error":"model_unavailable"}`。这两种 409 界面都要引导用户去模型设置（Go：`api.ErrNoModel`、`api.ErrModelUnavailable`）。
+- 会话还没有模型时，服务在提交时给它配上默认模型；一个可用模型都没有时报 `no_model`。会话的模型所属的提供商被删除或停用时报 `model_unavailable`。这两种情况界面都要引导用户去模型设置（Go：`api.ErrNoModel`、`api.ErrModelUnavailable`）。
+- 提交前服务还会写入本轮上下文（消息、命令、数据源状态、关键词发现结果），并按 `server/src/tools/exposure.ts` 的算法重设本轮 `modelTools`。这一步会产生一条 `pi.system` 位置标记，界面渲染时应跳过。
 
 ### 中止（abort）
 
@@ -59,37 +66,38 @@ Go 应用把服务作为子进程启动：开发时是 `bun run server/src/main.
 
 `ConversationSummary = {id, root, parent?: {conversationId, at}, lastEntryId: number | null, updatedAt: number | null}`。只列出无主会话，任务创建的子会话不列。`updatedAt` 是最新一条 entry 中最后一条消息的 `timestamp`（毫秒），没有就是 `null`。
 
-pi-durable 1.5.0 的会话记录（`ConversationRecord`）只有 `id`、`parent`（分叉来源）和 `owner`（所属任务），没有标题、创建时间等元数据，所以列表暂时没有标题，界面先显示为“Chat <id>”。标题留到 P3.5，例如用一个应用自己的会话文档保存。
+pi-durable 1.5.0 的会话记录（`ConversationRecord`）只有 `id`、`parent`（分叉来源）和 `owner`（所属任务），没有标题、创建时间等元数据，所以列表暂时没有标题，界面先显示为"Chat <id>"。标题留到 P7.1，用一个应用自己的会话文档保存。
 
 ### 模型
 
-- 新建会话不带 `model` 时用设置里的默认模型：保存的默认模型仍然可用就用它，否则用第一个可用模型；没有可用模型时会话不带模型创建，提交时返回 409 `no_model`。
-- `PUT /:id/model` 从下一次模型请求起生效；`thinkingLevel: null` 表示清除，回到默认。响应里的 `thinkingLevel` 是实际生效的强度。
-- 思考强度取值：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，以模型支持的为准（`/v1/models/available` 的 `thinkingLevels`）。
+- 新建会话不带 `model` 时用设置里的默认模型：保存的默认模型仍然可用就用它，否则用第一个可用模型；没有可用模型时会话不带模型创建，提交时报 `no_model`。
+- `conversation.setModel` 从下一次模型请求起生效；`thinkingLevel: null` 表示清除，回到默认。响应里的 `thinkingLevel` 是实际生效的强度。
+- 思考强度取值：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，以模型支持的为准（`models.available` 的 `thinkingLevels`）。
 - 会话当前的模型在视图的 `docs["pi.agent"]` 里，界面从订阅中读取，不需要另外请求。
 
-## 3. 订阅（SSE）
+## 3. 订阅（通知）
 
-`GET /v1/conversations/:id/subscribe` 返回 `text/event-stream`：
+`conversation.subscribe {id}` 返回 `{subscriptionId}`，之后服务推送 `conversation.event` 通知：
 
-| 事件 | data | 说明 |
-|---|---|---|
-| `snapshot` | `{seq: 0, view}` | 每个订阅的第一个事件；`view` 是 `conversation.watch()` 的当前值（第 4 节） |
-| `ops` | `{seq, ops}` | `seq` 从 1 开始，每个事件加 1；`ops` 把 `seq - 1` 时的视图变成 `seq` 时的视图 |
-| `end` | `{kind}` | watch 结束（服务关闭时为 `ended`，存储失败时为 `failed`），服务随后关闭这条流 |
-| 注释行 `: ping` | — | 心跳，每 15 秒一行；不是事件 |
+| 通知参数 | 说明 |
+|---|---|
+| `{subscriptionId, event: "snapshot", seq: 0, view}` | 每个订阅的第一个事件；`view` 是 `conversation.watch()` 的当前值（第 4 节） |
+| `{subscriptionId, event: "ops", seq, ops}` | `seq` 从 1 开始，每个事件加 1；`ops` 把 `seq - 1` 时的视图变成 `seq` 时的视图 |
+| `{subscriptionId, event: "end", kind}` | watch 结束（服务关闭时为 `ended`，存储失败时为 `failed`） |
 
 规则：
 
-1. 每个订阅单独编号。SSE 的 `id:` 字段等于 `seq`。
-2. 一个 `ops` 事件对应 watch 的一次回调；回调还在处理时到达的多次提交会合并成一次。没有 op 的回调不发事件。
-3. watch 的 `failed` 回调（暂时算不出值）不发事件；之后的第一个值以 `["r", value]` 开头，照常应用即可。
-4. 客户端遇到以下情况时重新订阅：`seq` 不连续、应用 op 出错、收到 `end`、连接断开、45 秒内没收到任何字节（心跳也算）。服务不支持 `Last-Event-ID` 续传，重连一律从新快照开始，客户端不用保存任何游标。
-5. 服务每 15 秒写一次心跳；写入失败说明对方已经断开，服务停止这个 watch。
+1. 每个订阅单独编号。同一时刻可能有多个订阅，通知按管道顺序到达，客户端按 `subscriptionId` 分发。
+2. **快照可能先于 `subscribe` 的响应到达管道**：服务在返回前已写出快照。客户端必须缓存"还没有对应订阅的响应"的通知，拿到 `subscriptionId` 后按序补交，不能丢弃。
+3. 一个 `ops` 通知对应 watch 的一次回调；回调还在处理时到达的多次提交会合并成一次。没有 op 的回调不发通知。
+4. watch 的 `failed` 回调（暂时算不出值）不发通知；之后的第一个值以 `["r", value]` 开头，照常应用即可。
+5. 客户端遇到以下情况时重新订阅：`seq` 不连续、应用 op 出错、收到 `end`、管道关闭。服务不支持续传，重连一律从新快照开始，客户端不用保存任何游标。
+6. `conversation.unsubscribe` 停止 watch 且**不**发 `end`。服务停止时先给所有订阅发 `end`，再关闭。
+7. 管道本身是有序可靠的，所以不再需要心跳：进程消失由 supervisor 观测。
 
 断线重连后界面状态与服务端一致，已用测试验证：TS 端 `server/test/conversations.test.ts` 用 chord 的 `applyImmutable` 还原一次流式回复，结果与重新订阅拿到的快照相等；Go 端 `desktop/live_test.go` 的 `TestLiveReplicaMatchesTheService` 用 `ApplyOps` 还原，与新快照的 JSON 逐字节相等，服务被 SIGKILL 杀掉、重启后拿到的快照也与它相等。
 
-Go 端的 `api.Follow` 实现了上述重连：退避从 250 毫秒开始，每次翻倍，最多 5 秒，收到快照后重置；会话不存在（404）时停止。服务重启后端口会变，界面停掉旧的 `Follow`，用新端口重新订阅。
+Go 端的 `api.Follow` 实现了上述重连：退避从 250 毫秒开始，每次翻倍，最多 5 秒，收到快照后重置；会话不存在时报 `not_found` 并停止。服务重启后是新管道，界面停掉旧的 `Follow`，用新连接重新订阅。
 
 ### ops
 
@@ -148,55 +156,51 @@ Go 端的 `api.Follow` 实现了上述重连：退避从 250 毫秒开始，每�
 
 ## 5. 一次回复的实录
 
-2026-11-04 用 `server/test/support/stub-service.ts`（服务加进程内假模型）录制，长行有截断：
+2026-11-04 用 `server/test/support/stub-service.ts`（服务 + 进程内假模型）经管道录制，长行有截断：
 
 ```
-不带令牌的请求                                              → 401
-POST /v1/conversations {}                                   → 201 {"id":2}
-POST /v1/conversations/2/submit {"requestId":"doc-1",…}     → {"submissionId":9,"status":"placed"}
-回复结束后用同一个 requestId 再提交                         → {"submissionId":9,"status":"done"}
-GET  /v1/conversations                                      → {"conversations":[{"id":2,"root":false,"lastEntryId":11,"updatedAt":1793760037926}]}
-GET  /v1/conversations/99/subscribe                         → 404 {"error":"not_found"}
-PUT  /v1/conversations/2/model {"model":{"provider":"custom-stub","modelId":"stub-reasoner"},"thinkingLevel":"high"}
-                                                            → {"model":{"provider":"custom-stub","modelId":"stub-reasoner"},"thinkingLevel":"high"}
+→ {"id":"1","method":"conversation.create","params":{}}                ← {"id":"1","result":{"id":2}}
+→ {"id":"2","method":"conversation.subscribe","params":{"id":2}}       ← {"id":"2","result":{"subscriptionId":1}}
+→ {"id":"3","method":"conversation.submit","params":{"id":2,"requestId":"doc-1","text":"Summarize the data"}}
+                                                                       ← {"id":"3","result":{"submissionId":10,"status":"placed"}}
+回复结束后用同一个 requestId 再提交                                     ← {"id":"4","result":{"submissionId":10,"status":"done"}}
+→ {"id":"5","method":"conversation.setModel","params":{"id":2,"model":{"provider":"custom-stub","modelId":"stub-reasoner"},"thinkingLevel":"high"}}
+                                                                       ← {"id":"5","result":{"model":{"provider":"custom-stub","modelId":"stub-reasoner"},"thinkingLevel":"high"}}
 ```
 
-```
-event: snapshot
-data: {"seq":0,"view":{"conversation":{"id":2},"entries":[],"docs":{"pi.agent":{"model":{"provider":"custom-stub","modelId":"stub-chat"}},"pi.live":{},"pi.inbox":{"items":[]},"pi.provider":{"sessionId":"01a1a46e-…"},"pi.usage":{"models":{},"tools":{}}}}}
+同一轮的通知（`method: "conversation.event"`，共 6 条）：
 
-event: ops
-data: {"seq":1,"ops":[["s",["docs","pi.live","run"],{"taskId":10,"inputs":[9],"turns":0,"first":8}],["p",["entries"],0,0,[{"model":[{"role":"user","content":"Summarize the data","timestamp":1793760037872}],"kind":"pi.user","id":8,"conversationId":2}]]]}
-data: {"seq":2,"ops":[["s",["docs","pi.live","generation"],{"attempt":1}]]}
-data: {"seq":3,"ops":[["s",["docs","pi.live","generation","message"],{"role":"assistant","content":[{"type":"text","text":"## Hello\n\nThis is a **streamed** mar"}],…,"stopReason":"pending",…}]]}
-data: {"seq":4,"ops":[["a",["docs","pi.live","generation","message","content",0,"text"],"kdown reply from the stub (req"]]}
-…                                                            （seq 5–7 同样是 a）
-data: {"seq":8,"ops":[["d",["docs","pi.live","run"]],["d",["docs","pi.live","generation"]],["s",["docs","pi.usage","models","custom-stub/stub-chat"],{"input":101,"output":20,…,"totalTokens":121,…}],["p",["entries"],1,0,[{"model":[{"role":"assistant",…}],"kind":"pi.assistant","id":11,"conversationId":2,"byTaskId":10}]]]}
-data: {"seq":9,"ops":[["s",["docs","pi.agent","model"],{"provider":"custom-stub","modelId":"stub-reasoner"}],["s",["docs","pi.agent","thinkingLevel"],"high"]]}
+```
+{"method":"conversation.event","params":{"subscriptionId":1,"event":"snapshot","seq":0,"view":{"conversation":{"id":2},"entries":[],"docs":{"pi.agent":{"model":{"provider":"custom-stub","modelId":"stub-chat"}},"pi.live":{},"pi.inbox":{"items":[]},"pi.provider":{"sessionId":"01a1a5db-…"},"pi.usage":{"models":{},"tools":{}}}}}}
+{"method":"conversation.event","params":{"subscriptionId":1,"event":"ops","seq":1,"ops":[["s",["docs","pi.agent","modelTools"],[]]]}}
+{"method":"conversation.event","params":{"subscriptionId":1,"event":"ops","seq":2,"ops":[["s",["docs","pi.live","run"],{"taskId":11,"inputs":[10],"turns":0,"first":9}],["p",["entries"],0,0,[{"model":[{"role":"user","content":"Summarize the data","timestamp":1793783983619}],"kind":"pi.user","id":9,…}]]]}}
+…                                                          （seq 3–4 是 generation 的开始与 `a` 追加流式文本）
+{"method":"conversation.event","params":{"subscriptionId":1,"event":"ops","seq":5,"ops":[["d",["docs","pi.live","run"]],["d",["docs","pi.live","generation"]],["s",["docs","pi.usage","models","custom-stub/stub-chat"],{"input":101,"output":20,…,"totalTokens":121,"cost":{…}}],["p",["entries"],2,0,[{"model":[{"role":"assistant",…}],"kind":"pi.assistant",…}]]]}}
 ```
 
-回复用了 8 个 `ops` 事件（seq 1–8），第 9 个是切换模型。seq 8 提交的回复 `byTaskId` 为 10，与 seq 1 的 `run.taskId` 相同。9 个事件的 op 用量：`s` 6（其中 2 个来自切换模型）、`a` 4、`p` 2、`d` 2。
+注意 seq 1 的 `["s",["docs","pi.agent","modelTools"],[]]`：提交前三步（写本轮上下文 → 收敛工具集 → `configure`）在这一轮没有可用工具，所以先把 `modelTools` 置空。有工具时会列出本轮要给模型的工具名。
 
 ## 6. 模型设置接口（P3.1）
 
-全部路由列在 `server/src/routes/models.ts` 的文件头，请求体类型见 `server/src/models/service.ts`。API key 只能写入，任何响应都不返回 key。
+方法表在 `server/src/ipc/methods.ts`（`models.*`），参数类型见 `server/src/models/service.ts`。API key 只能写入，任何响应都不返回 key。
 
-| 方法 | 路径 | 说明 |
+| 方法 | 参数 | 结果 |
 |---|---|---|
-| GET | `/v1/models` | 设置视图（提供商、默认模型、各提供商认证来源）、内置提供商 id、自定义地址预设 |
-| GET | `/v1/models/available` | 当前可用的聊天模型（已启用且认证齐全的提供商）：`{models: [{provider, id, name, contextWindow, maxTokens, reasoning, vision, thinkingLevels}]}` |
-| PUT / DELETE | `/v1/models/providers/:id` | 新建或替换提供商（`ProviderSettings`，body 里的 id 要与 URL 一致）／删除提供商和它的 key |
-| PUT / DELETE | `/v1/models/providers/:id/key` | 写入 `{apiKey}`／删除 key |
-| PUT | `/v1/models/default` | `{model: ModelRef \| null, thinkingLevel: <强度> \| null}` |
-| POST | `/v1/models/test` | `{model, provider?, apiKey?}`：通过真实提供商发一次很小的请求，可以测试未保存的设置 → `{ok: true, text}` 或 `{ok: false, error}` |
+| `models.view` | — | 设置视图（提供商、默认模型、各提供商认证来源）、内置提供商 id、自定义地址预设 |
+| `models.available` | — | `{models: [{provider, id, name, contextWindow, maxTokens, reasoning, vision, thinkingLevels}]}` |
+| `models.putProvider` / `models.deleteProvider` | `{provider: ProviderSettings}` / `{providerId}` | 设置视图 |
+| `models.setKey` / `models.clearKey` | `{providerId, apiKey}` / `{providerId}` | 设置视图 |
+| `models.setDefault` | `{model: ModelRef \| null, thinkingLevel: <强度> \| null}` | 设置视图 |
+| `models.test` | `{model, provider?, apiKey?}` | 通过真实提供商发一次很小的请求，可测未保存的设置 → `{ok: true, text}` 或 `{ok: false, error}` |
 
-输入不合法返回 400 `{error}`。Go 客户端目前只封装了 `AvailableModels`（设置页的占位内容用到），其余在 P7.4 做设置界面时补上。
+参数不合法报 `-32602`。Go 客户端目前只封装了 `AvailableModels`（设置页的占位内容用到），其余在 P7.4 做设置界面时补上。
 
 ## 7. 类型对照
 
 | 线上类型 | TS（`server/src/protocol.ts`） | Go（`desktop/internal/api`） |
 |---|---|---|
 | snapshot / ops / end 事件 | `SnapshotEvent`、`OpsEvent`、`EndEvent` | `Event`（`Name`、`Seq`、`View`、`Ops`、`Kind`） |
+| 通知封装 | `ConversationEvent`（`conversation.event` 的 params） | `Subscribe` 内部解码 |
 | 提交 | `SubmitRequest`、`SubmitResponse` | `SubmitRequest`、`SubmitResponse` |
 | 会话列表 | `ConversationSummary`、`ConversationListResponse` | `ConversationSummary` |
 | 新建会话 | `CreateConversationRequest`、`CreateConversationResponse` | `CreateConversationRequest`（返回 id） |
