@@ -400,10 +400,14 @@ class KnowledgeBase:
         self._path = Path(db_path) if db_path is not None else scope_dir / "knowledge.db"
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
-        # busy_timeout 必须先于 journal_mode：切到 WAL 需要短暂的独占锁，而界面侧的聚合会并行打开
-        # 多个连接——没有等待窗口时第二条连接直接抛 "database is locked"。
         self._conn.execute("PRAGMA busy_timeout=5000")
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            # 另一个连接还持有读事务时，切换 journal mode 会立刻返回 BUSY —— busy_timeout 对这种情况
+            # 不生效（SQLITE_BUSY_SNAPSHOT）。库在第一次打开时已经切成 WAL，所以这里失败可以忽略；
+            # 真降级成 rollback journal 也能正常读写，只是并发写会串行。
+            logging.getLogger(__name__).debug("[knowledge_base] journal_mode 切换被占用，沿用现有模式")
         _init_db(self._conn)
 
     def close(self) -> None:
