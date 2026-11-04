@@ -5,6 +5,7 @@ import { createRegistry, defineExtension, Harness, type Registry, type SessionEn
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { dataWhisperPrompts } from "./agent/extension.ts";
 import { dataWhisperPolicies } from "./agent/policies.ts";
+import { harnessSettings } from "./agent/settings.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
 import { type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
@@ -37,6 +38,15 @@ export type Service = {
 };
 
 /** 在 `<dataDir>/datawhisper.sqlite` 上打开 Harness，恢复被中断的工作。传输由调用方接上（见 `ipc/attach.ts`）。 */
+/** 每次 Harness 解析设置时现算：模型目录会随用户在设置里增删而变。 */
+function serviceSettings(modelService: ModelService) {
+  const models = modelService.models.getModels().map((model) => ({ provider: model.provider, modelId: model.id }));
+  return harnessSettings({
+    models,
+    contextWindowOf: (ref) => modelService.models.getModel(ref.provider, ref.modelId)?.contextWindow,
+  });
+}
+
 export async function startService(config: Config, options: ServiceOptions = {}): Promise<Service> {
   const context = BACKGROUND_CONTEXT;
   mkdirSync(config.dataDir, { recursive: true });
@@ -56,6 +66,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
       models: modelService.models,
       registry,
       identity: { attribution: null },
+      // 压缩与 prompt cache 策略按当前可用模型动态计算：模型增删后下一次解析即生效（settings 是 getter）。
+      settings: () => serviceSettings(modelService),
       // stdout 只走协议，诊断一律 stderr。
       onReport: (report) => console.error(`[harness] ${report.kind}`, report),
     },

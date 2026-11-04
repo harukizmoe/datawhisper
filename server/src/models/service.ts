@@ -314,7 +314,9 @@ export class ModelService {
       maxTokens: m.maxTokens,
       // pi-ai 对 Ollama/vLLM/SGLang 的建议就是 supportsDeveloperRole: false；而 "system" 被所有 OpenAI 兼容服务接受。
       // 其余 compat 字段仍根据 baseUrl 自动探测（例如 DeepSeek 的 thinking 格式）。
-      compat: { supportsDeveloperRole: false },
+      // supportsLongCacheRetention：缓存保留策略为 long 时才会带 `prompt_cache_key`（P0.3 的发现）。不认这个字段的
+      // 端点会忽略它；识别不了前缀缓存的服务只是多收一个字段。
+      compat: { supportsDeveloperRole: false, supportsLongCacheRetention: true },
     }));
     const auth = settings.requiresKey
       ? envApiKeyAuth(`${settings.name} API key`, [])

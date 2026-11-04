@@ -1,0 +1,86 @@
+[
+ {
+  "contextWindow": 1,
+  "threshold": 1
+ },
+ {
+  "contextWindow": 512,
+  "threshold": 180
+ },
+ {
+  "contextWindow": 1000,
+  "threshold": 350
+ },
+ {
+  "contextWindow": 2048,
+  "threshold": 717
+ },
+ {
+  "contextWindow": 4096,
+  "threshold": 1434
+ },
+ {
+  "contextWindow": 8192,
+  "threshold": 3278
+ },
+ {
+  "contextWindow": 16384,
+  "threshold": 6555
+ },
+ {
+  "contextWindow": 32000,
+  "threshold": 12800
+ },
+ {
+  "contextWindow": 32768,
+  "threshold": 13108
+ },
+ {
+  "contextWindow": 65536,
+  "threshold": 28045
+ },
+ {
+  "contextWindow": 100000,
+  "threshold": 47000
+ },
+ {
+  "contextWindow": 128000,
+  "threshold": 62400
+ },
+ {
+  "contextWindow": 131072,
+  "threshold": 64090
+ },
+ {
+  "contextWindow": 200000,
+  "threshold": 102000
+ },
+ {
+  "contextWindow": 262144,
+  "threshold": 136180
+ },
+ {
+  "contextWindow": 384000,
+  "threshold": 203200
+ },
+ {
+  "contextWindow": 500000,
+  "threshold": 267000
+ },
+ {
+  "contextWindow": 1000000,
+  "threshold": 608000
+ },
+ {
+  "contextWindow": 1048576,
+  "threshold": 656576
+ },
+ {
+  "contextWindow": 2000000,
+  "threshold": 1608000
+ },
+ {
+  "contextWindow": 10000000,
+  "threshold": 9608000
+ }
+]

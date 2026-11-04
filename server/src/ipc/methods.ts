@@ -135,6 +135,12 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
     "conversation.subscribe": (params) => conversations.subscribe(idParam(params), publish),
 
     "conversation.unsubscribe": (params) => conversations.unsubscribe(numberParam(params, "subscriptionId")),
+
+    /**
+     * 用量：整库汇总供设置页/统计面板使用；单个会话的明细在订阅视图的 `docs["pi.usage"]` 里，
+     * 这里不再重复一份（同一份数据两个来源迟早会不一致）。
+     */
+    "usage.summary": () => harness.usage(context),
   };
 }
 
