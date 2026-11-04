@@ -3,7 +3,6 @@ import type { ToolRegistration } from "@earendil-works/pi-durable";
 import type { ComputeClient } from "../compute/client.ts";
 import type { Config } from "../config.ts";
 import { createAppTools } from "../tools/app/index.ts";
-import { createDirectoryArtifactSource } from "../tools/app/artifacts.ts";
 import { NodeWorkspaceFs } from "../tools/app/workspace/fs.ts";
 import { createComputeTools } from "../tools/compute/index.ts";
 import { createToolResultStore, type ToolResultStore } from "../tools/guard/spill.ts";
@@ -69,7 +68,9 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
     sessionId,
     docs: docsFor,
     ...(teamDelegate === undefined ? {} : { teamDelegate }),
-    artifacts: createDirectoryArtifactSource({ dirs: [join(config.dataDir, "tool_results")], allowed: [] }),
+    // 外溢器与 `read_tool_result` 必须共用同一个 store：否则模型拿不到自己刚外溢的结果
+    // （store 同时实现 `ToolResultArtifactSource`，allowlist 就在它内部按会话维护）。
+    artifacts: toolResults,
     memoryDirs: { userDir: join(config.dataDir, "memory") },
     skillDirs: { builtinDir: join(config.computeCwd, "skills") },
     fetch: globalThis.fetch,
