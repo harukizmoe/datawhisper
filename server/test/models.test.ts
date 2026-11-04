@@ -195,7 +195,7 @@ describe("model methods", () => {
     expect(view).not.toContain("sk-route-secret");
     expect(JSON.parse(view)).toMatchObject({ credentialBackend: "file", providers: [{ id: "custom-relay", hasStoredKey: true }] });
     const presets = (await server.call<{ presets: { presetId: string }[] }>("models.view")).result!.presets;
-    expect(presets.map((preset) => preset.presetId)).toEqual(["ollama", "atlascloud"]);
+    expect(presets.map((preset) => preset.presetId)).toEqual(["ollama", "magpie", "atlascloud"]);
 
     // 非法 provider（id 前缀不对）、错误的 apiKey 类型、未知模型、坏 JSON。
     const badProvider = await server.call("models.putProvider", custom({ id: "relay" }));
@@ -210,5 +210,48 @@ describe("model methods", () => {
 
     const tested = await server.call("models.test", { model: { provider: "custom-relay", modelId: "relay-chat" } });
     expect(tested.result).toMatchObject({ ok: true });
+  });
+});
+
+describe("模型发现", () => {
+  test("从 OpenAI 兼容端点读回模型及其上限，缺元数据时标 inferred", async () => {
+    const { service } = await open();
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        if (!new URL(req.url).pathname.endsWith("/models")) return new Response("not found", { status: 404 });
+        expect(req.headers.get("authorization")).toBe("Bearer sk-discover");
+        return Response.json({
+          data: [
+            { id: "gw/flash", display_name: "Flash", context_length: 512_000, max_output_tokens: 384_000, reasoning: true, modalities: { input: ["text", "image"] } },
+            { id: "gw/plain", context_window: 8_192 },
+            { id: "   " },
+            { not_an_id: 1 },
+          ],
+        });
+      },
+    });
+    try {
+      const { models } = await service.discover(`http://127.0.0.1:${server.port}/v1`, "sk-discover");
+      expect(models.map((m) => m.id)).toEqual(["gw/flash", "gw/plain"]);
+      expect(models[0]).toMatchObject({ contextWindow: 512_000, maxTokens: 384_000, reasoning: true, vision: true });
+      // 只报了窗口、没报输出上限：用保守值并标 inferred，界面提示用户核对。
+      expect(models[1]).toMatchObject({ contextWindow: 8_192, maxTokens: 4_096, reasoning: false, inferred: true });
+      expect(models[0]!.inferred).toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("端点返回非 200 或地址非法时给出可读错误", async () => {
+    const { service } = await open();
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("nope", { status: 503 }) });
+    try {
+      await expect(service.discover(`http://127.0.0.1:${server.port}/v1`)).rejects.toThrow(/HTTP 503/);
+      await expect(service.discover("ftp://example.com")).rejects.toThrow(SettingsError);
+    } finally {
+      server.stop(true);
+    }
   });
 });

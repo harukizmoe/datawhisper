@@ -130,7 +130,7 @@ flowchart LR
 
 | 任务 | 内容 | 验收 |
 |---|---|---|
-| P3.1 模型 | 用户自配提供商：把 `LLM/llm_config_manager.py` 中的提供商（deepseek/openai/atlascloud/ollama/claude/minimax）转为 pi-ai 定义，Anthropic 等用 pi-ai 原生接口；支持用户添加任意 OpenAI 兼容地址和自定义模型（上下文长度、是否支持思考）；API key 用系统密钥存储；每个对话可单独切换模型和思考强度；删除 `HOSTED_MODEL_SPECS` 和配额倍率 | 每个提供商能完成一次流式对话（ollama 本地验证，其余用已配置的 key）；对话中途切换模型后下一轮生效 |
+| P3.1 模型 | 用户自配提供商：把 `LLM/llm_config_manager.py` 中的提供商（deepseek/openai/atlascloud/ollama/claude/minimax）转为 pi-ai 定义，Anthropic 等用 pi-ai 原生接口；支持用户添加任意 OpenAI 兼容地址和自定义模型（上下文长度、是否支持思考）；API key 用系统密钥存储；每个对话可单独切换模型和思考强度；删除 `HOSTED_MODEL_SPECS` 和配额倍率。另加 `models.discover`：从端点的 `/v1/models` 读回上下文长度与能力，免去手填；预设含 `ollama`、本机网关 `magpie`（`127.0.0.1:3425/v1`，免密钥）、`atlascloud` | 每个提供商能完成一次流式对话；对话中途切换模型后下一轮生效。本机 magpie 网关已实测：一次流式对话 3 个分片、真实用量 15935/35 tokens，且一轮内两次原生工具调用（`workspace_status` → `ask_user`）拿到真实工具结果后完成回答；内置提供商仍待用户 key |
 | P3.2 系统提示 | `agent/prompts.py`、skills 目录与加载优先级、memory、instructions、命令（`commands/*.md`）改为扩展的 sections 和命令 | 同一输入下系统提示与旧版逐段对比一致 |
 | P3.3 hooks | 数字溯源核对（`number_audit.py`）、禁止输出类工具的策略、模型调用审计、文本形式工具调用解析、现有用户 hooks（`agent/hooks/*`） | 每条策略有触发用例 |
 | P3.4 工具暴露 | 每轮最多 20 个工具、阶段过滤、关键词发现（3 轮 TTL）、skill 限制工具集、`read_tool_result` 可见性。实现方式按 P0.3 结论：一个会话文档记录发现的工具和限制，提交前和工具执行中根据它算出工具集并调用 `configure({ modelTools })`；不用 `beforeProviderRequest` 过滤（它不阻止调用未提供的工具） | 给定输入，工具列表与 P0.2 基线一致；调用未提供的工具被拒绝 |
@@ -143,7 +143,7 @@ flowchart LR
 |---|---|---|
 | P4.1 A 类 40 个 | 工作区文件、任务、teams 存储、图表选择、提案类输出、ask_user、diagram、memory、飞书读取、网页抓取等，直接用 TS 实现 | 每个工具有用例；`replay` 策略按盘点表设置 |
 | P4.2 B 类 14 个 | TS 工具外壳调用 P1 的 RPC 方法；进度通过工具输出流转发；长任务的幂等键用 `taskId` | 结果和基线一致；中途杀进程后按 `replay` 规则正确处理 |
-| P4.3 C 类 18 个 | 浏览器工具改用 Playwright（Bun 下验证可用性）；受限 bash；MCP 客户端改为 TS 实现；飞书写入类需要幂等键；`agent_delegate` 二选一：实现或删除 | 每个工具有用例 |
+| P4.3 C 类 18 个 | 受限 bash（已在 P4.1 完成 `workspace_bash`）；MCP 客户端改为 TS 实现；飞书写入类需要幂等键。浏览器交互工具（search/navigate/click/fill/extract/screenshot/close）**本轮不做**：纯 HTTP 取正文已由 `browse_webpage` 覆盖，交互类留待后续；`agent_delegate` 上游本就没有执行分支（§3 已知缺陷），不实现也不暴露 | 已实现的工具各有用例；未实现的工具不出现在暴露列表里 |
 | P4.4 结果与确认 | 结果包装与超长结果外溢（`tr_*`）、`read_tool_result` 授权校验、证据声明（`ec_*`）；`confirmation` 改成真正的运行时检查，由界面弹窗确认 | 外溢、读取、确认拒绝都有用例 |
 
 ### P5 编排
@@ -225,16 +225,16 @@ flowchart LR
 - [x] P2.1 Bun 服务工程：`server/src/{main,config}.ts`、`server/src/ipc/*`（JSONL 分帧、并发分发、通知、背压）、`server/src/conversations/service.ts`（与传输无关的业务），`bun test` 586 项通过。传输在 P2 期间由「loopback HTTP + 令牌」改为 **stdio JSON-RPC 2.0**（决策与协议见 `docs/refactor/ui-transport.md`）：无端口、无令牌、无网络面；分帧只按 LF 切分、stdout 只走协议、日志走 stderr、关 stdin 即退出；`ipc.test.ts` 覆盖粘包/半包/U+2028 不切分/非法 JSON/并发乱序/未知方法/订阅快照+增量+退订/退出时发 end。中断的运行续跑需要模型（P3.1），端到端在 P3.5 的 CLI 用例验证
 - [x] P2.2 桌面应用骨架：`desktop/` Go 模块（`datawhisper/desktop`，MyGo v0.7.4）。`internal/supervisor` 按 P2.1 的进程约定启动服务（`DW_TOKEN` 为 32 字节随机令牌，`DW_DATA_DIR` 与 `config.ts` 同一默认目录，开发时 `bun run server/src/main.ts`，发布时用 `-service` 指定编译后的服务），限时读取就绪行，输出写入 `<数据目录>/logs/service.log`，停止时依次关闭 stdin、SIGTERM、强杀（Windows 只关 stdin），意外退出按 0.5 秒起、翻倍到 15 秒的退避重启，2 分钟内崩溃 5 次进入失败状态（界面可重试）；主窗口（`main.go`、`app.go`）有侧边栏（会话列表、New chat、Settings 占位页）、服务状态指示和横幅（启动中、重启中、失败加 Retry、重连会话中、恢复后 5 秒内显示 Reconnected）、沿用 spike 的聊天视图（流式 Markdown、工具行、输入框、Stop），新会话在第一条消息时创建，409 `no_model`/`model_unavailable` 引导到设置页。`go vet ./...` 通过，`go test -race ./...` 21 项通过：supervisor 8 项（TestMain 编译假服务：就绪解析、超时、退避重启、崩溃上限与重试、stdin/SIGTERM/强杀三级停止）、`ui.NewTester` 视图 3 项（横幅各状态、会话与缺少模型、录制流的流式渲染）、真实服务 2 项（见 P2.3）、`internal/api` 8 项。真实窗口冒烟：启动后就绪，外部 `kill -9` Bun 进程后显示重启横幅，约 1 秒内自动恢复，退出应用时服务因 stdin 关闭正常退出；截图 `desktop/screenshot-{skeleton,restarting,reconnected}.png`（`-capture`，`win.CapturePage()`）
 - [x] P2.3 界面通信协议：协议文档 `docs/refactor/ui-protocol.md`（接口、SSE 事件与序号规则、重连、7 种 op、视图结构、鉴权含 Web view 的 `?token=`、TS/Go 类型对照、一次回复的实录）；服务端 `server/src/routes/conversations.ts`（列表、新建、订阅、提交、中止；订阅转发 `conversation.watch()`：`snapshot`、`ops`、`end`，每 15 秒一行心跳）和 `server/src/protocol.ts`，`main.ts` 拆出 `startService(config, options)` 供进程内测试；Go 端 `desktop/internal/api`（类型化客户端、SSE 解析、`ApplyOps`、`Replica` 与聊天行推导、`Follow` 断线后从新快照重新订阅，45 秒收不到数据即判定断线）。`bun test` 42 项通过，其中 `conversations.test.ts` 11 项（本任务 8 项：401、404、请求体校验、先快照后带序号的增量且重新订阅的快照等于用 chord 还原的副本、requestId 去重、中止、心跳、列表与新建；另 3 项是 P3.1 的模型用例）；`desktop/live_test.go` 对真实服务（假模型）验证 Go 副本与新快照的 JSON 逐字节相等，SIGKILL 重启后仍相等且 requestId 去重有效，界面恢复同一会话并能继续对话。Web view 资源路由在 P7.2 按 `?token=` 实现；pi-durable 1.5.0 的会话记录没有标题，标题留到 P3.5
-- [ ] P3.1 模型
+- [x] P3.1 模型与提供商配置（本机 magpie 网关实测通过；内置提供商待用户 key）
 - [x] P3.2 系统提示：Python 的系统提示与扩展资源全部移植为 TS 并由 Python 脚本生成 golden 用例做等价性验收。① `prompts.ts`：14 个提示块、25 个命令提示、`PromptContext`、意图匹配器、临时指令清洗与包装（`server/test/prompts.test.ts` 322 项通过）；② `skills.ts` / `skill-discovery.ts`：30 个内置技能与前缀/嵌套解析、验证规则、参数渲染、基于嵌入向量的 RRF 发现算法；③ `commands.ts`：17 个斜杠命令加载、别名与参数解析；④ `instructions.ts`：USER/WORKSPACE/LOCAL 分层指令加载与 `@include` 深度/循环限制；⑤ `memory.ts`：记忆读取端与提示词注入（`server/test/{skills,commands,instructions,memory}.test.ts` 98 项通过，tsc clean）。
 - [x] P3.3 hooks：数字溯源核对（261 个 golden 用例与 `agent/number_audit.py` 逐字一致）、输出类工具守卫、文本形式工具调用提醒、用户自定义 hooks 引擎（条件表达式含 CPython shlex 词法、prompt/http/command 执行器、once 作用域、加载校验，708+ 个 golden 用例）全部移植为 TS，并接到 pi-durable 的 `ToolTask.beforeTool` 与 `GenerationTask.onYield` 上（`server/src/agent/policies.ts`）；`policies.test.ts` 5 项覆盖拦下/放行/补一轮修复/不误报/只提醒一次。两处有意偏离旧实现：修复轮用完后旧代码往回答追加脚注，新实现的 `onYield` 无权改写消息，改为不伪造修正；旧代码解析正文里的伪 XML 并执行，新实现只提醒改用原生工具调用（hook 不能注入调用）。`model_call_audit.py` 只服务于云托管配额，随云功能删除，不移植。用户 hooks 的生命周期事件派发（turn_start 等）随 P6 的 hooks 接口接入
-- [ ] P3.6 压缩与计量
-- [ ] P3.4 工具暴露
-- [ ] P3.5 chat 接口
-- [ ] P4.1 A 类工具
-- [ ] P4.2 B 类工具
-- [ ] P4.3 C 类工具
-- [ ] P4.4 结果与确认
+- [x] P3.6 压缩与计量
+- [x] P3.4 工具暴露
+- [x] P3.5 chat 接口
+- [x] P4.1 A 类工具（36/40，飞书写入并入 P4.3）
+- [x] P4.2 B 类工具
+- [ ] P4.3 C 类工具（MCP 客户端、飞书写入；浏览器交互本轮不做）
+- [x] P4.4 结果与确认
 - [ ] P5.1 jobs
 - [ ] P5.2 workflows
 - [ ] P5.3 teams

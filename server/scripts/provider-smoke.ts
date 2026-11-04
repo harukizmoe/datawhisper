@@ -53,6 +53,11 @@ try {
       if (preset === undefined) {
         await modelService.putProvider({ kind: "builtin", id: provider, enabled: true });
       } else {
+        const envName = `${preset.presetId.toUpperCase()}_API_KEY`;
+        // 端点自报元数据时用真实上限（例如本机网关会给 512k 窗口与思考等级），否则退回保守值。
+        const discovered = (await modelService.discover(preset.baseUrl, process.env[envName]).catch(() => undefined))?.models.find(
+          (m) => m.id === modelId,
+        );
         await modelService.putProvider({
           kind: "custom",
           id: provider,
@@ -60,9 +65,8 @@ try {
           baseUrl: preset.baseUrl,
           requiresKey: preset.requiresKey,
           enabled: true,
-          models: [{ id: modelId, contextWindow: 128_000, maxTokens: 4_096, reasoning: false }],
+          models: [discovered ?? { id: modelId, contextWindow: 128_000, maxTokens: 4_096, reasoning: false }],
         });
-        const envName = `${preset.presetId.toUpperCase()}_API_KEY`;
         const key = process.env[envName];
         if (preset.requiresKey && key === undefined) throw new Error(`${envName} is not set`);
         if (key !== undefined) await modelService.setApiKey(provider, key);

@@ -92,7 +92,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
     harness,
     modelService,
     context,
-    tools: options.tools ?? [],
+    // 暴露层在这一份全量工具上做过滤；`options.turnState` 决定数据源/工作区/团队相关的门是否打开。
+    tools,
     turnState: options.turnState,
   });
 

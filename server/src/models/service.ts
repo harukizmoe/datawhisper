@@ -71,6 +71,14 @@ export type CustomPreset = Omit<Extract<ProviderSettings, { kind: "custom" }>, "
  */
 export const CUSTOM_PRESETS: readonly CustomPreset[] = [
   { presetId: "ollama", name: "Ollama", baseUrl: "http://localhost:11434/v1", requiresKey: false },
+  {
+    // 本机网关（magpie）：OpenAI 兼容、免密钥，模型元数据自带 context_length / reasoning_levels，
+    // 所以配合 `discover` 一次就能把模型列表填好。
+    presetId: "magpie",
+    name: "Magpie 本地网关",
+    baseUrl: "http://127.0.0.1:3425/v1",
+    requiresKey: false,
+  },
   { presetId: "atlascloud", name: "AtlasCloud", baseUrl: "https://api.atlascloud.ai/v1", requiresKey: true },
 ];
 
@@ -88,6 +96,13 @@ export class SettingsError extends Error {
 }
 
 const CUSTOM_ID = /^custom-[a-z0-9][a-z0-9-]{0,47}$/;
+/** 端点不报元数据时的保守上限（32k 窗口 / 4k 输出）。 */
+const INFERRED_CONTEXT_WINDOW = 32_768;
+const INFERRED_MAX_TOKENS = 4_096;
+const DISCOVER_TIMEOUT_MS = 10_000;
+
+const positive = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 
 /** 思考强度的全部取值（pi-ai 的 `ModelThinkingLevel`），用于把线上传来的字符串收窄成该类型。 */
 const THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -219,6 +234,54 @@ export class ModelService {
     const ref = { provider: model.provider, modelId: model.id };
     const thinking = this.settings.defaultThinking;
     return thinking === undefined ? { model: ref } : { model: ref, thinkingLevel: clampThinkingLevel(model, thinking) };
+  }
+
+  /**
+   * 从端点读模型列表（OpenAI 兼容的 `GET <baseUrl>/models`），把上限与能力映射成可保存的模型条目。
+   *
+   * 之所以要有这一步：自定义提供商要求用户自己填上下文长度与最大输出，填错就会在压缩阈值上出错
+   * （见 `agent/settings.ts` 的预留量换算）。能自报元数据的端点（本机网关、Ollama、vLLM）不该让用户手抄。
+   * 端点不报 `context_length` 时按保守值处理并在结果里标 `inferred`，界面可以提示用户核对。
+   */
+  async discover(baseUrl: string, apiKey?: string): Promise<{ models: (CustomModel & { inferred?: boolean })[] }> {
+    let url: URL;
+    try {
+      url = new URL(`${normalizeBaseUrl(baseUrl)}/models`);
+    } catch {
+      throw new SettingsError(`invalid base URL: ${baseUrl}`);
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new SettingsError("base URL must be http(s)");
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (apiKey !== undefined && apiKey.trim() !== "") headers.authorization = `Bearer ${apiKey.trim()}`;
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(DISCOVER_TIMEOUT_MS) });
+    if (!response.ok) throw new SettingsError(`model list failed: HTTP ${response.status}`);
+    const payload = (await response.json()) as { data?: unknown[] };
+    const entries = Array.isArray(payload.data) ? payload.data : [];
+    const models = entries.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) return [];
+      const record = entry as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id.trim() : "";
+      if (id === "") return [];
+      const contextWindow = positive(record.context_length) ?? positive(record.context_window);
+      const maxTokens = positive(record.max_output_tokens) ?? positive(record.max_tokens);
+      const reasoningLevels = Array.isArray(record.reasoning_levels) ? record.reasoning_levels : [];
+      const modalities = (record.modalities as { input?: unknown })?.input;
+      const vision = Array.isArray(modalities) && modalities.includes("image");
+      const inferred = contextWindow === undefined || maxTokens === undefined;
+      return [
+        {
+          id,
+          name: typeof record.display_name === "string" && record.display_name !== "" ? record.display_name : id,
+          // 端点不报时给保守值：32k 窗口 / 4k 输出，明显低于任何现代模型，宁可早点压缩也不要溢出。
+          contextWindow: contextWindow ?? INFERRED_CONTEXT_WINDOW,
+          maxTokens: Math.min(maxTokens ?? INFERRED_MAX_TOKENS, contextWindow ?? INFERRED_CONTEXT_WINDOW),
+          reasoning: record.reasoning === true || reasoningLevels.length > 0,
+          ...(vision ? { vision: true } : {}),
+          ...(inferred ? { inferred } : {}),
+        },
+      ];
+    });
+    return { models };
   }
 
   /**

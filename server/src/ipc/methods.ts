@@ -7,7 +7,10 @@ import type { Harness } from "@earendil-works/pi-durable";
 import type { ComputeClient } from "../compute/client.ts";
 import type { ConversationEvent, Conversations } from "../conversations/service.ts";
 import { CUSTOM_PRESETS, type ModelService, type ProviderSettings, SettingsError, parseThinkingLevel } from "../models/service.ts";
+import type { Jobs } from "../jobs/service.ts";
+import type { Workflows } from "../workflows/service.ts";
 import { INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
+import { orchestrationMethods } from "./orchestration.ts";
 import type { MapError, MethodParams, RpcMethod } from "./rpc.ts";
 
 export type MethodDeps = {
@@ -18,6 +21,12 @@ export type MethodDeps = {
   context: Context;
   /** 推送 `conversation.event` 通知。 */
   publish: (event: ConversationEvent) => void | Promise<void>;
+  /**
+   * 编排查询面（P5.1 jobs / P5.2 workflows）。由 `service.ts` 创建后传入；
+   * 未接线时对应方法不注册（-32601）。
+   */
+  jobs?: Jobs;
+  workflows?: Workflows;
 };
 
 function idParam(params: MethodParams, key = "id"): string | number {
@@ -58,6 +67,9 @@ export function modelMethods(service: ModelService): Record<string, RpcMethod> {
   const view = async () => ({ ...(await service.view()), builtinProviders: service.builtinIds(), presets: CUSTOM_PRESETS });
   return {
     "models.view": view,
+
+    /** 从端点读模型列表：让能自报元数据的服务（本机网关、Ollama、vLLM）免去手填上下文长度。 */
+    "models.discover": (params) => service.discover(stringParam(params, "baseUrl"), optionalStringParam(params, "apiKey")),
     "models.available": async () => ({ models: await service.available() }),
     "models.putProvider": async (params) => {
       const kind = params.kind;
@@ -99,9 +111,10 @@ export function modelMethods(service: ModelService): Record<string, RpcMethod> {
 }
 
 export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
-  const { harness, compute, modelService, conversations, context, publish } = deps;
+  const { harness, compute, modelService, conversations, context, publish, jobs, workflows } = deps;
   return {
     ...modelMethods(modelService),
+    ...orchestrationMethods({ jobs, workflows }),
 
     async health() {
       const inspection = await harness.inspect(context);
