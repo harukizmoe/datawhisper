@@ -4,14 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import { runChatCli } from "../scripts/chat-cli.ts";
 import { loadConfig } from "../src/config.ts";
 import { TurnDoc } from "../src/agent/turn.ts";
 import { type Service, startService } from "../src/service.ts";
+import { connectToService } from "./support/pipe.ts";
 import { type Stub, startStub } from "./support/stub-openai.ts";
 import { stubProvider } from "./support/stub-models.ts";
-
-const TOKEN = "cli-test-token";
-const SERVER_DIR = join(import.meta.dir, "..");
 
 /**
  * 测试用的 `get_schema` 替身：名字取自真实注册表（`tools/registry.ts`），所以能通过工具暴露过滤；
@@ -38,7 +37,7 @@ let dir: string;
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "dw-cli-test-"));
   stub = startStub({ chunkDelayMs: 0 });
-  service = await startService(loadConfig({ DW_TOKEN: TOKEN, DW_DATA_DIR: dir, DW_PORT: "0" }), {
+  service = await startService(loadConfig({ DW_DATA_DIR: dir }), {
     forceFileCredentials: true,
     tools: [fakeGetSchema],
     // 真实工具的 `requires_data_source` 只在有数据源时暴露，这里模拟已连接一个数据源。
@@ -53,27 +52,30 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/**
- * 子进程必须异步启动：同进程里的服务要响应 CLI 的 HTTP 请求，`spawnSync` 会堵住事件循环，直接死锁。
- */
-async function runCli(args: string[], env: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
-  const child = Bun.spawn(["bun", "run", "scripts/chat-cli.ts", ...args], {
-    cwd: SERVER_DIR,
-    env: { ...process.env, ...env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { code, stdout, stderr };
+/** 用内存管道把命令行接到给定服务上，输出收集到字符串里而不是终端。 */
+async function runCli(target: Service, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const pipe = connectToService(target);
+  let stdout = "";
+  let stderr = "";
+  try {
+    const code = await runChatCli(args, {
+      connect: async () => ({ client: pipe.client, close: () => pipe.close() }),
+      out: (text) => {
+        stdout += text;
+      },
+      err: (text) => {
+        stderr += text;
+      },
+    });
+    return { code, stdout, stderr };
+  } finally {
+    pipe.close();
+  }
 }
 
 describe("chat-cli", () => {
   test("一轮带工具调用的对话从命令行走通，工具结果回到模型", async () => {
-    const run = await runCli(["CALL:get_schema{\"table\":\"orders\"} 查一下表结构", "--conversation", "root"], { DW_PORT: String(service.port), DW_TOKEN: TOKEN });
+    const run = await runCli(service, ['CALL:get_schema{"table":"orders"} 查一下表结构', "--conversation", "root"]);
     expect(run.stderr).toBe("");
     expect(run.code).toBe(0);
     // 工具行说明模型真的调用了工具（工具集合与执行链路都通）。
@@ -85,7 +87,7 @@ describe("chat-cli", () => {
   }, 30_000);
 
   test("命令行的提交写下了本轮上下文，工具集按轮收敛", async () => {
-    const run = await runCli(["再来一次", "--conversation", "root"], { DW_PORT: String(service.port), DW_TOKEN: TOKEN });
+    const run = await runCli(service, ["再来一次", "--conversation", "root"]);
     expect(run.code).toBe(0);
     const root = await service.harness.root(ctx);
     const turn = await service.harness.snapshot(TurnDoc, root.id, ctx);
@@ -97,9 +99,9 @@ describe("chat-cli", () => {
 
   test("没有模型时命令行以非零码退出并打印服务端错误", async () => {
     const emptyDir = mkdtempSync(join(tmpdir(), "dw-cli-nomodel-"));
-    const bare = await startService(loadConfig({ DW_TOKEN: TOKEN, DW_DATA_DIR: emptyDir, DW_PORT: "0" }), { forceFileCredentials: true });
+    const bare = await startService(loadConfig({ DW_DATA_DIR: emptyDir }), { forceFileCredentials: true });
     try {
-      const result = await runCli(["hi"], { DW_PORT: String(bare.port), DW_TOKEN: TOKEN });
+      const result = await runCli(bare, ["hi"]);
       expect(result.code).not.toBe(0);
       expect(result.stderr).toContain("no_model");
     } finally {

@@ -1,11 +1,11 @@
 /**
- * Text-form tool calls (port of `_parse_text_fallback_tool_calls` in agent/agent.py).
+ * 文本形式的工具调用（移植自 agent/agent.py 的 `_parse_text_fallback_tool_calls`）。
  *
- * Some models answer with pseudo-XML tool calls in the message text instead of native tool calls — e.g. MiniMax-M3
- * writing `<display_diagram><parameter name="xml">…</parameter></display_diagram>`. When a stop-reason reply carries
- * such a block for one of the tools listed below, the block is turned back into a real call so it actually runs.
- * Only those names are recognised, so unrelated XML in prose is never misread as a call, and a block without any
- * `<parameter>` entries is ignored (an argument-less call the model could not have meant).
+ * 有些模型会在消息文本中写出伪 XML 工具调用，而不是原生工具调用 —— 例如 MiniMax-M3
+ * 写出的 `<display_diagram><parameter name="xml">…</parameter></display_diagram>`。当 stop-reason
+ * 回复里带有下文所列工具的这类块时，该块会被还原成真正的调用，从而实际执行。
+ * 只识别这些名字，因此正文中无关的 XML 不会被误读为调用；不含任何 `<parameter>` 条目的
+ * 块会被忽略（一个无参数的调用不可能是模型的本意）。
  */
 
 const TEXT_FALLBACK_TOOL_NAMES: ReadonlySet<string> = new Set(["display_diagram", "edit_diagram", "append_diagram"]);
@@ -18,8 +18,8 @@ export type TextToolCall = { name: string; args: Record<string, string> };
 export function parseTextFallbackToolCalls(content: string): TextToolCall[] {
   if (content === "" || !content.includes("<")) return [];
   const calls: TextToolCall[] = [];
-  // Python's `finditer` with `(?P=name)` finds non-overlapping matches in order; `matchAll` on a fresh RegExp does too,
-  // but the alternation inside the pattern means the group numbering must follow Python's: name is group 1, body 2.
+  // Python 用 `finditer` 配合 `(?P=name)` 按顺序找不重叠的匹配；在新 RegExp 上调用 `matchAll` 亦然，
+  // 但模式内部的交替结构意味着分组编号必须与 Python 一致：name 是第 1 组，body 是第 2 组。
   const blocks = new RegExp(TOOL_BLOCK_RE.source, TOOL_BLOCK_RE.flags);
   for (const match of content.matchAll(blocks)) {
     const name = match[1]!;

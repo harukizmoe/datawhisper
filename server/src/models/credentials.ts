@@ -3,15 +3,13 @@ import { dirname } from "node:path";
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 
 /**
- * API keys for user-configured providers.
+ * 用户配置的 provider 的 API key。
  *
- * Primary backend: the OS keychain via `Bun.secrets` (macOS Keychain, Windows Credential Manager,
- * Linux Secret Service). When the platform has none (e.g. a Linux session without a Secret Service
- * daemon), credentials go to a JSON file readable only by the user (mode 0600). `backend` tells the
- * settings UI which one is in use.
+ * 主后端：通过 `Bun.secrets` 使用操作系统钥匙串（macOS Keychain、Windows Credential Manager、
+ * Linux Secret Service）。平台没有钥匙串时（例如没有 Secret Service 守护进程的 Linux 会话），
+ * 凭据写入仅当前用户可读的 JSON 文件（权限 0600）。`backend` 告诉设置界面当前使用的是哪一个。
  *
- * The keychain cannot enumerate entries, so the ids of stored credentials are kept in an index file
- * next to the fallback file (ids only, never secrets).
+ * 钥匙串无法枚举条目，因此已存凭据的 id 保存在回退文件旁边的索引文件中（只存 id，绝不存密钥）。
  */
 export type CredentialBackend = "keychain" | "file";
 
@@ -29,7 +27,7 @@ export class SecretCredentialStore implements CredentialStore {
     private readonly indexPath: string,
   ) {}
 
-  /** Probes the keychain once; falls back to the file when it is unavailable. */
+  /** 探测一次钥匙串是否可用；不可用时回退到文件存储。 */
   static async open(filePath: string, indexPath: string, options: { forceFile?: boolean } = {}): Promise<SecretCredentialStore> {
     const backend = options.forceFile || !(await keychainUsable()) ? "file" : "keychain";
     return new SecretCredentialStore(backend, filePath, indexPath);
@@ -123,7 +121,7 @@ async function readJson<T>(path: string): Promise<T | undefined> {
   }
 }
 
-/** Atomic write of a file only the user can read (0600 is a no-op on Windows; the profile dir is per-user). */
+/** 以原子方式写入仅当前用户可读的文件（0600 在 Windows 上无效；用户配置目录本身按用户隔离）。 */
 export async function writePrivateJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;

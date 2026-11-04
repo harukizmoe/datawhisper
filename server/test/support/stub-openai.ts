@@ -34,7 +34,7 @@ function text(content: unknown): string {
   return "";
 }
 
-export function startStub(options: { port?: number; chunkDelayMs?: number; onRequest?: (r: StubRequest) => void } = {}): Stub {
+export function startStub(options: { port?: number; chunkDelayMs?: number; onRequest?: (r: StubRequest) => void; answerText?: string } = {}): Stub {
   const log: StubRequest[] = [];
   const delay = options.chunkDelayMs ?? 15;
   const server = Bun.serve({
@@ -89,9 +89,9 @@ export function startStub(options: { port?: number; chunkDelayMs?: number; onReq
             }
             send(chunk({}, "tool_calls"));
           } else {
-            const answer = last.role === "tool"
+            const answer = options.answerText ?? (last.role === "tool"
               ? `## Result\n\nThe tool returned: **${(entry.lastTool ?? "").slice(0, 200)}**\n\n- request #${entry.n}\n- tools offered: ${entry.tools.length}\n`
-              : `## Hello\n\nThis is a **streamed** markdown reply from the stub (request #${entry.n}).\n\n| metric | value |\n|---|---|\n| rows | 42 |\n| cols | 7 |\n\n\`\`\`python\nprint("ok")\n\`\`\`\n`;
+              : `## Hello\n\nThis is a **streamed** markdown reply from the stub (request #${entry.n}).\n\n| metric | value |\n|---|---|\n| rows | 42 |\n| cols | 7 |\n\n\`\`\`python\nprint("ok")\n\`\`\`\n`);
             for (let i = 0; i < answer.length; i += 6) {
               await Bun.sleep(delay);
               send(chunk({ content: answer.slice(i, i + 6) }));

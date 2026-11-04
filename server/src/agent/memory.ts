@@ -1,20 +1,18 @@
 /**
- * Long-term memory, read side: the on-disk layout, record parsing/validation and the prompt section.
+ * 长期记忆的读取侧：磁盘布局、记录解析/校验以及提示词段落。
  *
- * Port of `agent/memory.py::{render_memory_section, read_memory}` and the read half of
- * `data/memory_store.py` (the file format, `_validate_payload`, `_parse`, `list_records`, `_render_index`).
- * The extraction / consolidation LLM jobs and the write side (create/update/archive, audit log,
- * trash) are NOT here (planned for P3.3).
+ * 移植自 `agent/memory.py::{render_memory_section, read_memory}` 以及
+ * `data/memory_store.py` 的读取部分（文件格式、`_validate_payload`、`_parse`、`list_records`、`_render_index`）。
+ * 抽取 / 合并的 LLM 任务与写入侧（创建/更新/归档、审计日志、回收站）不在本文件（计划于 P3.3）。
  *
- * Layout (single user, no user ids):
- *   user scope       `<userDir>/memories/<name>.md`                (types `user`, `feedback`)
- *   workspace scope  `<workspaceRoot>/.zhixi/memory/memories/<name>.md` (types `project`, `reference`)
- * Each file is `---\n<YAML frontmatter>---\n<body>`.
+ * 布局（单用户，无 user id）：
+ *   user 作用域       `<userDir>/memories/<name>.md`                （类型 `user`、`feedback`）
+ *   workspace 作用域  `<workspaceRoot>/.zhixi/memory/memories/<name>.md`（类型 `project`、`reference`）
+ * 每个文件形如 `---\n<YAML frontmatter>---\n<body>`。
  *
- * Difference from Python: `list_records` there also rewrote `<scope>/MEMORY.md` on every call (a
- * write on the read path that created `.zhixi/memory` inside the user's workspace; nothing reads
- * that file). Reads here are side-effect free; the write side should refresh MEMORY.md with
- * {@link renderMemoryIndex}.
+ * 与 Python 的差异：那里的 `list_records` 每次调用还会重写 `<scope>/MEMORY.md`（读取路径上的写入，
+ * 会在用户工作区内创建 `.zhixi/memory`；而没有任何地方读取该文件）。这里的读取无副作用；
+ * 写入侧应使用 {@link renderMemoryIndex} 刷新 MEMORY.md。
  */
 import { readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -35,7 +33,7 @@ export const MAX_TITLE_CHARS = 180;
 export const MAX_BODY_CHARS = 2_000;
 export const MAX_RECORDS = 200;
 export const MAX_INDEX_CHARS = 25_000;
-/** Workspace memory root relative to a workspace root. */
+/** 相对于 workspace 根目录的工作区记忆根目录。 */
 export const WORKSPACE_MEMORY_SUBDIR = join(".zhixi", "memory");
 
 export type MemoryType = "user" | "feedback" | "project" | "reference";
@@ -77,17 +75,17 @@ export type MemoryRecord = Readonly<{
   sourceSession: string;
 }>;
 
-/** Where the two memory scopes live. Both are passed in; nothing is derived from `~` or the environment. */
+/** 两个记忆作用域所在的位置。两者都由外部传入；不从 `~` 或环境变量推导。 */
 export type MemoryDirs = {
-  /** User-scope root (holds `memories/`). */
+  /** 用户作用域的根目录（其中包含 `memories/`）。 */
   userDir: string;
-  /** Mounted workspace root; absent = no workspace-scope memory. */
+  /** 挂载的工作区根目录；缺省 = 没有工作区作用域记忆。 */
   workspaceRoot?: string;
 };
 
 export class MemoryValidationError extends Error {}
 
-/** Canonical, validated field set of a record (what `_validate_payload` returns). */
+/** 记录的规范、已校验字段集合（即 `_validate_payload` 的返回值）。 */
 export type ValidatedMemoryPayload = Readonly<{
   name: string;
   type: MemoryType;
@@ -106,7 +104,7 @@ function validateText(value: unknown, label: string, limit: number, required = t
   return text;
 }
 
-/** `_validate_payload`: the canonical field set of a record (`None`/`undefined` fields fall back to `existing`). */
+/** `_validate_payload`：记录的规范字段集合（`None`/`undefined` 字段回退到 `existing`）。 */
 export function validateMemoryPayload(
   payload: Record<string, unknown>,
   options: { automatic?: boolean; existing?: Record<string, unknown> } = {},
@@ -137,7 +135,7 @@ function isFile(path: string): boolean {
   }
 }
 
-/** `_parse`: one record file, or `null` when it is invalid, misplaced or of the wrong scope. */
+/** `_parse`：解析单个记录文件；无效、位置不对或作用域不符时返回 `null`。 */
 export function parseMemoryFile(path: string, root: string, scope: MemoryScope): MemoryRecord | null {
   if (!isWithin(path, root) || pySuffix(basename(path)) !== ".md" || !isFile(path)) return null;
   let raw: string;
@@ -175,7 +173,7 @@ export function parseMemoryFile(path: string, root: string, scope: MemoryScope):
   };
 }
 
-/** `_records`: valid records of one scope, newest `updated_at` first (ties: file name ascending). */
+/** `_records`：某个作用域内的有效记录，按 `updated_at` 从新到旧（相同时按文件名升序）。 */
 function scopeRecords(root: string, scope: MemoryScope): MemoryRecord[] {
   const folder = join(root, "memories");
   let names: string[];
@@ -189,11 +187,11 @@ function scopeRecords(root: string, scope: MemoryScope): MemoryRecord[] {
     const record = parseMemoryFile(join(folder, name), root, scope);
     if (record) records.push(record);
   }
-  // Array.prototype.sort is stable, so equal timestamps keep the name order above.
+  // Array.prototype.sort 是稳定排序，因此时间戳相同的记录保持上面的文件名顺序。
   return records.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 }
 
-/** All visible records: user scope first, then workspace scope. */
+/** 所有可见记录：先 user 作用域，再 workspace 作用域。 */
 export function listMemoryRecords(dirs: MemoryDirs): MemoryRecord[] {
   const records = scopeRecords(resolveNonStrict(dirs.userDir), "user");
   if (dirs.workspaceRoot) {
@@ -207,7 +205,7 @@ export function getMemoryRecord(name: string, dirs: MemoryDirs): MemoryRecord | 
   return listMemoryRecords(dirs).find((record) => record.name === name);
 }
 
-/** `_render_index`: one `- [label] title (name)` line per record, bounded by count and characters. */
+/** `_render_index`：每条记录一行 `- [label] title (name)`，受数量和字符数限制。 */
 export function renderMemoryIndex(records: readonly Pick<MemoryRecord, "type" | "title" | "name">[]): string {
   const lines = records.map((record) => `- [${INDEX_LABELS[record.type]}] ${record.title} (${record.name})`);
   const kept: string[] = [];
@@ -219,7 +217,7 @@ export function renderMemoryIndex(records: readonly Pick<MemoryRecord, "type" | 
   return kept.join("\n") + (kept.length > 0 ? "\n" : "");
 }
 
-/** The `[LONG-TERM MEMORY]` prompt section, or `""` when there are no records. */
+/** `[LONG-TERM MEMORY]` 提示词段落；没有记录时返回 `""`。 */
 export function renderMemorySection(dirs: MemoryDirs): string {
   const records = listMemoryRecords(dirs);
   if (records.length === 0) return "";
@@ -230,7 +228,7 @@ export function renderMemorySection(dirs: MemoryDirs): string {
   );
 }
 
-/** Text returned to the `memory_read` tool. */
+/** 返回给 `memory_read` 工具的文本。 */
 export function readMemory(name: string, dirs: MemoryDirs): string {
   const record = getMemoryRecord(name, dirs);
   if (!record) return "Memory record is unavailable in the current scope.";

@@ -1,15 +1,14 @@
 /**
- * Client for the Python compute worker (`python -m compute`, protocol in compute/rpc.py).
+ * Python compute worker 的客户端（`python -m compute`，协议见 compute/rpc.py）。
  *
- * One worker process, started on first use. Requests run concurrently in the worker; a
- * request that depends on another must await it first (openSource does this for sources).
+ * 只有一个 worker 进程，首次使用时启动。worker 内请求并发执行；依赖另一请求的请求
+ * 必须先 await 它（source 相关操作由 openSource 保证顺序）。
  *
- * Crash policy: when the worker exits unexpectedly, every in-flight request rejects with
- * ComputeCrashed and is not retried here (whether a tool may rerun is pi-durable's
- * `replay` decision). The next call restarts the worker and reopens every recorded source
- * from its descriptor before sending anything else. In-memory tables created at runtime do
- * not survive; the RestartReport names them per source. More than `maxRestarts` crashes
- * within `restartWindowMs` stops restarting: calls then reject with ComputeUnavailable.
+ * 崩溃策略：worker 意外退出时，所有在途请求都以 ComputeCrashed 失败，且不在此处重试
+ * （工具能否重跑由 pi-durable 的 `replay` 决定）。下一次调用会重启 worker，并在发出
+ * 任何其他请求之前，按 descriptor 重新打开所有已记录的 source。运行时创建的内存表
+ * 不会保留；RestartReport 会按 source 列出丢失的表。若在 `restartWindowMs` 内崩溃次数
+ * 超过 `maxRestarts`，则不再重启：此后调用以 ComputeUnavailable 失败。
  */
 
 export const RPC_CANCELLED = -32800;
@@ -35,7 +34,7 @@ export class ComputeCancelled extends ComputeError {
   }
 }
 
-/** The worker died while the request was in flight; the request may have partially run. */
+/** 请求执行期间 worker 死亡；该请求可能已部分执行。 */
 export class ComputeCrashed extends Error {
   constructor(readonly exitCode: number | null, readonly stderrTail: string) {
     super(`compute worker exited (code ${exitCode}) during the request`);
@@ -63,16 +62,16 @@ export type CallOptions = {
 };
 
 export type ComputeOptions = {
-  /** Python interpreter, e.g. `.venv/bin/python`, or a frozen compute executable. */
+  /** Python 解释器，例如 `.venv/bin/python`，或冻结的 compute 可执行文件。 */
   python: string;
-  /** Arguments after the interpreter. Default `["-m", "compute"]`. */
+  /** 解释器之后的参数。默认 `["-m", "compute"]`。 */
   args?: string[];
-  /** Working directory: the repo root, where `compute/` and `Function/` import from. */
+  /** 工作目录：仓库根目录，`compute/` 与 `Function/` 从这里导入。 */
   cwd: string;
   env?: Record<string, string>;
   maxRestarts?: number;
   restartWindowMs?: number;
-  /** Grace period for `close()` before the worker is killed. */
+  /** `close()` 中等待 worker 退出的宽限时间，超时则杀掉它。 */
   shutdownTimeoutMs?: number;
   onStderr?: (line: string) => void;
   onRestart?: (report: RestartReport) => void;
@@ -117,12 +116,12 @@ export class ComputeClient {
     };
   }
 
-  /** Process id of the running worker, if any. */
+  /** 运行中 worker 的进程号；没有 worker 时为 undefined。 */
   get pid(): number | undefined {
     return this.worker?.proc.pid;
   }
 
-  /** Settles when the current worker exits; test seam for crash scenarios. */
+  /** 当前 worker 退出时落定；供崩溃场景测试使用的接缝。 */
   get exited(): Promise<number | null> | undefined {
     return this.worker?.exited;
   }
@@ -130,13 +129,13 @@ export class ComputeClient {
   async call<T = JsonValue>(method: string, params: Record<string, unknown> = {}, options: CallOptions = {}): Promise<T> {
     options.signal?.throwIfAborted();
     if (this.closed) throw new ComputeUnavailable("compute client is closed", "");
-    // With a live worker the request is written synchronously, so calls keep their issue
-    // order relative to each other and to a later close().
+    // 已有 worker 时请求是同步写入的，因此各次调用之间、以及与之后的 close() 之间
+    // 都保持发起顺序。
     const worker = this.worker ?? (await this.ready());
     return (await this.send(worker, method, params, options)) as T;
   }
 
-  /** Opens (or reopens) a source and remembers its descriptor for restarts. */
+  /** 打开（或重新打开）一个 source，并记住其 descriptor 以供重启后恢复。 */
   async openSource(sourceId: string, descriptor: SourceDescriptor, options: CallOptions = {}) {
     const result = await this.call<{ source_id: string; name: string; tables: string[] }>(
       "source.open",
@@ -153,7 +152,7 @@ export class ComputeClient {
     await this.call("source.close", { source_id: sourceId });
   }
 
-  /** Records a source's current tables, so a restart can report which in-memory ones were lost. */
+  /** 记录 source 当前的 tables，使重启后能报告哪些内存表已丢失。 */
   async refreshTables(sourceId: string): Promise<string[]> {
     const { tables } = await this.call<{ tables: string[] }>("source.tables", { source_id: sourceId });
     const entry = this.sources.get(sourceId);
@@ -215,7 +214,7 @@ export class ComputeClient {
 
   private async reopenSources(worker: Worker): Promise<RestartReport> {
     const report: RestartReport = { generation: this.generation, reopened: [], failed: [] };
-    // Sequential: each open must finish before the next call that may use it.
+    // 串行执行：每次 open 都必须在下一次可能用到它的调用之前完成。
     for (const [sourceId, entry] of this.sources) {
       try {
         const result = (await this.send(worker, "source.open", { source_id: sourceId, descriptor: entry.descriptor }, {})) as {

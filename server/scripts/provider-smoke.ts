@@ -27,7 +27,7 @@ if (specs.length === 0) {
 }
 
 const dir = mkdtempSync(join(tmpdir(), "dw-provider-smoke-"));
-const service = await startService(loadConfig({ DW_DATA_DIR: dir, DW_PORT: "0", DW_TOKEN: crypto.randomUUID() }), {
+const service = await startService(loadConfig({ DW_DATA_DIR: dir }), {
   forceFileCredentials: true,
 });
 const { modelService, harness } = service;

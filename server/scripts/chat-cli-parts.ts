@@ -9,49 +9,66 @@ import type { ConversationView, LiveState } from "@earendil-works/pi-durable";
  * 漏帧，此时直接报错而不是继续渲染——静默的半份状态比报错更难查。
  */
 export type ChatParts = {
-  /** 喂一段完整的 SSE 帧（不含结尾空行）。 */
-  consume(frame: string): void;
+  /** 喂一条 `conversation.event` 通知的 params。 */
+  apply(params: Record<string, unknown>): void;
   /** 运行是否已结束（与服务端测试里的 answered 判定一致）。 */
   answered(): boolean;
+  /** 订阅的结束原因；还没结束时为 undefined。 */
+  ended(): string | undefined;
   printFinal(): void;
   readonly view: ConversationView | undefined;
 };
 
 const liveOf = (view: ConversationView): LiveState => (view.docs["pi.live"] ?? {}) as LiveState;
 
-export function createParts(options: { conversationId: string }): ChatParts {
+export function createParts(options: { conversationId: string; out: (text: string) => void }): ChatParts {
   let view: ConversationView | undefined;
   let seq = 0;
   let printed = 0;
+  let endKind: string | undefined;
   /** 工具名 -> 上次打印的状态；状态变化时打一行，避免重复刷屏。 */
   const toolStates = new Map<string, string>();
 
-  function consume(frame: string): void {
-    let event = "message";
-    let data = "";
-    for (const line of frame.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) data += line.slice(5).trim();
-    }
-    if (data === "") return;
-    const payload = JSON.parse(data) as { seq?: number; view?: ConversationView; ops?: Op[]; kind?: string };
-
+  function apply(params: Record<string, unknown>): void {
+    const event = params.event;
     if (event === "snapshot") {
-      view = payload.view;
-      seq = payload.seq ?? 0;
+      view = params.view as ConversationView;
+      seq = typeof params.seq === "number" ? params.seq : 0;
       printed = 0;
       return;
     }
     if (event === "ops") {
       if (view === undefined) throw new Error("收到 ops 之前没有 snapshot");
-      if (payload.seq !== seq + 1) throw new Error(`序号不连续：期望 ${seq + 1}，收到 ${payload.seq}`);
-      seq = payload.seq;
-      view = applyImmutable(view, payload.ops ?? []);
+      if (params.seq !== seq + 1) throw new Error(`序号不连续：期望 ${seq + 1}，收到 ${params.seq}`);
+      seq = params.seq as number;
+      const ops = (params.ops ?? []) as Op[];
+      // 工具状态可能在同一个事件里被设成 done 又随工具轮结束被删掉，折叠后的视图看不到它；
+      // 因此状态变化直接从 ops 里读，而不是只看最终视图。
+      reportToolStatus(ops, view);
+      view = applyImmutable(view, ops);
       render();
       return;
     }
     if (event === "end") {
-      console.error(`\n[订阅结束：${payload.kind}]`);
+      endKind = typeof params.kind === "string" ? params.kind : "ended";
+      options.out(`\n[订阅结束：${endKind}]`);
+    }
+  }
+
+  /** 打印 `docs.pi.live.tools[i].status` 的每一次变化；同名的重复状态只打一次。 */
+  function reportToolStatus(ops: Op[], before: ConversationView): void {
+    for (const op of ops) {
+      if (op[0] !== "s") continue;
+      const path = op[1];
+      if (path.length !== 5 || path[0] !== "docs" || path[1] !== "pi.live" || path[2] !== "tools" || path[4] !== "status") continue;
+      const index = path[3];
+      if (typeof index !== "number") continue;
+      const slot = (liveOf(before).tools ?? [])[index];
+      const name = slot?.name ?? `#${index}`;
+      const status = String(op[2]);
+      if (toolStates.get(name) === status) continue;
+      toolStates.set(name, status);
+      options.out(`\n[工具 ${name}: ${status}]\n`);
     }
   }
 
@@ -61,13 +78,13 @@ export function createParts(options: { conversationId: string }): ChatParts {
     const message = liveOf(view).generation?.message;
     const text = (message?.content ?? []).flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
     if (text.length > printed) {
-      process.stdout.write(text.slice(printed));
+      options.out(text.slice(printed));
       printed = text.length;
     }
     for (const slot of liveOf(view).tools ?? []) {
       if (toolStates.get(slot.name) === slot.status) continue;
       toolStates.set(slot.name, slot.status);
-      process.stdout.write(`\n[工具 ${slot.name}: ${slot.status}]\n`);
+      options.out(`\n[工具 ${slot.name}: ${slot.status}]\n`);
     }
   }
 
@@ -78,19 +95,27 @@ export function createParts(options: { conversationId: string }): ChatParts {
 
   function printFinal(): void {
     if (view === undefined) {
-      console.error("没有收到任何快照");
+      options.out("没有收到任何快照");
       return;
     }
     const message = view.entries.findLast((entry) => entry.kind === "pi.assistant")?.model?.[0] as AssistantMessage | undefined;
     const usage = view.docs["pi.usage"] as { models?: Record<string, { input: number; output: number }> } | undefined;
-    process.stdout.write("\n");
+    options.out("\n");
     if (message !== undefined && message.content.some((block) => block.type === "text")) {
       const full = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-      if (full.length > printed) process.stdout.write(full.slice(printed));
+      if (full.length > printed) options.out(full.slice(printed));
     }
-    console.log(`\n\n[会话 ${options.conversationId}] stopReason=${message?.stopReason ?? "—"}`);
-    console.log(`[用量] ${JSON.stringify(usage?.models ?? {})}`);
+    options.out(`\n\n[会话 ${options.conversationId}] stopReason=${message?.stopReason ?? "—"}\n`);
+    options.out(`[用量] ${JSON.stringify(usage?.models ?? {})}\n`);
   }
 
-  return { consume, answered, printFinal, get view() { return view; } };
+  return {
+    apply,
+    answered,
+    ended: () => endKind,
+    printFinal,
+    get view() {
+      return view;
+    },
+  };
 }

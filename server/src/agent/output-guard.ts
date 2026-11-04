@@ -1,14 +1,13 @@
 /**
- * Output-tool guard (port of `_OUTPUT_TOOL_GUARDS` in agent/agent.py).
+ * 输出工具守卫（移植自 agent/agent.py 的 `_OUTPUT_TOOL_GUARDS`）。
  *
- * Report/PPT/Excel/dashboard tools exist in pairs: a `propose_*` outline the model offers, and the `generate_*` /
- * `export_*` tool the system runs after the user confirms. Both are reachable only inside their slash command (or a
- * builtin skill that acts as that command): the model must never call them from ordinary chat, or it would produce a
- * deck from a half-understood request with no confirmation. A blocked batch is answered with a tool result telling the
- * model to reply in plain text instead.
+ * 报告/PPT/Excel/看板类工具成对存在：模型给出的 `propose_*` 大纲，以及用户确认后由系统执行的
+ * `generate_*` / `export_*` 工具。两者都只能在其斜杠命令（或充当该命令的内置 skill）内被调用：
+ * 模型绝不能在日常聊天中调用它们，否则会在没有确认的情况下、仅凭一知半解的请求生成文档。
+ * 被拦截的批次会以工具结果作答，要求模型改用纯文本回复。
  */
 
-/** Tool name -> the command (or builtin skill name) that may call it. */
+/** 工具名 -> 可以调用它的命令（或内置 skill 名）。 */
 export const OUTPUT_TOOL_GUARDS: Readonly<Record<string, ReadonlySet<string>>> = {
   propose_ppt_outline: new Set(["ppt", "ppt_revise"]),
   generate_ppt: new Set(["ppt_confirm"]),
@@ -21,8 +20,8 @@ export const OUTPUT_TOOL_GUARDS: Readonly<Record<string, ReadonlySet<string>>> =
 };
 
 /**
- * The token that unlocks guarded tools this turn: the slash command, or the builtin skill's name when the turn was
- * started by a skill (`agent.activation.kind === "skill"`). Empty when neither applies.
+ * 本轮解锁受守卫工具的 token：斜杠命令，或本轮由 skill 启动时的内置 skill 名
+ * （`agent.activation.kind === "skill"`）。两者都不适用时为空串。
  */
 export function guardToken(command: string | undefined, activation: { kind: string; name: string }): string {
   if (command !== undefined && command !== "") return command;
@@ -32,8 +31,8 @@ export function guardToken(command: string | undefined, activation: { kind: stri
 export type OutputToolBlock = { name: string; reason: string };
 
 /**
- * The guarded calls of a batch that the token may not unlock. Python blocks the whole batch when this is non-empty and
- * gives every guarded call a `[SYSTEM BLOCK]` result while other calls get `ok` (they are cancelled, not executed).
+ * 批次中 token 无权解锁的受守卫调用。该结果非空时，Python 会拦截整个批次：每个受守卫调用都得到
+ * `[SYSTEM BLOCK]` 结果，其他调用得到 `ok`（它们被取消，并未执行）。
  */
 export function blockedOutputTools(toolNames: readonly string[], token: string): OutputToolBlock[] {
   return toolNames

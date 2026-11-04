@@ -1,16 +1,16 @@
 /**
- * 桌面应用（Go，`desktop/internal/api`）与本服务之间 UI 协议的消息类型。
- * 规范见 docs/refactor/ui-protocol.md；两者须保持同步。
+ * 桌面应用（Go，`desktop/internal/api`）与本服务之间 UI 协议的**载荷**类型。
+ * 传输见 docs/refactor/ui-transport.md（stdin/stdout 上的 JSONL JSON-RPC 2.0），语义见 docs/refactor/ui-protocol.md。
  */
 import type { Op } from "@earendil-works/chord/delta";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConversationView, ModelRef } from "@earendil-works/pi-durable";
 
-/** `event: snapshot`：每个订阅的第一个事件；`view` 即 `conversation.watch()` 的返回值。 */
+/** `conversation.event` 的 `snapshot`：每个订阅的第一条；`view` 即 `conversation.watch()` 的返回值。 */
 export type SnapshotEvent = { seq: 0; view: ConversationView };
-/** `event: ops`：把 `seq - 1` 时的视图变为 `seq` 时视图的 Chord delta ops。 */
+/** `conversation.event` 的 `ops`：把 `seq - 1` 时的视图变为 `seq` 时视图的 Chord delta ops。 */
 export type OpsEvent = { seq: number; ops: readonly Op[] };
-/** `event: end`：watch 已结束（服务关闭、存储失败）。客户端会重新订阅。 */
+/** `conversation.event` 的 `end`：watch 已结束（退订、服务关闭、存储失败）。客户端会重新订阅。 */
 export type EndEvent = { kind: "stopped" | "aborted" | "ended" | "listener_error" | "failed" };
 
 export type SubmitRequest = {
@@ -40,13 +40,11 @@ export type ConversationSummary = {
   updatedAt: number | null;
 };
 export type ConversationListResponse = { conversations: ConversationSummary[] };
-/** `POST /v1/conversations` 的请求体（可选）：未给 `model` 时使用设置中的默认模型（`/v1/models`）。 */
+/** `conversation.create` 的参数（可选）：未给 `model` 时使用设置中的默认模型（`models.view`）。 */
 export type CreateConversationRequest = { model?: ModelRef; thinkingLevel?: ModelThinkingLevel };
 export type CreateConversationResponse = { id: number };
 
-/** `PUT /v1/conversations/:id/model`：切换模型与思考等级；从下一次模型请求起生效。 */
+/** `conversation.setModel`：切换模型与思考等级；从下一次模型请求起生效。 */
 export type SetModelRequest = { model: ModelRef; thinkingLevel: ModelThinkingLevel | null };
 /** 该会话解析后的 agent 模型；`thinkingLevel` 是实际生效的等级（未设置时取 pi-durable 默认值）。 */
 export type AgentModelResponse = { model: ModelRef | null; thinkingLevel: ModelThinkingLevel };
-
-export type ErrorResponse = { error: string };

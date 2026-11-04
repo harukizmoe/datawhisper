@@ -1,11 +1,10 @@
 /**
- * Safe layered project-instruction loading: USER (`<userRoot>/ZHIXI.md`), WORKSPACE
- * (`<workspaceRoot>/ZHIXI.md`) and LOCAL (`<workspaceRoot>/ZHIXI.local.md`) instruction files with
- * `@include <file>` expansion (root containment, depth limit, cycle detection), a size bound and an
- * mtime-keyed result cache.
+ * 安全的分层项目指令加载：USER（`<userRoot>/ZHIXI.md`）、WORKSPACE
+ * （`<workspaceRoot>/ZHIXI.md`）与 LOCAL（`<workspaceRoot>/ZHIXI.local.md`）指令文件，支持
+ * `@include <file>` 展开（限制在根目录内、深度上限、环检测）、大小上限，以及按 mtime 缓存结果。
  *
- * Port of `agent/instructions.py`. Single user: no user/workspace ids; `userRoot` is the app data
- * dir and `workspaceRoot` an optional mounted workspace directory, both passed in.
+ * 移植自 `agent/instructions.py`。单用户：没有 user/workspace id；`userRoot` 是应用数据目录，
+ * `workspaceRoot` 是可选的挂载工作区目录，两者都由调用方传入。
  */
 import { statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
@@ -19,9 +18,9 @@ export const LOCAL_INSTRUCTION_FILE = "ZHIXI.local.md";
 
 const INCLUDE_RE = new RegExp(`^[${PY_SPACE}]*@include[${PY_SPACE}]+<([^>]+)>[${PY_SPACE}]*$`);
 
-// Key: `${userRoot}\0${workspaceRoot}`. Value: the mtimes of the candidate files when rendered
-// (0 = file did not exist) and the rendered section. @include targets are NOT individually tracked;
-// editing the parent file changes its mtime and invalidates the entry naturally.
+// Key: `${userRoot}\0${workspaceRoot}`。Value: 渲染时候选文件的 mtime（0 = 文件不存在）
+// 以及渲染出的段落。@include 的目标文件不做单独跟踪；修改父文件会改变其 mtime，
+// 从而自然地使该缓存条目失效。
 const cache = new Map<string, { mtimes: number[]; result: string }>();
 
 export function clearInstructionCache(): void {
@@ -75,7 +74,7 @@ function expand(path: string, root: string, visited: Set<string>, depth: number)
       continue;
     }
     const raw = pyStrip(match[1]!);
-    // Joined without lexical normalisation: `..` must be applied after symlink resolution.
+    // 拼接时不做词法归一化：`..` 必须在符号链接解析之后才生效。
     const candidate = resolveNonStrict(isAbsolute(raw) ? raw : `${dirname(resolved)}${sep}${raw}`);
     if (!isWithin(candidate, root)) lines.push("<!-- @include blocked: path outside root -->");
     else if (!exists(candidate)) lines.push(`<!-- @include missing: ${raw} -->`);
@@ -86,8 +85,8 @@ function expand(path: string, root: string, visited: Set<string>, depth: number)
 }
 
 /**
- * Bounded, trusted instructions block, or `""` when no instruction file has content. Results are
- * cached by file mtimes: creating, modifying or deleting a file invalidates automatically.
+ * 有界的可信指令块；没有任何指令文件含内容时返回 `""`。结果按文件 mtime 缓存：
+ * 新建、修改或删除文件都会自动使其失效。
  */
 export function renderInstructionSection(dirs: { userRoot: string; workspaceRoot?: string }): string {
   const userRoot = resolveNonStrict(dirs.userRoot);

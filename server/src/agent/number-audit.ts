@@ -1,14 +1,14 @@
 /**
- * Numeric provenance audit for final answers (port of agent/number_audit.py).
+ * 最终答案中数字的来源审计（移植自 agent/number_audit.py）。
  *
- * A report may only present data-derived numbers that trace back to tool results of the conversation, to numbers
- * the user wrote, or to numbers the agent put into tool arguments (SQL thresholds). Percentages, magnitude-suffixed
- * values, ranges, years, small integers, tiny decimals and identifier-embedded tokens (PM2.5, v1.3) are skipped.
+ * 报告只能呈现可追溯到本会话工具结果、用户写下的数字、或 agent 写入工具参数的数字（SQL 阈值）的
+ * 数据类数字。百分比、带量级后缀的值、范围、年份、小整数、极小的小数以及嵌在标识符中的记号
+ * （PM2.5、v1.3）会被跳过。
  *
- * Python used `decimal.Decimal`; here a number is an exact `{int, scale}` pair (value = int / 10^scale), so equality,
- * ROUND_HALF_UP quantization and the 28-digit context limit behave the same. Known divergence: Python's `\d` also
- * matches every Unicode decimal digit and `Decimal()` parses them; here only digits that NFKC maps to ASCII
- * (full-width ０-９) are read, other scripts' digits are ignored.
+ * Python 使用 `decimal.Decimal`；这里用精确的 `{int, scale}` 对（值 = int / 10^scale），因此相等性、
+ * ROUND_HALF_UP 量化和 28 位上下文限制的行为一致。已知差异：Python 的 `\d` 也匹配所有 Unicode
+ * 十进制数字，`Decimal()` 也能解析它们；这里只读取 NFKC 映射到 ASCII 的数字（全角 ０-９），
+ * 其他文种的数字会被忽略。
  */
 import type { Message } from "@earendil-works/pi-ai";
 
@@ -21,10 +21,10 @@ const MIN_INT = 100n;
 const MIN_DECIMAL: Dec = { int: 3n, scale: 0 };
 const MAX_LISTED = 15;
 const MAX_TEXT_CHARS = 60_000;
-/** Python's default Decimal context precision. */
+/** Python 默认的 Decimal 上下文精度。 */
 const DECIMAL_PRECISION = 28;
 
-/** Tools whose success marks a turn as data-derived; only those turns are audited. */
+/** 成功即把该轮标记为数据来源的工具；只有这些轮次会被审计。 */
 export const NUMBER_EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   "query_data",
   "run_analysis",
@@ -35,7 +35,7 @@ export const NUMBER_EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   "generate_chart",
 ]);
 
-/** Exact non-negative decimal: value = int / 10^scale, canonical form has no trailing fractional zeros. */
+/** 精确的非负十进制数：值 = int / 10^scale，规范形式不带末尾的小数零。 */
 type Dec = { int: bigint; scale: number };
 
 function canonical(int: bigint, scale: number): Dec {
@@ -59,7 +59,7 @@ function compare(a: Dec, b: Dec): number {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
-/** Returns the parsed number and its count of fractional digits as written (`1500.00` has 2). */
+/** 返回解析出的数字及其按原样书写的小数位数（`1500.00` 为 2 位）。 */
 function toDecimal(raw: string): { value: Dec; decimals: number } | undefined {
   const cleaned = raw.replaceAll(",", "").normalize("NFKC");
   if (!/^[0-9]+(?:\.[0-9]+)?$/.test(cleaned)) return undefined;
@@ -71,7 +71,7 @@ function digitCount(n: bigint): number {
   return n === 0n ? 1 : n.toString().length;
 }
 
-/** `Decimal.quantize(10^-decimals, ROUND_HALF_UP)`; the value is returned unchanged when Python would raise InvalidOperation. */
+/** `Decimal.quantize(10^-decimals, ROUND_HALF_UP)`；当 Python 会抛 InvalidOperation 时原样返回该值。 */
 function quantize(value: Dec, decimals: number): Dec {
   let int: bigint;
   if (value.scale <= decimals) {
@@ -127,19 +127,18 @@ function parseCorpusValues(texts: readonly string[]): Map<string, Dec> {
   return values;
 }
 
-/** Python `float(Decimal)` is the nearest double; so is `Number(string)`. */
+/** Python 的 `float(Decimal)` 取最近的双精度值；`Number(string)` 亦然。 */
 function toFloat(d: Dec): number {
   return Number(d.scale === 0 ? d.int.toString() : `${d.int}e-${d.scale}`);
 }
 
-/** Python `round(x, 6)` for the magnitudes seen here (doubles): round-half-even on the exact value. */
+/** 对这里出现的量级（双精度）模拟 Python 的 `round(x, 6)`：按精确值四舍六入五取偶。 */
 function round6(x: number): number {
   return Number(x.toFixed(6));
 }
 
 /**
- * Returns the report numbers (first-appearance order, deduplicated, capped at 15) that no evidence supports, and the
- * full count of unsupported numbers.
+ * 返回报告中没有任何证据支持的数字（按首次出现顺序、去重、最多 15 个），以及不受支持数字的总数。
  */
 export function auditReportNumbers(
   reportText: string,
@@ -169,7 +168,7 @@ export function auditReportNumbers(
     }
     if (matched) continue;
     if (decimals === 0) {
-      // Derived integer deltas: x == a + b or x == a - b where BOTH operands are substantial evidence numbers.
+      // 推导出的整数差值：x == a + b 或 x == a - b，其中两个操作数都是足够大的证据数字。
       const x = toFloat(value);
       let derived = false;
       for (const a of floatValues) {
@@ -190,8 +189,8 @@ export function auditReportNumbers(
 }
 
 /**
- * Splits a conversation into tool-result texts and context texts (user messages and the agent's own tool-call
- * arguments). Assistant prose is excluded on purpose: that is the channel fabricated numbers would re-enter through.
+ * 把对话拆成工具结果文本与上下文文本（用户消息和 agent 自身的工具调用参数）。助手散文被特意排除：
+ * 那正是编造的数字可能重新流入的通道。
  */
 export function collectNumberEvidence(messages: readonly Message[]): { evidence: string[]; context: string[] } {
   const evidence: string[] = [];

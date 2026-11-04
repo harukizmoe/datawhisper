@@ -19,16 +19,16 @@ import type { ModelRef } from "@earendil-works/pi-durable";
 import { SecretCredentialStore, writePrivateJson } from "./credentials.ts";
 
 /**
- * User-configured model providers. Nothing is hosted: every provider, model and key comes from the
- * user. Settings (no secrets) live in `<dataDir>/models.json`; keys in SecretCredentialStore.
+ * 用户配置的模型 provider。这里不托管任何东西：provider、模型和密钥全部来自用户。
+ * 设置（不含密钥）保存在 `<dataDir>/models.json`；密钥保存在 SecretCredentialStore。
  *
- * Two provider kinds:
- *  - builtin: a pi-ai built-in provider (catalog, native API, thinking maps come from pi-ai)
- *  - custom:  any OpenAI-compatible endpoint (Ollama, AtlasCloud, relays, self-hosted servers);
- *             the user lists its models with their limits.
+ * 两种 provider：
+ *  - builtin：pi-ai 内置 provider（模型目录、原生 API、思考等级映射都来自 pi-ai）
+ *  - custom:  任何 OpenAI 兼容端点（Ollama、AtlasCloud、中转服务、自建服务）；
+ *             模型及其上限由用户列出。
  *
- * Changes are applied to one long-lived `Models` instance, so the Harness (which reads
- * `models: () => service.models`) uses them on its next request.
+ * 变更会应用到一个长期存在的 `Models` 实例上，因此 Harness（它读取
+ * `models: () => service.models`）在下一次请求时就会用到新配置。
  */
 
 export type CustomModel = {
@@ -38,7 +38,7 @@ export type CustomModel = {
   maxTokens: number;
   reasoning: boolean;
   vision?: boolean;
-  /** USD per million tokens, optional (usage cost display). */
+  /** 每百万 token 的美元价格，可选（用于展示用量成本）。 */
   inputCostPerMillion?: number;
   outputCostPerMillion?: number;
 };
@@ -50,7 +50,7 @@ export type ProviderSettings =
       id: string;
       name: string;
       baseUrl: string;
-      /** false for local servers such as Ollama. */
+      /** 对 Ollama 这类本地服务为 false。 */
       requiresKey: boolean;
       enabled: boolean;
       models: CustomModel[];
@@ -66,22 +66,40 @@ export type ModelSettings = {
 export type CustomPreset = Omit<Extract<ProviderSettings, { kind: "custom" }>, "kind" | "enabled" | "id" | "models"> & { presetId: string };
 
 /**
- * Endpoint presets carried over from the old LLM config (ollama, atlascloud). The user lists the
- * models and their limits; no limits are guessed here.
+ * 从旧的 LLM 配置沿用下来的端点预设（ollama、atlascloud）。模型及其上限由用户填写，
+ * 这里不猜测任何上限。
  */
 export const CUSTOM_PRESETS: readonly CustomPreset[] = [
   { presetId: "ollama", name: "Ollama", baseUrl: "http://localhost:11434/v1", requiresKey: false },
   { presetId: "atlascloud", name: "AtlasCloud", baseUrl: "https://api.atlascloud.ai/v1", requiresKey: true },
 ];
 
+/** 设置类错误在 RPC 里的细分（`error.data.kind`）；默认是普通的输入不合法。 */
+export type SettingsErrorKind = "invalid_input" | "unknown_model" | "unsupported_thinking_level";
+
 export class SettingsError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly kind: SettingsErrorKind = "invalid_input",
+  ) {
     super(message);
     this.name = "SettingsError";
   }
 }
 
 const CUSTOM_ID = /^custom-[a-z0-9][a-z0-9-]{0,47}$/;
+
+/** 思考强度的全部取值（pi-ai 的 `ModelThinkingLevel`），用于把线上传来的字符串收窄成该类型。 */
+const THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** `null`/缺省表示「不指定」；其他取值必须落在 `ModelThinkingLevel` 里，否则是设置错误。 */
+export function parseThinkingLevel(value: unknown): ModelThinkingLevel | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !(THINKING_LEVELS as readonly string[]).includes(value)) {
+    throw new SettingsError(`thinking level must be one of ${THINKING_LEVELS.join(", ")}`);
+  }
+  return value as ModelThinkingLevel;
+}
 
 export class ModelService {
   readonly models: MutableModels;
@@ -111,12 +129,12 @@ export class ModelService {
     return new ModelService(settings, settingsPath, credentials);
   }
 
-  /** Built-in provider ids the user can enable. */
+  /** 用户可以启用的内置 provider id。 */
   builtinIds(): string[] {
     return [...this.builtins.keys()].sort();
   }
 
-  /** Settings plus per-provider auth status; never returns secrets. */
+  /** 设置加上各 provider 的鉴权状态；绝不返回密钥。 */
   async view() {
     const providers = await Promise.all(
       this.settings.providers.map(async (p) => ({
@@ -124,7 +142,7 @@ export class ModelService {
         name: p.kind === "custom" ? p.name : (this.builtins.get(p.id)?.name ?? p.id),
         hasStoredKey: (await this.credentials.read(p.id)) !== undefined,
         keyRequired: p.kind === "custom" ? p.requiresKey : true,
-        /** Where the effective auth comes from ("stored", an env var name, "local server"); null = not configured or disabled. */
+        /** 实际生效的鉴权来源（"stored"、环境变量名、"local server"）；null = 未配置或已禁用。 */
         authSource: p.enabled ? ((await this.models.checkAuth(p.id))?.source ?? null) : null,
       })),
     );
@@ -165,17 +183,17 @@ export class ModelService {
     await this.save({ ...this.settings, defaultModel: model ?? undefined, defaultThinking: thinking ?? undefined });
   }
 
-  /** Validates a per-conversation choice against the current catalog; throws SettingsError. */
+  /** 按当前模型目录校验每个会话的选择；不合法时抛 SettingsError。 */
   resolve(ref: ModelRef, thinking: ModelThinkingLevel | null): Model<Api> {
     const model = this.models.getModel(ref.provider, ref.modelId);
-    if (model === undefined) throw new SettingsError(`unknown model: ${ref.provider}/${ref.modelId}`);
+    if (model === undefined) throw new SettingsError(`unknown model: ${ref.provider}/${ref.modelId}`, "unknown_model");
     if (thinking !== null && !getSupportedThinkingLevels(model).includes(thinking)) {
-      throw new SettingsError(`${ref.provider}/${ref.modelId} does not support thinking level ${thinking}`);
+      throw new SettingsError(`${ref.provider}/${ref.modelId} does not support thinking level ${thinking}`, "unsupported_thinking_level");
     }
     return model;
   }
 
-  /** Chat models of enabled providers whose auth is complete. */
+  /** 已启用且鉴权完整的 provider 的聊天模型。 */
   async available() {
     return (await this.models.getAvailable()).map((m) => ({
       provider: m.provider,
@@ -190,8 +208,8 @@ export class ModelService {
   }
 
   /**
-   * The agent model for a conversation without one: the saved default when it is still available, otherwise the first
-   * available model; the saved thinking level clamped to what that model supports. Undefined when nothing is available.
+   * 会话没有指定模型时使用的 agent 模型：保存的默认模型仍可用则用它，否则用第一个可用
+   * 模型；保存的思考等级会被钳制到该模型支持的范围内。没有任何可用模型时为 undefined。
    */
   async defaultAgent(): Promise<{ model: ModelRef; thinkingLevel?: ModelThinkingLevel } | undefined> {
     const available = await this.models.getAvailable();
@@ -204,8 +222,8 @@ export class ModelService {
   }
 
   /**
-   * One tiny request through the real provider. `draft` tests unsaved input ("test before save"):
-   * its provider and key are used for this request only.
+   * 通过真实 provider 发一次极小请求。`draft` 用于测试尚未保存的输入（“先测后存”）：
+   * 其中的 provider 和密钥仅用于本次请求。
    */
   async test(
     ref: ModelRef,
@@ -294,8 +312,8 @@ export class ModelService {
       cost: { input: m.inputCostPerMillion ?? 0, output: m.outputCostPerMillion ?? 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: m.contextWindow,
       maxTokens: m.maxTokens,
-      // pi-ai's own guidance for Ollama/vLLM/SGLang is supportsDeveloperRole: false; "system" is accepted by every OpenAI-compatible server.
-      // Other compat fields stay auto-detected from baseUrl (e.g. DeepSeek thinking format).
+      // pi-ai 对 Ollama/vLLM/SGLang 的建议就是 supportsDeveloperRole: false；而 "system" 被所有 OpenAI 兼容服务接受。
+      // 其余 compat 字段仍根据 baseUrl 自动探测（例如 DeepSeek 的 thinking 格式）。
       compat: { supportsDeveloperRole: false },
     }));
     const auth = settings.requiresKey
@@ -320,7 +338,7 @@ export class ModelService {
   }
 }
 
-/** Ollama's native `/api` or `/api/chat` URL is a common paste; its OpenAI endpoint is `/v1`. */
+/** 用户常粘贴 Ollama 原生的 `/api` 或 `/api/chat` URL；其 OpenAI 端点应为 `/v1`。 */
 export function normalizeBaseUrl(raw: string): string {
   const value = raw.trim().replace(/\/+$/, "");
   if (/:11434$/.test(value)) return `${value}/v1`;

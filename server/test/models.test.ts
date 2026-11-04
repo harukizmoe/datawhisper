@@ -2,9 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { INVALID_PARAMS, PARSE_ERROR } from "../src/ipc/errors.ts";
+import { mapSettingsError, modelMethods } from "../src/ipc/methods.ts";
 import { ModelService, normalizeBaseUrl, type ProviderSettings, SettingsError } from "../src/models/service.ts";
-import { modelRoutes } from "../src/routes/models.ts";
 import { type Stub, startStub } from "./support/stub-openai.ts";
+import { memoryServer } from "./support/rpc.ts";
 
 let stub: Stub;
 const dirs: string[] = [];
@@ -181,31 +183,32 @@ describe("ModelService", () => {
   });
 });
 
-describe("model routes", () => {
-  test("keys go in but never come out, and bad input answers 400", async () => {
+describe("model methods", () => {
+  test("keys go in but never come out, and bad input is -32602", async () => {
     const { service } = await open();
-    const app = modelRoutes(service);
-    const put = (path: string, body: unknown) =>
-      app.request(path, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const server = memoryServer(modelMethods(service), mapSettingsError);
 
-    expect((await put("/providers/custom-relay", custom())).status).toBe(200);
-    expect((await put("/providers/custom-relay/key", { apiKey: "sk-route-secret" })).status).toBe(200);
+    expect((await server.call("models.putProvider", custom())).error).toBeUndefined();
+    expect((await server.call("models.setKey", { providerId: "custom-relay", apiKey: "sk-route-secret" })).error).toBeUndefined();
 
-    const view = await (await app.request("/")).text();
+    const view = JSON.stringify((await server.call("models.view")).result);
     expect(view).not.toContain("sk-route-secret");
     expect(JSON.parse(view)).toMatchObject({ credentialBackend: "file", providers: [{ id: "custom-relay", hasStoredKey: true }] });
-    expect(JSON.parse(view).presets.map((p: { presetId: string }) => p.presetId)).toEqual(["ollama", "atlascloud"]);
+    const presets = (await server.call<{ presets: { presetId: string }[] }>("models.view")).result!.presets;
+    expect(presets.map((preset) => preset.presetId)).toEqual(["ollama", "atlascloud"]);
 
-    expect((await put("/providers/custom-other", custom())).status).toBe(400);
-    expect((await put("/providers/custom-relay/key", { apiKey: 1 })).status).toBe(400);
-    expect((await put("/default", { model: { provider: "custom-relay", modelId: "nope" }, thinkingLevel: null })).status).toBe(400);
-    expect((await app.request("/providers/custom-relay", { method: "PUT", body: "{" })).status).toBe(400);
-
-    const tested = await app.request("/test", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: { provider: "custom-relay", modelId: "relay-chat" } }),
+    // 非法 provider（id 前缀不对）、错误的 apiKey 类型、未知模型、坏 JSON。
+    const badProvider = await server.call("models.putProvider", custom({ id: "relay" }));
+    expect(badProvider.error).toMatchObject({ code: INVALID_PARAMS, data: { kind: "invalid_input" } });
+    expect((await server.call("models.setKey", { providerId: "custom-relay", apiKey: 1 })).error?.code).toBe(INVALID_PARAMS);
+    expect((await server.call("models.setDefault", { model: { provider: "custom-relay", modelId: "nope" }, thinkingLevel: null })).error).toMatchObject({
+      code: INVALID_PARAMS,
+      data: { kind: "unknown_model" },
     });
-    expect(await tested.json()).toMatchObject({ ok: true });
+    await server.line("{");
+    expect(server.records.at(-1)?.error).toMatchObject({ code: PARSE_ERROR });
+
+    const tested = await server.call("models.test", { model: { provider: "custom-relay", modelId: "relay-chat" } });
+    expect(tested.result).toMatchObject({ ok: true });
   });
 });
