@@ -161,6 +161,7 @@ scripts/*
 !scripts/clean-chat-chunks.mjs
 !scripts/verify-chat-bundle.mjs
 !scripts/generate_tool_inventory.py
+!scripts/golden/
 # Untracked assets
 Information/assets/LOGO.png
 
