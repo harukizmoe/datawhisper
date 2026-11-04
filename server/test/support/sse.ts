@@ -1,4 +1,4 @@
-/** Minimal SSE client for tests: parses `event:`/`data:` frames and counts comment lines (heartbeats). */
+/** 测试用的极简 SSE 客户端：解析 `event:`/`data:` 帧并统计注释行（心跳）。 */
 export type SseEvent = { event: string; data: unknown };
 
 export class SseClient {
@@ -25,7 +25,7 @@ export class SseClient {
     this.#controller.abort();
   }
 
-  /** Resolve once `predicate` holds for the events (and comments) received so far. */
+  /** 当 `predicate` 对目前已收到的事件（及注释）成立时 resolve。 */
   async until(predicate: (events: SseEvent[], client: SseClient) => boolean, timeoutMs = 10_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!predicate(this.events, this)) {
@@ -74,7 +74,7 @@ export class SseClient {
         this.#wake();
       }
     } catch {
-      // aborted by close()
+      // 由 close() 中止
     } finally {
       this.done = true;
       this.#wake();

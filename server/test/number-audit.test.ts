@@ -6,7 +6,7 @@ import { auditReportNumbers, collectNumberEvidence } from "../src/agent/number-a
 type Case = { report: string; evidence: string[]; context: string[]; unsupported: string[]; total: number };
 
 describe("auditReportNumbers", () => {
-  // Expected values come from running agent/number_audit.py (scripts/golden/export_number_audit.py).
+  // 期望值来自运行 agent/number_audit.py（scripts/golden/export_number_audit.py）。
   test("matches the Python implementation on every golden case", () => {
     const failures: string[] = [];
     for (const [i, c] of (golden as Case[]).entries()) {

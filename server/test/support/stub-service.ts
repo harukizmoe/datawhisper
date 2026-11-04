@@ -1,6 +1,6 @@
 /**
- * The agent service with the in-process stub model (stub-openai.ts) as its only provider, so every conversation uses it. Same process
- * contract as src/main.ts (env, ready line, SIGTERM / stdin EOF), so the desktop app's live tests can supervise it:
+ * 以进程内 stub 模型（stub-openai.ts）为唯一 provider 的 agent 服务，因此每个会话都会用它。进程契约与
+ * src/main.ts 相同（env、ready 行、SIGTERM / stdin EOF），以便桌面应用的 live 测试可以监管它：
  *
  *   DW_TOKEN=t DW_DATA_DIR=/tmp/x STUB_CHUNK_MS=15 bun run server/test/support/stub-service.ts
  */
@@ -12,7 +12,7 @@ import { startStub } from "./stub-openai.ts";
 const stub = startStub({ chunkDelayMs: Number(process.env.STUB_CHUNK_MS ?? 15) });
 const config = loadConfig();
 const service = await startService(config, { forceFileCredentials: true });
-// Overwritten on every start, so a data dir from an earlier run points at this run's stub port.
+// 每次启动都会覆盖，因此早先运行留下的数据目录会指向本次运行的 stub 端口。
 await service.modelService.putProvider(stubProvider(stub.url));
 
 console.log(

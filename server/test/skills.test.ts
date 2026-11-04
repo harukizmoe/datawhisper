@@ -51,7 +51,7 @@ function tempDir(): string {
   return dir;
 }
 
-/** Python YAML error text cannot be reproduced; only its prefix is part of the contract. */
+/** Python 的 YAML 错误文本无法复现；只把它的前缀视为契约的一部分。 */
 function comparableError(error: string): string {
   return error.startsWith("invalid YAML frontmatter: ") ? "invalid YAML frontmatter: " : error;
 }
@@ -253,7 +253,7 @@ describe("prompt rendering and activation", () => {
     for (const row of golden.defs) {
       const k = row.kwargs;
       const fields = { name: k.name, description: k.description, prompt: k.prompt, path: "x.md", allowedTools: k.allowed_tools, tags: k.tags, source: k.source };
-      // Keys the generator left out take the dataclass defaults, like in Python.
+      // 生成器省略的键取 dataclass 默认值，与 Python 一致。
       const make = () => makeSkillDef(Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) as typeof fields);
       if (row.error) expect(make).toThrow(row.error);
       else {
@@ -352,7 +352,7 @@ describe("skill discovery", () => {
 
   test("catalog entries match", async () => {
     const { catalog, total } = await buildSkillCatalog(discovery.corpus, embedder, memoryStore());
-    // Python drops only the empty name; a whitespace-only name is kept.
+    // Python 只丢弃空名称；纯空白名称会被保留。
     expect(total).toBe(discovery.corpus.length - 1);
     expect(total).toBe(discovery.catalog.length);
     expect(catalog.map((c) => ({ name: c.name, description: c.description, tags: [...c.tags], text: c.text }))).toEqual(discovery.catalog);

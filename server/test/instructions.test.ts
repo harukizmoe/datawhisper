@@ -79,7 +79,7 @@ describe("instruction sections", () => {
       return null;
     });
     expect(outputs).toEqual(seq.outputs);
-    // the cache only helps when nothing changed: stale results are the documented trade-off
+    // 缓存只在无任何变化时才有用：陈旧结果是已知并接受的取舍
     expect(outputs.filter((o: string | null) => o !== null).length).toBe(11);
   });
 

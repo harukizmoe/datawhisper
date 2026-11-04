@@ -1,25 +1,25 @@
-// Scripted OpenAI-compatible chat-completions stub (streaming SSE only).
+// 按脚本应答的 OpenAI 兼容 chat-completions stub（仅流式 SSE）。
 //
-// Behaviour, decided from the request's messages:
-// - last message is a tool result  -> stream a final text answer that quotes the tool result
-// - last user message contains `CALL:<tool>` markers (each optionally `CALL:<tool>{flat json}`) and no tool
-//   result has been seen since that user message -> stream one tool call per marker, in one response
-// - otherwise -> stream a markdown answer in small chunks
+// 行为由请求中的 messages 决定：
+// - 最后一条消息是 tool 结果  -> 流式输出最终文本答案，并引用该 tool 结果
+// - 最后一条 user 消息含 `CALL:<tool>` 标记（每个标记可选携带 `CALL:<tool>{flat json}`），且自该 user 消息以来
+//   未出现过 tool 结果 -> 每个标记流式输出一次 tool 调用，全部放在同一个响应里
+// - 其他情况 -> 以小分块流式输出 markdown 答案
 //
-// Every request is appended to `log` (offered tool names, message roles, last user text) so
-// spikes can assert how often and with what the model was called.
+// 每个请求都会追加到 `log`（提供的 tool 名称、消息角色、最后一条 user 文本），
+// 便于测试断言模型被调用的次数与内容。
 
 export type StubRequest = {
   n: number;
   model: string;
   tools: string[];
-  /** Tools declared in place by mid-conversation system messages (pi-ai "additions" mode), one list per message. */
+  /** 由对话中途的 system 消息就地声明的 tool（pi-ai "additions" 模式），每条消息一个列表。 */
   systemTools: string[][];
   roles: string[];
   lastUser: string;
   lastTool?: string;
   authorization: string | null;
-  /** Raw request body, for inspecting payload shape (tools/messages order, cache keys). */
+  /** 原始请求体，用于检查载荷结构（tools/messages 顺序、缓存键）。 */
   body: Record<string, unknown>;
 };
 

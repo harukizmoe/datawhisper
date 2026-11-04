@@ -1,5 +1,5 @@
-// Parity of the TS prompt port with the real Python (agent/prompts.py).
-// Cases come from scripts/golden/export_prompts.py -> test/golden/prompts.json.
+// TS 提示词移植版与真实 Python（agent/prompts.py）的一致性。
+// 用例来自 scripts/golden/export_prompts.py -> test/golden/prompts.json。
 import { describe, expect, test } from 'bun:test'
 import golden from './golden/prompts.json' with { type: 'json' }
 import {

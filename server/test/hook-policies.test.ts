@@ -9,7 +9,7 @@ const cases = golden as unknown as Golden;
 const NONE = { kind: "none", name: "" };
 
 describe("parseTextFallbackToolCalls", () => {
-  // Expected values come from agent/agent.py `_parse_text_fallback_tool_calls` (scripts/golden/export_hook_policies.py).
+  // 期望值来自 agent/agent.py 的 `_parse_text_fallback_tool_calls`（scripts/golden/export_hook_policies.py）。
   test("matches the Python parser on every golden case", () => {
     const failures = cases.parse.flatMap(({ content, calls }) => {
       const got = parseTextFallbackToolCalls(content).map((c) => [c.name, c.args]);
@@ -21,7 +21,7 @@ describe("parseTextFallbackToolCalls", () => {
 
   test("ignores unknown and differently-cased tool names; repeated parameters keep the last value", () => {
     expect(parseTextFallbackToolCalls('<other><parameter name="x">1</parameter></other>')).toEqual([]);
-    // The tag pattern is case-insensitive but the allowlist is not: Python drops an upper-cased name too.
+    // 标签正则是大小写不敏感的，但 allowlist 不是：Python 同样会丢弃大写名称。
     expect(parseTextFallbackToolCalls('<EDIT_DIAGRAM><PARAMETER NAME="id">3</PARAMETER></EDIT_DIAGRAM>')).toEqual([]);
     expect(parseTextFallbackToolCalls('<display_diagram><parameter name="xml">a</parameter><parameter name="xml">b</parameter></display_diagram>')).toEqual([
       { name: "display_diagram", args: { xml: "b" } },
@@ -38,7 +38,7 @@ describe("output tools", () => {
     const batch = ["propose_ppt_outline", "generate_ppt", "query_data"];
     expect(blockedOutputTools(batch, "").map((b) => b.name)).toEqual(["propose_ppt_outline", "generate_ppt"]);
     expect(blockedOutputTools(batch, "ppt").map((b) => b.name)).toEqual(["generate_ppt"]);
-    // Each tool has its own token set: the confirm step unlocks generate_* but not propose_*.
+    // 每个工具有自己的 token 集合：confirm 步骤解锁 generate_*，但不解锁 propose_*。
     expect(blockedOutputTools(batch, "ppt_confirm").map((b) => b.name)).toEqual(["propose_ppt_outline"]);
     expect(blockedOutputTools(["generate_dashboard"], "dashboard").map((b) => b.name)).toEqual(["generate_dashboard"]);
     expect(blockedOutputTools(["export_report"], "report_confirm")).toEqual([]);

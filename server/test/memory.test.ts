@@ -47,7 +47,7 @@ const dirsFor = (root: string, hasWorkspace: boolean): MemoryDirs => ({
   workspaceRoot: hasWorkspace ? join(root, "ws") : undefined,
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: golden JSON rows are compared structurally
+// biome-ignore lint/suspicious/noExplicitAny: golden JSON 行按结构比较
 function checkCase(root: string, c: any, trimmed = false) {
   const dirs = dirsFor(root, c.has_workspace);
   const records = listMemoryRecords(dirs);
@@ -83,7 +83,7 @@ describe("memory read side: static fixtures", () => {
     expect(names).not.toContain("wrong-scope");
     expect(names).not.toContain("bom");
     expect(invalid.section).toStartWith("\n\n[LONG-TERM MEMORY]\n- [");
-    // user-scope records are always listed before workspace-scope records
+    // user 作用域的记录总是排在 workspace 作用域之前
     const scopes: string[] = invalid.records.map((r: { scope: string }) => r.scope);
     expect(scopes.indexOf("workspace")).toBeGreaterThan(scopes.lastIndexOf("user"));
   });

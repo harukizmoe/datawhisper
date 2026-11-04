@@ -2,7 +2,7 @@ import type { ProviderSettings } from "../../src/models/service.ts";
 
 export const STUB_MODEL = { provider: "custom-stub", modelId: "stub-chat" } as const;
 
-/** A keyless custom OpenAI-compatible provider pointed at `baseUrl` (the stub server of stub-openai.ts). */
+/** 一个指向 `baseUrl`（stub-openai.ts 的 stub 服务器）的免密钥自定义 OpenAI 兼容 provider。 */
 export function stubProvider(baseUrl: string): ProviderSettings {
   return {
     kind: "custom",

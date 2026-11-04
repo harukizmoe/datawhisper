@@ -60,7 +60,7 @@ function pyCommand(c: CommandDef, base = REPO_ROOT) {
   };
 }
 
-// Error texts may embed the temp directory; the generator stores it as "<tmp>".
+// 错误文本可能内嵌临时目录；生成器统一将其存为 "<tmp>"。
 const pyDiagnostics = (list: readonly { path: string; source: string; error: string }[], base = REPO_ROOT) =>
   list.map((d) => ({ path: relativeTo(base, d.path), source: d.source, error: comparableError(d.error.replaceAll(base, "<tmp>")) }));
 const expectedDiagnostics = (list: { path: string; source: string; error: string }[]) =>
