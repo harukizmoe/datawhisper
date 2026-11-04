@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
-import { AppToolError, errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "../types.ts";
+import { AppToolError, errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "./types.ts";
 
 export const TOOL_RESULT_READ_MAX_CHARS = 4_000;
 
@@ -137,6 +137,10 @@ export function createArtifactTool(deps: AppToolDeps): AppTool[] {
             throw new AppToolError("artifact SHA-256 metadata mismatch");
           }
           const text = record.data;
+          const digest = createHash("sha256").update(text, "utf8").digest("hex");
+          if (record.sha256 !== undefined && record.sha256 !== digest) {
+            throw new AppToolError("artifact is missing or failed SHA-256 verification");
+          }
           const boundedLimit = Math.max(1, Math.min(TOOL_RESULT_READ_MAX_CHARS, Math.trunc(args.limit ?? 4000) || 4000));
           const cleanQuery = String(args.query ?? "").trim();
           let result: Record<string, JsonValue>;

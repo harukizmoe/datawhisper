@@ -7,7 +7,8 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "../types.ts";
+import { pyRepr } from "../../agent/py-compat.ts";
+import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "./types.ts";
 
 /** 与 `Function/Charts_generation/charts/color_schemes.py` 相同的四套方案。 */
 export const COLOR_SCHEMES: Readonly<Record<string, { name: string; description: string }>> = {
@@ -102,7 +103,7 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
       replay: "safe",
       async execute(args) {
         try {
-          const tables = args.tables ?? [];
+          const tables = args.tables ?? ["*"];
           const all = tables.length === 1 && (tables[0] === "*" || tables[0] === "all");
           const exportLabel = all
             ? "全部可用表格（原始数据 + 分析结果）"
@@ -247,7 +248,7 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
         },
         required: ["scheme"],
       },
-      replay: "safe",
+      replay: "unsafe",
       async execute(args) {
         const requested = (args.scheme ?? "").toLowerCase().trim();
         const info = COLOR_SCHEMES[requested];
@@ -326,7 +327,7 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
             const mapping = record.field_mapping;
             const fields = mapping !== null && typeof mapping === "object" && !Array.isArray(mapping)
               ? Object.entries(mapping as Record<string, JsonValue>)
-                .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join("|") : String(value)}`)
+                .map(([key, value]) => `${key}=${pyRepr(value)}`)
                 .join(", ")
               : "—";
             rows.push(`| ${index + 1} | ${title} | ${chartType} | ${fields || "—"} |`);

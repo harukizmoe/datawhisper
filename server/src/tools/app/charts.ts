@@ -8,7 +8,7 @@
 
 import type { JsonValue } from "@earendil-works/chord";
 import { pyRepr } from "../../agent/py-compat.ts";
-import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "../types.ts";
+import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "./types.ts";
 import { BOOST_TABLE, CHARTS, COLUMN_PATTERN_TABLE, type ChartEntry } from "./chart-registry.ts";
 
 const MINIMUM_VALID_SCORE = 1;
@@ -28,8 +28,8 @@ export type ChartCandidate = {
 function flattenRoles(entry: ChartEntry): string[] {
   const roles: string[] = [];
   for (const role of entry.required_roles) {
-    if (Array.isArray(role)) roles.push(...role);
-    else roles.push(role);
+    if (typeof role === "string") roles.push(role);
+    else roles.push(...role);
   }
   return roles;
 }
@@ -73,7 +73,7 @@ export function selectCharts(
     chart_id: entry.chart_id,
     name: entry.name,
     category: entry.category,
-    required_roles: entry.required_roles.map((role) => (Array.isArray(role) ? role.join(" OR ") : role)),
+    required_roles: entry.required_roles.map((role) => (typeof role === "string" ? role : role.join(" OR "))),
     optional_roles: [...entry.optional_roles],
     data_format: entry.data_format,
     constraints: entry.constraints,

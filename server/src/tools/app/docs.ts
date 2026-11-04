@@ -11,7 +11,7 @@
  */
 
 import type { Context, JsonValue } from "@earendil-works/chord";
-import { defineDoc, type Conversation, type Harness } from "@earendil-works/pi-durable";
+import { defineDoc, type Conversation, type Harness, type JsonObject } from "@earendil-works/pi-durable";
 import type { AppDocHost, AppDocHosts, AppDocToken } from "./types.ts";
 
 export type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
@@ -179,7 +179,7 @@ export function createConversationDocs(options: {
   readonly context: Context;
 }): AppDocHosts {
   const { harness, conversation, context } = options;
-  function host<T extends object>(token: AppDocToken<T>): AppDocHost<T> {
+  function host<T extends JsonObject>(token: AppDocToken<T>): AppDocHost<T> {
     const initial = (): T => token.definition.initial() as T;
     return {
       async read(): Promise<T> {
@@ -202,7 +202,7 @@ export function createConversationDocs(options: {
 }
 
 /** 内存宿主：测试与“无 durable 会话”的嵌入场景使用；语义与生产宿主一致。 */
-export function createMemoryDocHost<T extends object>(initial: T): AppDocHost<T> & { peek(): T } {
+export function createMemoryDocHost<T extends JsonObject>(initial: T): AppDocHost<T> & { peek(): T } {
   let value = structuredClone(initial) as T;
   return {
     async read(): Promise<T> {

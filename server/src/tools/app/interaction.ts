@@ -9,7 +9,7 @@
 import type { JsonValue } from "@earendil-works/chord";
 import { BUILTIN_TOOL_REGISTRY } from "../registry.ts";
 import { activateSkill, getSkill, type SkillDirs } from "../../agent/skills.ts";
-import { errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "../types.ts";
+import { errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "./types.ts";
 import { searchMcpCatalog } from "./mcp.ts";
 
 const ASK_USER_EMPTY_OPTIONS = "ASKU-001";

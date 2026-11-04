@@ -8,8 +8,8 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "../types.ts";
-import type { AppDocHost } from "../types.ts";
+import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "./types.ts";
+import type { AppDocHost } from "./types.ts";
 import {
   type DynamicPlan,
   type PlanBudget,
@@ -20,7 +20,7 @@ import {
   type TeamMessage,
   type TeamRecord,
   type TeamStoreDoc,
-} from "../docs.ts";
+} from "./docs.ts";
 import { isoSeconds } from "./tasks.ts";
 
 const BAD_NAME_RE = /[\x00-\x1f\x7f/\\]/;

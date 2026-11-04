@@ -14,7 +14,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync, mkdirSync, lstatSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { JsonValue } from "@earendil-works/chord";
 import { readXlsxRows } from "./spreadsheet.ts";
@@ -237,8 +237,30 @@ export function fnmatch(name: string, pattern: string): boolean {
   return new RegExp(`${source}$`).test(name);
 }
 
+/** Python `str.splitlines()` 的常用子集：末尾换行不产生空行。 */
+function splitLines(text: string): string[] {
+  const lines = text.split(/\r\n|\r|\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === "" && /(?:\r\n|\r|\n)$/.test(text)) lines.pop();
+  return lines;
+}
+
 function posix(path: string): string {
   return path.split(sep).join("/");
+}
+
+/**
+ * 等价于 Python `Path.resolve(strict=False)`：能解析的前缀跟随符号链接，
+ * 不存在的尾部按父目录的真实路径拼接。安全校验必须用真实路径，否则一个
+ * 指向工作区外的符号链接会绕过 `within()`。
+ */
+function realPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    const parent = dirname(path);
+    if (parent === path) return path;
+    return join(realPath(parent), basename(path));
+  }
 }
 
 function within(parent: string, child: string): boolean {
@@ -322,8 +344,13 @@ function readLegacyDocText(path: string): string {
     throw new AppToolError(`DOC cannot be opened: ${error instanceof Error ? error.message : String(error)}`);
   }
   const fragments: string[] = [];
-  for (const match of data.toString("latin1").matchAll(/[\x09\x0a\x0d\x20-\x7e]{4,}/g)) {
+  const latin = data.toString("latin1");
+  for (const match of latin.matchAll(/[\x09\x0a\x0d\x20-\x7e]{4,}/g)) {
     fragments.push(match[0]);
+  }
+  // 旧实现还会提取 UTF-16LE 的可打印片段（字节间夹 \x00）。
+  for (const match of latin.matchAll(/(?:[\x09\x0a\x0d\x20-\x7e]\x00){4,}/g)) {
+    fragments.push(Buffer.from(match[0], "latin1").toString("utf16le"));
   }
   const normalized = normalizeExtractedText(fragments.join("\n"));
   if (normalized.length < 8) {
@@ -377,21 +404,21 @@ export class NodeWorkspaceFs implements WorkspaceFs {
   readonly #state = new ReadState();
 
   constructor(options: WorkspaceFsOptions) {
-    this.#userRoot = options.userRoot === undefined ? undefined : resolve(options.userRoot);
+    this.#userRoot = options.userRoot === undefined ? undefined : realPath(resolve(options.userRoot));
     this.#permission = options.userPermission ?? "read_only";
-    this.#resourceRoot = options.resourceRoot === undefined ? undefined : resolve(options.resourceRoot);
-    const dataRoot = resolve(options.dataRoot);
+    this.#resourceRoot = options.resourceRoot === undefined ? undefined : realPath(resolve(options.resourceRoot));
+    const dataRoot = realPath(resolve(options.dataRoot));
     const roots: Record<string, RootPolicy> = {
-      uploads: { name: "uploads", path: resolve(dataRoot, "uploads"), writable: false },
-      outputs: { name: "outputs", path: resolve(dataRoot, "outputs"), writable: true },
+      uploads: { name: "uploads", path: realPath(join(dataRoot, "uploads")), writable: false },
+      outputs: { name: "outputs", path: realPath(join(dataRoot, "outputs")), writable: true },
     };
     if (this.#resourceRoot !== undefined) {
-      roots.mcp = { name: "mcp", path: resolve(this.#resourceRoot, "MCP"), writable: false };
+      roots.mcp = { name: "mcp", path: realPath(join(this.#resourceRoot, "MCP")), writable: false };
     }
     this.#roots = roots;
-    this.#metaDir = options.metaDir === undefined ? undefined : resolve(options.metaDir);
-    this.#cacheDir = options.cacheDir === undefined ? undefined : resolve(options.cacheDir);
-    this.#blockedDirs = (options.blockedDirs ?? []).map((dir) => resolve(dir));
+    this.#metaDir = options.metaDir === undefined ? undefined : realPath(resolve(options.metaDir));
+    this.#cacheDir = options.cacheDir === undefined ? undefined : realPath(resolve(options.cacheDir));
+    this.#blockedDirs = (options.blockedDirs ?? []).map((dir) => realPath(resolve(dir)));
   }
 
   /** 显式虚拟路径：`workspace://uploads/x` / `uploads/x` / `workspace://user`。 */
@@ -415,7 +442,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
       if (write && this.#permission !== "read_write") throw new AppToolError("workspace is mounted read-only");
       const raw = virtual.relative;
       const candidate = isAbsolute(raw) ? raw : join(root, raw);
-      const resolved = resolve(candidate);
+      const resolved = realPath(resolve(candidate));
       if (!within(root, resolved)) throw new AppToolError("path must stay inside the mounted workspace");
       this.#checkUserTarget(resolved, root, write);
       return { path: resolved, rootName: "user", rootPath: root, user: true };
@@ -426,7 +453,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
       if (write && !policy.writable) throw new AppToolError(`system workspace root '${virtual.root}' is read-only`);
       const raw = virtual.relative;
       if (isAbsolute(raw)) throw new AppToolError("system workspace paths must be virtual, not absolute");
-      const resolved = resolve(policy.path, raw);
+      const resolved = realPath(resolve(policy.path, raw));
       if (!within(policy.path, resolved)) throw new AppToolError("path must stay inside the system workspace root");
       const parts = posix(relative(policy.path, resolved)).split("/").filter(Boolean);
       if (parts.some((part) => part.startsWith(".") || isSkipDir(part, true))) {
@@ -444,7 +471,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
     else if (lowered.startsWith("workspace://user/")) normalized = normalized.slice("workspace://user/".length);
     else if (lowered.startsWith("user/")) normalized = normalized.slice("user/".length);
     const candidate = isAbsolute(normalized) ? normalized : join(root, normalized);
-    const resolved = resolve(candidate);
+    const resolved = realPath(resolve(candidate));
     if (!within(root, resolved)) throw new AppToolError("path must stay inside the mounted workspace");
     this.#checkUserTarget(resolved, root, write);
     return { path: resolved, rootName: "user", rootPath: root, user: true };
@@ -573,7 +600,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
         name: policy.name,
         uri: `workspace://${policy.name}`,
         access: policy.writable ? "read-write" : "read-only",
-        file_count: scan.entries.length,
+        file_count: scan.entries.size,
         total_bytes: [...scan.entries.values()].reduce((sum, meta) => sum + meta.size, 0),
         recent,
         truncated: scan.truncated,
@@ -796,7 +823,11 @@ export class NodeWorkspaceFs implements WorkspaceFs {
     let base: Located;
     if (virtual !== undefined && virtual.root !== "user") {
       const policy = this.#roots[virtual.root] as RootPolicy;
-      base = { path: policy.path, rootName: policy.name, rootPath: policy.path, user: false };
+      const relativeBase = realPath(resolve(policy.path, virtual.relative));
+      if (!within(policy.path, relativeBase)) {
+        throw new AppToolError("path must stay inside the system workspace root");
+      }
+      base = { path: relativeBase, rootName: policy.name, rootPath: policy.path, user: false };
     } else {
       base = this.#locate(path);
     }
@@ -811,7 +842,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
     const results: GrepMatch[] = [];
     let searchedFiles = 0;
     let outputChars = 0;
-    for (const file of this.#walkFiles(base.path, base.rootPath, !base.user)) {
+    for (const file of this.#walkFiles(base.user ? base.path : base.rootPath, base.rootPath, !base.user)) {
       if (results.length >= limit) break;
       const name = basename(file.full);
       if (!fnmatch(name, include || "*")) continue;
@@ -826,7 +857,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
       } catch {
         continue;
       }
-      const lines = text.split(/\r?\n/);
+      const lines = splitLines(text);
       for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index] as string;
         if (!regex.test(line)) continue;
@@ -884,7 +915,7 @@ export class NodeWorkspaceFs implements WorkspaceFs {
       text = decodeTextBytes(data, "file");
       contentType = "text/plain; charset=utf-8";
     }
-    const lines = text.split(/\r?\n/);
+    const lines = splitLines(text);
     this.#state.record(path);
     const selected: string[] = [];
     let chars = 0;
@@ -1040,7 +1071,14 @@ export class NodeWorkspaceFs implements WorkspaceFs {
     }
     mkdirSync(dirname(destination), { recursive: true });
     const sourceDisplay = this.#display(source);
-    renameSync(source, destination);
+    try {
+      renameSync(source, destination);
+    } catch (error) {
+      // 跨文件系统移动时 rename 会报 EXDEV；回退成复制后删除（与 shutil.move 一致）。
+      if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+      copyFileSync(source, destination);
+      unlinkSync(source);
+    }
     this.#state.move(source, destination);
     return {
       source_path: sourceDisplay,

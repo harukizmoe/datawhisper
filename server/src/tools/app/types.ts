@@ -10,7 +10,7 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { defineTool, type ConversationDocToken, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineTool, type ConversationDocToken, type JsonObject, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { WorkspaceFs } from "./workspace/fs.ts";
 import type { PlanStoreDoc, TaskBoardDoc, TeamStoreDoc } from "./docs.ts";
 import type { MemoryDirs } from "../../agent/memory.ts";
@@ -23,11 +23,7 @@ import type { McpCatalogReader } from "./mcp.ts";
 export class AppToolError extends Error {}
 
 /** details 必须是可 JSON 序列化的值；失败时带 `error`。 */
-export type AppToolDetails = {
-  readonly tool: string;
-  readonly error?: { readonly kind: string; readonly message: string };
-  readonly [field: string]: JsonValue | undefined;
-};
+export type AppToolDetails = Readonly<Record<string, JsonValue>>;
 
 /** `defineTool` 返回的注册项；details 比默认 `JsonValue` 更具体。 */
 export type AppTool = ToolRegistration<object, AppToolDetails>;
@@ -64,12 +60,14 @@ export type AppToolDeps = {
   readonly workspaceId?: string;
   /** 用户界面语言：影响 PPT 布局标签（`_tt` 语义）。 */
   readonly uiLang?: "zh" | "en";
+  /** 会话级配色偏好；`set_ppt_color_scheme` 就地更新它，图表/PPT 读取。 */
+  readonly colorScheme?: { value: string };
   /** 时钟；测试可固定，避免真实计时器。 */
   readonly now?: () => Date;
 };
 
 /** 一份文档的读写端口：`update` 在一次 pi-durable commit 内完成。 */
-export type AppDocHost<T extends object = object> = {
+export type AppDocHost<T extends JsonObject = JsonObject> = {
   read(): Promise<T>;
   update<R>(mutate: (draft: T) => R | Promise<R>): Promise<R>;
 };
@@ -82,7 +80,7 @@ export type AppDocHosts = {
 };
 
 /** `defineDoc` 的 conversation 文档 token；由 `docs.ts` 定义。 */
-export type AppDocToken<T extends object> = ConversationDocToken<T>;
+export type AppDocToken<T extends JsonObject> = ConversationDocToken<T>;
 
 /**
  * 工具结果：模型只看 `output` 文本，UI 看 `details`。

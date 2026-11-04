@@ -7,14 +7,14 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "../types.ts";
-import type { AppDocHost } from "../types.ts";
+import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "./types.ts";
+import type { AppDocHost } from "./types.ts";
 import {
   VALID_STATUS,
   type TaskBoardDoc,
   type TaskRecord,
   type TaskStatus,
-} from "../docs.ts";
+} from "./docs.ts";
 
 export class WorkspaceTaskError extends AppToolError {}
 
@@ -234,7 +234,7 @@ export function createTaskTools(deps: AppToolDeps): AppTool[] {
         },
         required: ["task_id"],
       },
-      replay: "safe",
+      replay: "unsafe",
       async execute(args) {
         try {
           const task = await store().update(args.task_id ?? "", {
