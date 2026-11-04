@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Mixin: export-oriented tools (Excel, Word report, PPT, Dashboard)."""
+"""Mixin：面向导出的工具（Excel、Word 报告、PPT、Dashboard）。"""
 import datetime
 import copy
 import logging
@@ -16,16 +16,16 @@ REPORT_JOB_SECTION_THRESHOLD = 6
 REPORT_JOB_CHART_THRESHOLD = 3
 DASHBOARD_JOB_WIDGET_THRESHOLD = 4
 DASHBOARD_JOB_ROW_THRESHOLD = 50_000
-EXCEL_JOB_BYTES_THRESHOLD = 5 * 1024 * 1024  # 5MB — matches registry excel_bytes_gt_5mb
-PPT_JOB_SLIDES_THRESHOLD = 5  # matches registry ppt_slides_gt_5
+EXCEL_JOB_BYTES_THRESHOLD = 5 * 1024 * 1024  # 5MB —— 与 registry 的 excel_bytes_gt_5mb 一致
+PPT_JOB_SLIDES_THRESHOLD = 5  # 与 registry 的 ppt_slides_gt_5 一致
 
 
 class ExportToolsMixin:
-    """All methods here rely on self.data_source, self._chart_store,
-    self._session_chart_ids, self.ppt_color_scheme — set by the host
-    (``agent.agent.BusinessAgent`` or ``compute.host.ToolHost``)."""
+    """这里的所有方法都依赖 self.data_source、self._chart_store、
+    self._session_chart_ids、self.ppt_color_scheme —— 由宿主
+    （``agent.agent.BusinessAgent`` 或 ``compute.host.ToolHost``）设置。"""
 
-    # ── A5: export directory resolution ───────────────────────────────────────
+    # ── A5：导出目录解析 ───────────────────────────────────────────────────────
 
     def _get_export_dir(self) -> str:
         """返回导出文件应该写入的目录。
@@ -70,7 +70,7 @@ class ExportToolsMixin:
             workspace_root=runtime.workdir if runtime is not None else None,
         )
 
-    # ── Excel export ──────────────────────────────────────────────────────────
+    # ── Excel 导出 ─────────────────────────────────────────────────────────────
 
     def _excel_safe_name(self, filename: str) -> str:
         import re as _re
@@ -84,8 +84,7 @@ class ExportToolsMixin:
         return safe_base
 
     def _render_excel_export(self, tables: list, filename: str) -> str:
-        """Synchronous render path. *tables* must already be resolved to a
-        concrete list of real table names."""
+        """同步渲染路径。*tables* 必须已解析为具体真实表名构成的列表。"""
         from Function.Output.excel_export import export_to_excel
 
         safe_name = self._excel_safe_name(filename)
@@ -120,17 +119,16 @@ class ExportToolsMixin:
         return self._render_excel_export(tables, filename)
 
     def _tool_export_excel_with_jobs(self, tables: list, filename: str = ""):
-        """Excel export with JobRunner routing. Prefetches DataFrame snapshots
-        on the request thread (DataSource connection never crosses threads),
-        then hands snapshots to a worker for openpyxl writing when the
-        estimated serialized size exceeds EXCEL_JOB_BYTES_THRESHOLD.
+        """带 JobRunner 路由的 Excel 导出。先在请求线程预取 DataFrame 快照
+        （DataSource 连接绝不跨线程），当估算的序列化大小超过
+        EXCEL_JOB_BYTES_THRESHOLD 时，把快照交给 worker 做 openpyxl 写入。
         """
         if not tables or tables == ["*"]:
             tables = self._discover_all_tables()
             if not tables:
                 return "❌ 数据源中没有可用的表格，请先上传数据或运行分析。"
 
-        # Prefetch on the request thread.
+        # 在请求线程预取。
         from Function.Output.excel_export import prefetch_excel_frames
         try:
             frames = prefetch_excel_frames(self.data_source, tables)
@@ -140,7 +138,7 @@ class ExportToolsMixin:
         if not frames:
             return "❌ 没有可导出的表格数据，请确认表名正确且数据不为空。"
 
-        # Estimate serialized size (bytes): rows × cols × ~8 bytes heuristic.
+        # 估算序列化大小（字节）：行 × 列 × ~8 字节 的启发式。
         est_bytes = 0
         for _t, df in frames:
             try:
@@ -152,7 +150,7 @@ class ExportToolsMixin:
             self._job_runner is not None and est_bytes > EXCEL_JOB_BYTES_THRESHOLD
         )
         if not should_job:
-            # Small export: write synchronously from the prefetched frames.
+            # 小导出：直接用预取好的 frame 同步写入。
             from Function.Output.excel_export import write_excel_from_frames
             safe_name = self._excel_safe_name(filename)
             export_dir = self._get_export_dir()
@@ -177,7 +175,7 @@ class ExportToolsMixin:
                 f"[📥 点击下载 {safe_name}]({download_url})"
             )
 
-        # Large export: deep-copy snapshots and let the worker write them.
+        # 大导出：深拷贝快照，交给 worker 写入。
         snapshot = [(t, df.copy(deep=True)) for t, df in frames]
         tables_snapshot = list(tables)
         filename_snapshot = str(filename or "")
@@ -241,9 +239,8 @@ class ExportToolsMixin:
         )
         if summary:
             markdown += f"**说明：** {summary}\n"
-        # Pre-check named tables against the data source so missing names surface
-        # before the export job runs (otherwise absent tables are silently
-        # skipped in excel_export and the user only learns when the file is empty).
+        # 先在数据源中核对指定表名，让不存在的表在导出 job 运行前就暴露
+        # （否则缺失的表会在 excel_export 中被静默跳过，用户直到文件为空才发现）。
         if table_list not in (["*"], ["all"]) and self.data_source is not None:
             available = set(self._discover_all_tables())
             missing = [t for t in table_list if t not in available]
@@ -251,7 +248,7 @@ class ExportToolsMixin:
                 markdown += f"**⚠️ 不存在的表：** {', '.join(missing)}\n"
         return {"tables": table_list, "filename": filename, "summary": summary, "markdown": markdown}
 
-    # ── Word report ───────────────────────────────────────────────────────────
+    # ── Word 报告 ──────────────────────────────────────────────────────────────
 
     def _report_chart_htmls(self) -> list:
         return [
@@ -270,10 +267,9 @@ class ExportToolsMixin:
         title = normalized["title"]
         sections = normalized["sections"]
 
-        # File name carries the report title (slugified) so users can find
-        # "the income analysis report from last week" by title instead of
-        # guessing from a wall of `report_<ts>.docx` timestamps. Aligns
-        # with PPT (_ppt_safe_name) and Excel (_excel_safe_name).
+        # 文件名带上（slug 化后的）报告标题，让用户能按标题找到
+        # "上周的收入分析报告"，而不必从一堆 `report_<ts>.docx` 时间戳里猜。
+        # 与 PPT（_ppt_safe_name）和 Excel（_excel_safe_name）保持一致。
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         slug = _title_slug(title)
         export_dir = self._get_export_dir()
@@ -371,7 +367,7 @@ class ExportToolsMixin:
         )
         return {"title": title, "sections": sections, "markdown": markdown}
 
-    # ── PPT ───────────────────────────────────────────────────────────────────
+    # ── PPT 导出 ───────────────────────────────────────────────────────────────
 
     def _tool_set_ppt_color_scheme(self, scheme: str) -> str:
         from charts.color_schemes import COLOR_SCHEMES
@@ -384,7 +380,7 @@ class ExportToolsMixin:
         return f"✅ 配色已切换为「{info['name']}」（{info['description']}），后续图表和 PPT 均使用此配色。"
 
     def _tool_propose_ppt_outline(self, title: str, slides: list) -> dict:
-        # Bilingual layout labels — _tt(zh, en) per conventions §B
+        # 双语布局标签 —— 按 conventions §B 使用 _tt(zh, en)
         _LAYOUT_LABELS = {
             "cover":              ("封面", "Cover"),
             "toc":                ("目录", "Table of Contents"),
@@ -420,11 +416,11 @@ class ExportToolsMixin:
         return {"title": title, "slides": slides, "markdown": markdown}
 
     def _ppt_safe_name(self, title: str, filename: str) -> str:
-        """Build a safe .pptx filename from *filename* or *title*."""
+        """由 *filename* 或 *title* 生成安全的 .pptx 文件名。"""
         raw_base = filename or title or "ppt_export"
         safe_base = re.sub(r'[^\w\-.]', '_', raw_base)
         safe_base = re.sub(r'_+', '_', safe_base).strip('_') or "ppt_export"
-        # Case-insensitive suffix removal (cleaner than manual [:-5])
+        # 不区分大小写地去掉后缀（比手写 [:-5] 更干净）
         if safe_base.lower().endswith(".pptx"):
             safe_base = safe_base[:-len(".pptx")]
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -432,27 +428,23 @@ class ExportToolsMixin:
 
     def _render_ppt(self, title: str, slides: list, filename: str, scheme: str,
                     on_slide_done=None):
-        """Build the PPT deck and return ``(filepath, download_name, failed_slides)``.
+        """构建 PPT 并返回 ``(filepath, download_name, failed_slides)``。
 
-        Runs entirely on whichever thread calls it — MckEngine holds a
-        python-pptx Presentation which is NOT thread-safe, so the whole
-        engine lifecycle (instantiate → render slides → save → cleanup)
-        must execute on one thread. Callers that route to a worker pass
-        immutable snapshots (deep-copied slides, scheme string, filename)
-        and let the worker call this method.
+        完全在调用它的那个线程上运行 —— MckEngine 持有一个 python-pptx 的
+        Presentation，而它不是线程安全的，所以引擎的整个生命周期（实例化 → 渲染
+        幻灯片 → 保存 → 清理）必须在同一线程上完成。要路由到 worker 的调用方应
+        传入不可变快照（深拷贝的 slides、scheme 字符串、filename），让 worker 来
+        调用这个方法。
 
-        ``on_slide_done(i, total)`` is an optional callback invoked after
-        each slide renders successfully — used by the JobRunner worker to
-        report slide-granular progress (35% → 85% band) and to poll for
-        cancellation at slide granularity instead of once per deck.
+        ``on_slide_done(i, total)`` 是可选回调，每张幻灯片渲染成功后调用 ——
+        JobRunner worker 用它报告到幻灯片粒度的进度（35% → 85% 区间），并以
+        幻灯片粒度而不是每份 deck 一次地轮询取消。
 
-        Render-time exceptions on individual slides are **degraded to a
-        placeholder section_divider slide** rather than aborting the whole
-        deck — the user gets a deck with a marked failure page instead of
-        zero output. ``failed_slides`` lists ``(index, layout, error_msg)``
-        for each degraded slide so callers can surface the warning.
-        Schema errors (unsupported layout) still raise immediately because
-        no rendering has happened yet.
+        单张幻灯片在渲染期抛出的异常会**降级成占位的 section_divider 幻灯片**，
+        而不是中止整份 deck —— 用户拿到的是一份标注了失败页的文档，而非零产出。
+        ``failed_slides`` 列出每个降级幻灯片的 ``(index, layout, error_msg)``，
+        供调用方给出警告。schema 错误（不支持的布局）仍然立即抛出，因为此时
+        还没有开始渲染。
         """
         _PROJ_ROOT = str(resource_root())
 
@@ -575,12 +567,12 @@ class ExportToolsMixin:
             return result
 
         total = len(slides)
-        # Resolve template path: PPT_template/<scheme>.pptx next to the PPT module
+        # 解析模板路径：PPT 模块旁的 PPT_template/<scheme>.pptx
         _ppt_module_dir = os.path.join(_PROJ_ROOT, "Function", "Output", "PPT")
         _template_path = os.path.join(_ppt_module_dir, "PPT_template", f"{scheme}.pptx")
         template = _template_path if os.path.isfile(_template_path) else None
         eng = MckEngine(total_slides=total, template=template)
-        failed_slides = []  # (index, layout, error_msg) for degraded slides
+        failed_slides = []  # 降级幻灯片：(index, layout, error_msg)
 
         _SUPPORTED = {
             "cover", "toc", "section_divider", "closing",
@@ -635,9 +627,9 @@ class ExportToolsMixin:
                 method(**params)
             except Exception as exc:
                 log.warning("[export] slide %d (%s) render failed: %s", i, layout, exc)
-                # Degrade to a placeholder slide instead of aborting the deck.
-                # The user gets a 15-page deck with 1 marked failure page
-                # rather than zero output + an error string.
+                # 降级为占位幻灯片，而不是中止整份 deck。
+                # 用户拿到的是一份 15 页、其中 1 页标注失败的文档，
+                # 而不是零产出 + 一条错误字符串。
                 err_msg = str(exc)
                 try:
                     eng.section_divider(
@@ -692,14 +684,13 @@ class ExportToolsMixin:
         )
 
     def _tool_generate_ppt_with_jobs(self, title: str, slides: list, filename: str = ""):
-        """PPT generation with JobRunner routing. Decks with more than
-        PPT_JOB_SLIDES_THRESHOLD slides run on a worker thread.
+        """带 JobRunner 路由的 PPT 生成。幻灯片数超过
+        PPT_JOB_SLIDES_THRESHOLD 的 deck 在 worker 线程上运行。
 
-        Thread-safety (M4): python-pptx ``Presentation`` is not thread-safe,
-        so the *entire* MckEngine lifecycle (instantiate → render → save →
-        cleanup) runs inside the worker. The request thread only deep-copies
-        the immutable slide specs and resolves the scheme string; it never
-        touches the engine or template IO.
+        线程安全（M4）：python-pptx 的 ``Presentation`` 不是线程安全的，
+        因此 *整个* MckEngine 生命周期（实例化 → 渲染 → 保存 → 清理）都在
+        worker 内完成。请求线程只深拷贝不可变的 slide 规格并解析 scheme 字符串；
+        它绝不触碰引擎或模板 IO。
         """
         scheme = getattr(self, "ppt_color_scheme", "mckinsey")
         total = len(slides)
@@ -709,7 +700,7 @@ class ExportToolsMixin:
         if not should_job:
             return self._tool_generate_ppt(title, slides, filename)
 
-        # Immutable snapshots for the worker — no live objects cross threads.
+        # 给 worker 的不可变快照 —— 没有活对象跨线程。
         title_snapshot = str(title or "演示文稿")
         slides_snapshot = copy.deepcopy(slides)
         filename_snapshot = str(filename or "")
@@ -721,9 +712,8 @@ class ExportToolsMixin:
             ctx.check_canceled()
             ctx.set_progress(35, "正在渲染幻灯片")
 
-            # Slide-granular progress callback: 35% → 85% band, one tick per
-            # slide rendered. Also gives the worker a chance to poll
-            # cancellation between slides instead of once per deck.
+            # 幻灯片粒度的进度回调：35% → 85% 区间，每渲染一张 tick 一次。
+            # 也让 worker 能在幻灯片之间轮询取消，而不是每份 deck 一次。
             def _on_slide_done(i, total):
                 pct = 35 + int(50 * i / total) if total else 35
                 ctx.set_progress(pct, f"已渲染 {i}/{total} 张")
@@ -768,7 +758,7 @@ class ExportToolsMixin:
             return f"❌ PPT 生成失败：{job.get('error') or 'background job failed'}"
         return result_holder.get("text", "❌ PPT 生成失败：后台结果不可用。")
 
-    # ── Dashboard ─────────────────────────────────────────────────────────────
+    # ── 看板（Dashboard）────────────────────────────────────────────────────────
 
     def _tool_propose_dashboard_outline(self, name: str, widgets: list) -> dict:
         rows = ["| # | 标题 | 图表类型 | 核心字段 |", "|---|------|---------|---------|"]

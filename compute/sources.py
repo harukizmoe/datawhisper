@@ -1,13 +1,12 @@
-"""Data sources held open by the compute worker.
+"""compute worker 保持打开的数据源。
 
-Sources are stateful (in-memory DuckDB with runtime analysis tables), so the
-worker keeps them open by id. Node owns the descriptors and reopens them after
-a worker restart; in-memory derived tables do not survive a restart, persistent
-workspace tables do.
+Source 是有状态的（内存 DuckDB 加运行时分析表），因此 worker 按 id 保持它们
+打开。descriptor 由 Node 持有，并在 worker 重启后重新打开；内存中的派生表不会
+跨重启存活，持久化的 workspace 表会。
 
-A tool call leases an ordered set of sources (``SourceRegistry.lease``): it
-holds every source's lock for the whole call and sees a cached ``SourceView``
-(combined schema + cross-source ``MergedDataSource``) for that id tuple.
+一次工具调用会租用一组有序的 source（``SourceRegistry.lease``）：它在整个调用
+期间持有每个 source 的锁，并对该 id 元组使用缓存的 ``SourceView``
+（合并 schema + 跨源 ``MergedDataSource``）。
 """
 from __future__ import annotations
 
@@ -37,21 +36,21 @@ log = logging.getLogger(__name__)
 
 
 def combined_schema(sources: Sequence[DataSource]) -> str:
-    """Merged schema of the active sources, in order.
+    """按顺序返回活动 source 的合并 schema。
 
-    When multiple sources are active and any two share the same table name,
-    each table is prefixed with ``src{N}__`` (1-based) so that the LLM can
-    unambiguously reference it.  Single-source behaviour is unchanged.
+    当多个 source 同时活动且任意两个存在同名表时，每张表都加上
+    ``src{N}__``（从 1 开始）前缀，使 LLM 能无歧义地引用它。单 source 的行为
+    保持不变。
 
-    The prefix is understood by ``DataToolsMixin._route_query``, which strips
-    it before passing the SQL to the individual DataSource.
+    该前缀由 ``DataToolsMixin._route_query`` 识别，它会在把 SQL 交给具体
+    DataSource 之前去掉前缀。
     """
     if not sources:
         return ""
     if len(sources) == 1:
         return sources[0].get_schema()
 
-    # Collect all table names across sources to detect collisions.
+    # 收集所有 source 的表名以检测重名。
     all_table_names: list[str] = []
     for src in sources:
         try:
@@ -64,8 +63,8 @@ def combined_schema(sources: Sequence[DataSource]) -> str:
     for idx, src in enumerate(sources, start=1):
         raw_schema = src.get_schema()
         if collision:
-            # Prefix every "Table: <name>" line with src{N}__ so the LLM
-            # (and the router) can tell tables apart across sources.
+            # 给每行 "Table: <name>" 加上 src{N}__ 前缀，使 LLM
+            # （以及 router）能跨 source 区分不同表。
             raw_schema = re.sub(
                 r"Table:\s+(\S+)",
                 lambda m, idx=idx: f"Table: src{idx}__{m.group(1)}",
@@ -83,9 +82,8 @@ def combined_schema(sources: Sequence[DataSource]) -> str:
 
 
 def build_merged_source(sources: Sequence[DataSource]):
-    """A MergedDataSource (one DuckDB connection over all sources, tables
-    registered as ``src{N}__<table>``) for cross-source SQL; None when fewer
-    than two sources are given or construction fails."""
+    """用于跨源 SQL 的 MergedDataSource（单个 DuckDB 连接覆盖所有 source，表
+    注册为 ``src{N}__<table>``）；少于两个 source 或构建失败时返回 None。"""
     if len(sources) < 2:
         return None
     try:
@@ -112,12 +110,12 @@ def encode_conn_secret(conn_str: str) -> str:
 
 
 def friendly_conn_error(exc: Exception, service: str) -> str:
-    """Translate a low-level connection exception into a user-readable message.
+    """把底层的连接异常转成用户可读的消息。
 
-    `service` is a short label like 'Google Sheets' / '外部 API' / '数据库'.
-    Falls back to the raw message when the error is not a known network case.
+    `service` 是简短标签，如 'Google Sheets' / '外部 API' / '数据库'。
+    当错误不属于已知网络情形时，回退为原始消息。
     """
-    # Walk the exception cause chain so a wrapped error is still recognised.
+    # 沿异常 cause 链遍历，让被包了一层的错误也能被识别。
     chain = []
     cur: BaseException | None = exc
     seen = set()
@@ -127,7 +125,7 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
         cur = cur.__cause__ or cur.__context__
     text = "  ".join(f"{type(c).__name__}: {c}" for c in chain).lower()
 
-    # — SQL Server client prerequisites —
+    # — SQL Server 客户端依赖 —
     if "no module named 'pyodbc'" in text or "no module named \"pyodbc\"" in text:
         return (
             "SQL Server 驱动未安装：请升级或重新运行本程序以安装 pyodbc，"
@@ -142,7 +140,7 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
             "并在连接串中指定已安装的驱动名称。"
         )
 
-    # — SQL Server reachability / instance discovery —
+    # — SQL Server 可达性 / 实例发现 —
     if any(k in text for k in (
         "server is not found or not accessible", "named pipes provider",
         "tcp provider", "sql server does not exist", "error: 258", "10060",
@@ -153,7 +151,7 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
             "防火墙已放行端口（通常为 1433），且客户端网络可访问该服务器。"
         )
 
-    # — Network unreachable / connection reset (proxy, GFW, offline) —
+    # — 网络不可达 / 连接被重置（代理、GFW、离线） —
     if any(k in text for k in (
         "10054", "connection aborted", "connection reset", "connectionreseterror",
         "connection refused", "10061", "max retries", "failed to establish",
@@ -167,7 +165,7 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
             + ("（Google 服务在部分网络下需要代理）" if "google" in service.lower() else "")
             + "，确认代理 / VPN 已开启且 Python 进程已走代理后重试。"
         )
-    # — Authentication / authorization —
+    # — 认证 / 授权 —
     if any(k in text for k in (
         "401", "403", "unauthorized", "forbidden", "permission",
         "invalid_grant", "invalid_client", "authentication",
@@ -177,24 +175,24 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
             f"{service} 认证失败：凭证无效或没有访问权限。"
             "请检查服务账号 / 密钥是否正确，以及该账号是否已被授权访问目标资源。"
         )
-    # — Not found —
+    # — 未找到 —
     if any(k in text for k in ("404", "not found", "does not exist")):
         return f"{service} 目标资源不存在：请检查 URL / ID / 表名是否正确。"
 
-    # — Unknown — keep the raw message but keep it short —
+    # — 未知情形 — 保留原始消息，但要保持简短 —
     raw = str(exc).strip() or type(exc).__name__
     if len(raw) > 200:
         raw = raw[:200] + "…"
     return f"{service} 连接失败：{raw}"
 
 
-# Remote sources whose open failures get a readable reason.
+# 打开失败时需要给出可读原因的远程 source。
 _CONNECTION_LABELS = {"sql": "数据库", "gsheets": "Google Sheets", "http": "外部 API", "feishu": "飞书多维表格"}
 
 
 def open_failed(descriptor: dict, exc: Exception) -> RpcError:
-    """The error for a source that failed to open (``data.kind == "open_failed"``):
-    remote connections get a readable reason, files keep the raw message."""
+    """打开 source 失败时的错误（``data.kind == "open_failed"``）：远程连接给出
+    可读原因，文件则保留原始消息。"""
     label = _CONNECTION_LABELS.get(str(descriptor.get("kind") or ""))
     if label and not isinstance(exc, FeishuBitableError):
         message = friendly_conn_error(exc, label)
@@ -204,7 +202,7 @@ def open_failed(descriptor: dict, exc: Exception) -> RpcError:
 
 
 def pdf_source(file_path: str, name: str) -> DataSource:
-    """The tables of a text-based PDF as an in-memory source."""
+    """把文本型 PDF 中的表作为内存 source 返回。"""
     from data.sources.extracted import ExtractedTableDataSource
     from data.table_extract import MAX_PDF_BYTES, normalize_grids, parse_pdf_tables
 
@@ -221,8 +219,8 @@ def pdf_source(file_path: str, name: str) -> DataSource:
 
 
 def preview_tables(source_id: str, source: DataSource) -> list[dict]:
-    """Table metadata of one source for the data preview (no row data), each
-    tagged with the source and, for SQL sources, the analysis-table selection."""
+    """某个 source 供数据预览用的表元信息（不含行数据），每项都标注 source，
+    对 SQL source 还标注分析表选择情况。"""
     selectable = isinstance(source, SQLDataSource)
     selected = set(source.get_analysis_tables()) if selectable else set()
     tables = []
@@ -230,9 +228,8 @@ def preview_tables(source_id: str, source: DataSource) -> list[dict]:
         table.update({
             "source_id": source_id,
             "source_name": getattr(source, "name", ""),
-            # Selecting an analysis scope only makes sense for remote SQL
-            # catalogs, which may expose thousands of very large tables.
-            # Uploaded/local files are already a deliberate bounded selection.
+            # 只有远程 SQL catalog 才需要选择分析范围，它们可能暴露成千上万张
+            # 很大的表。上传/本地文件本身已是有限且刻意的选择。
             "selectable_for_analysis": selectable,
             "selected_for_analysis": selectable and table.get("name") in selected,
         })
@@ -241,7 +238,7 @@ def preview_tables(source_id: str, source: DataSource) -> list[dict]:
 
 
 def restore_source(info: dict) -> DataSource:
-    """Build a source from its persisted descriptor."""
+    """由持久化的 descriptor 构建 source。"""
     kind = str(info.get("kind") or "")
     name = str(info.get("name") or "").strip()
     if kind == "csv":
@@ -308,15 +305,14 @@ class _Entry:
 
     def __init__(self, source: DataSource):
         self.source = source
-        # DuckDB connections are not safe for concurrent use; serialize per source.
+        # DuckDB 连接不是并发安全的；按 source 串行化。
         self.lock = threading.Lock()
 
 
 class SourceView:
-    """Combined schema and merged source of one ordered set of sources.
+    """一组有序 source 的合并 schema 与合并 source。
 
-    Both are built lazily and only used while the owner holds every source's
-    lock, so building needs no extra locking.
+    两者都懒构建，且只在持有者掌握所有 source 的锁时使用，因此构建本身无需额外加锁。
     """
 
     def __init__(self, sources: Sequence[DataSource]):
@@ -343,7 +339,7 @@ class SourceView:
 
 
 class Lease:
-    """The sources of one call, all locked, in the caller's order."""
+    """一次调用涉及的 source，全部已加锁，顺序与调用方给出的顺序一致。"""
 
     def __init__(self, registry: "SourceRegistry", ids: tuple[str, ...], sources: dict[str, DataSource]):
         self._registry = registry
@@ -358,10 +354,9 @@ class Lease:
         return self._registry._view(self.ids, self.sources)
 
     def invalidate(self, source_ids: Sequence[str] | None = None) -> None:
-        """Drop cached views that include any of *source_ids* (default: all
-        leased sources) after their tables changed. Every user of such a view
-        holds the lock of the changed source, which this lease holds, so the
-        merged sources can be closed right away."""
+        """表变化后，丢弃包含 *source_ids* 中任一（默认：本次租用的全部）的缓存
+        视图。这类视图的每个使用者都持有被改动 source 的锁，而这把锁归本次租用
+        持有，因此合并 source 可以立刻关闭。"""
         for view in self._registry._drop_views(set(source_ids if source_ids is not None else self.ids)):
             view.close()
 
@@ -381,8 +376,8 @@ class SourceRegistry:
         return source
 
     def add(self, source_id: str, source: DataSource) -> None:
-        """Register a source the caller built (e.g. extracted web tables, not
-        from a descriptor) under a new id."""
+        """在新 id 下注册调用方自行构建的 source（例如从网页提取的表，而非来自
+        descriptor）。"""
         with self._lock:
             if source_id in self._entries:
                 raise RpcError(f"data source already open: {source_id}", INVALID_PARAMS)
@@ -394,7 +389,7 @@ class SourceRegistry:
             self._entries[source_id] = _Entry(source)
             stale = self._drop_views_locked({source_id})
         if previous is not None:
-            # Wait for calls still using the old source before closing it.
+            # 等仍在用旧 source 的调用结束，再关闭它。
             with previous.lock:
                 _close(previous.source)
                 for view in stale:
@@ -418,8 +413,8 @@ class SourceRegistry:
 
     @contextmanager
     def lease(self, source_ids: Sequence[str]) -> Iterator[Lease]:
-        """Lock the given sources (in sorted id order, so concurrent leases
-        cannot deadlock) for the duration of the block."""
+        """在代码块执行期间锁定给定 source（按 id 排序加锁，使并发租用不会
+        死锁）。"""
         ids = tuple(dict.fromkeys(source_ids))
         while True:
             with self._lock:
@@ -436,7 +431,7 @@ class SourceRegistry:
                 with self._lock:
                     replaced = any(self._entries.get(sid) is not entries[sid] for sid in ids)
                 if replaced:
-                    continue  # reopened or closed while we waited; resolve again
+                    continue  # 等待期间被重新打开或关闭了；重新解析
                 yield Lease(self, ids, {sid: entry.source for sid, entry in entries.items()})
                 return
 

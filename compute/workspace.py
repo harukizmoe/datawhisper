@@ -1,9 +1,9 @@
-"""Workspace data files -> the Workspace's persistent DuckDB.
+"""Workspace 数据文件 -> Workspace 的持久化 DuckDB。
 
-A mounted Workspace keeps its tables in ``<workdir>/.zhixi/workspace.duckdb``.
-``registry.json`` beside it records each imported file's sha256, so files that
-did not change are not parsed again (大 Excel 秒开) and the tables survive
-restarts. Shared by the ``workspace.sync`` RPC method and the old mount route.
+挂载的 Workspace 把表存放在 ``<workdir>/.zhixi/workspace.duckdb``。旁边的
+``registry.json`` 记录每个已导入文件的 sha256，因此未变化的文件不会再次解析
+（大 Excel 秒开），重启后表也依然存在。``workspace.sync`` RPC 方法与旧的
+mount 路由共用此模块。
 """
 import logging
 import re
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 # 可注册为 DataSource 的文件后缀
 REGISTERABLE_SUFFIXES = {".csv", ".xlsx", ".xls"}
 
-# Workbooks above this size import through a cancellable job.
+# 超过该大小的 Workbooks 通过可取消的 job 导入。
 EXCEL_JOB_BYTES = 5_000_000
 
 
@@ -34,16 +34,15 @@ def safe_table_name(filename: str) -> str:
 
 
 def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
-    """Import the new or changed data files of *runtime*'s workdir into its
-    persistent DuckDB, which *source* (a ``WorkspacePersistentSource``) has open.
+    """把 *runtime* 的 workdir 中新增或有变化的数据文件导入其持久化 DuckDB，
+    该 DuckDB 已由 *source*（一个 ``WorkspacePersistentSource``）打开。
 
-    Large workbooks and CSVs go through ``run_job(job_type, label, worker)``,
-    ``worker(ctx)`` being the cancellable import job: it returns the job result
-    when the job ran to completion, or None when it was queued to run later
-    (the caller reports queued jobs; they count as skipped here).
-    ``check_canceled`` runs before each file.
+    大工作簿与 CSV 通过 ``run_job(job_type, label, worker)`` 执行，其中
+    ``worker(ctx)`` 是可取消的导入 job：job 完整跑完时返回其结果，被排入稍后
+    执行时返回 None（调用方会报告排队的 job；这里把它们算作 skipped）。
+    ``check_canceled`` 在每个文件之前调用。
 
-    Returns ``{"added": [{"source_name", "tables"}], "errors", "skipped", "reused"}``.
+    返回 ``{"added": [{"source_name", "tables"}], "errors", "skipped", "reused"}``。
     """
     from data.sources.workspace_persistent import (
         csv_requires_job, parse_workspace_csv_job, parse_workspace_excel_job,
@@ -131,9 +130,8 @@ def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
                 "source_type": suffix.lstrip("."),
                 "file_path": file_path,
             }
-            # Merge and persist under the same writer lock.  A large Excel job
-            # may complete while this request is still walking later files;
-            # writing the original snapshot at function exit would lose it.
+            # 在同一个写锁下合并并持久化。一个大的 Excel job 可能在本次请求
+            # 还在遍历后续文件时完成；若在函数退出时写回最初的快照，就会丢失它。
             with runtime.db_lock:
                 registry = runtime.load_registry()
                 registry[file_key] = entry

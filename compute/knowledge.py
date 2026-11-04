@@ -1,14 +1,13 @@
-"""Knowledge base and embedder methods (``knowledge.*``, ``embed.*``).
+"""知识库与 embedder 方法（``knowledge.*``、``embed.*``）。
 
-The desktop knowledge base is ``Function.Knowledge.KnowledgeBase`` in its
-default scope: a SQLite store plus the kept source files beside it
-(``<data>/uploads/knowledge``). Records and document chunks are embedded by
-``neural_embedder`` (local BGE model, cloud endpoint or hash fallback), whose
-state lives in this process, so its settings are methods here as well.
+桌面版知识库就是默认作用域下的 ``Function.Knowledge.KnowledgeBase``：一个
+SQLite 存储，旁边存放保留下来的源文件（``<data>/uploads/knowledge``）。记录与
+文档分块由 ``neural_embedder``（本地 BGE 模型、云端端点或 hash 兜底）计算
+embedding，其状态存在于本进程内，因此它的设置也作为方法暴露在这里。
 
-Parsing never calls a model: ``knowledge.parse`` returns the records of
-template sheets plus the prompts for the rest of the file; the caller sends
-each prompt to the user's model and passes the replies to ``knowledge.extract``.
+解析过程从不调用模型：``knowledge.parse`` 返回模板 sheet 中的记录，以及文件
+其余部分对应的 prompt；调用方把每个 prompt 发给用户的模型，再把回复传给
+``knowledge.extract``。
 """
 from __future__ import annotations
 
@@ -23,14 +22,14 @@ from .rpc import INVALID_PARAMS, MethodContext, RpcError, int_param, str_param
 
 KNOWLEDGE_FILE_SUFFIXES = {".xlsx", ".xls", ".docx"}
 
-# Record kinds: (singular, plural) of their KnowledgeBase method names.
+# 记录种类：其 KnowledgeBase 方法名的（单数, 复数）。
 _KINDS = {
     "category": ("category", "categories"),
     "metric": ("metric", "metrics"),
     "rule": ("rule", "rules"),
     "note": ("note", "notes"),
 }
-# The fields ``knowledge.add`` passes to ``KnowledgeBase.add_<kind>``, with defaults.
+# ``knowledge.add`` 传给 ``KnowledgeBase.add_<kind>`` 的字段及其默认值。
 _ADD_FIELDS = {
     "category": {"name": ""},
     "metric": {"name": "", "alias": "", "definition": "", "sql_template": "", "notes": "",
@@ -53,7 +52,7 @@ BGE_FILES = [
 
 
 def bge_model_dir() -> Path:
-    """Return the snapshot directory where BGE model files are expected."""
+    """返回预期存放 BGE 模型文件的 snapshot 目录。"""
     cache = Path(
         os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
     ) / "baa_models" / "models--BAAI--bge-small-zh-v1.5" / "snapshots"
@@ -65,21 +64,21 @@ def bge_model_dir() -> Path:
 
 
 def bge_files_complete() -> bool:
-    """Check whether all required BGE model files exist on disk."""
+    """检查磁盘上是否已存在全部必需的 BGE 模型文件。"""
     d = bge_model_dir()
     return all((d / f).exists() for f in BGE_FILES)
 
 
 def stored_filename(original_name: str) -> str:
-    """The knowledge-folder name of an uploaded file: its stem made safe,
-    behind a random prefix that avoids collisions."""
+    """上传文件在知识库目录中的名字：把其 stem 清洗为安全形式，并加一个
+    随机前缀以避免冲突。"""
     path = Path(original_name)
     safe_stem = "".join(c if c.isalnum() or c in "-_." else "_" for c in path.stem)[:60]
     return f"{uuid.uuid4().hex[:8]}_{safe_stem}{path.suffix.lower()}"
 
 
 def list_knowledge_files(scope_dir: Path) -> list[dict]:
-    """Kept source files of a knowledge scope, newest first."""
+    """某个知识作用域中保留下来的源文件，最新的在前。"""
     scope_dir.mkdir(parents=True, exist_ok=True)
     files = []
     for p in sorted(scope_dir.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True):
@@ -97,7 +96,7 @@ def _knowledge_dir() -> Path:
 
 @contextmanager
 def _knowledge_base() -> Iterator:
-    """A short-lived KnowledgeBase (own SQLite connection) per call."""
+    """每次调用一个短生命周期的 KnowledgeBase（自有 SQLite 连接）。"""
     from Function.Knowledge.knowledge_base import KnowledgeBase
 
     kb = KnowledgeBase()
@@ -126,7 +125,7 @@ def _not_found(kind: str, item_id: int) -> RpcError:
 
 
 def knowledge_list(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.list {kind, category_id?=1}`` -> ``{"items"}``; categories list all."""
+    """``knowledge.list {kind, category_id?=1}`` -> ``{"items"}``；category 列出全部。"""
     kind = _kind(params)
     with _knowledge_base() as kb:
         if kind == "category":
@@ -135,7 +134,7 @@ def knowledge_list(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_add(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.add {kind, record}`` -> the stored record (same name/rule_id/topic: updated)."""
+    """``knowledge.add {kind, record}`` -> 已存储的记录（同名/同 rule_id/同 topic 时更新）。"""
     kind = _kind(params)
     record = _object(params, "record")
     fields = {key: record.get(key, default) for key, default in _ADD_FIELDS[kind].items()}
@@ -147,7 +146,7 @@ def knowledge_add(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_update(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.update {kind, id, fields}`` -> the updated record."""
+    """``knowledge.update {kind, id, fields}`` -> 更新后的记录。"""
     kind = _kind(params)
     item_id = int_param(params, "id")
     fields = _object(params, "fields")
@@ -162,7 +161,7 @@ def knowledge_update(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_toggle(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.toggle {kind, id}`` -> the record with ``enabled`` flipped."""
+    """``knowledge.toggle {kind, id}`` -> 翻转 ``enabled`` 后的记录。"""
     kind = _kind(params)
     item_id = int_param(params, "id")
     singular = _KINDS[kind][0]
@@ -174,8 +173,8 @@ def knowledge_toggle(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_delete(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.delete {kind, id}`` -> ``{"deleted": true}``; deleting a category
-    deletes its knowledge too and adds the ``counts`` removed per kind."""
+    """``knowledge.delete {kind, id}`` -> ``{"deleted": true}``；删除 category 会连同
+    其知识一起删除，并附带按种类统计的 ``counts``。"""
     kind = _kind(params)
     item_id = int_param(params, "id")
     with _knowledge_base() as kb:
@@ -191,8 +190,8 @@ def knowledge_delete(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_search(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.search {q}`` -> ``{"metrics", "rules", "notes", "documents"}``:
-    hybrid-search hits among enabled knowledge (at most 5 overall)."""
+    """``knowledge.search {q}`` -> ``{"metrics", "rules", "notes", "documents"}``：
+    在已启用的知识中做 hybrid 检索得到的命中（总共至多 5 条）。"""
     q = str_param(params, "q", required=False).strip()
     if not q:
         return {"metrics": [], "rules": [], "notes": [], "documents": []}
@@ -201,12 +200,12 @@ def knowledge_search(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_parse(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.parse {file_path, name?}``: keep an uploaded .xlsx/.xls/.docx in
-    the knowledge folder and read it without a model.
+    """``knowledge.parse {file_path, name?}``：把上传的 .xlsx/.xls/.docx 留在知识库
+    目录中，并在不调用模型的情况下读取它。
 
-    Returns ``{"filename", "format", "preview", "prompts"}``: ``preview`` holds the
-    records of template sheets; every prompt (the rest of the file, chunked)
-    goes to the user's model, the replies to ``knowledge.extract``.
+    返回 ``{"filename", "format", "preview", "prompts"}``：``preview`` 保存模板
+    sheet 中的记录；每个 prompt（文件其余部分，已分块）发给用户的模型，回复交给
+    ``knowledge.extract``。
     """
     from Function.Knowledge.file_parser import extraction_prompts, read_knowledge_file
 
@@ -237,8 +236,8 @@ def knowledge_parse(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_extract(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.extract {replies}`` -> ``{"records"}`` from the model's replies
-    to the ``knowledge.parse`` prompts, in prompt order, deduplicated."""
+    """``knowledge.extract {replies}`` -> ``{"records"}``：从模型对 ``knowledge.parse``
+    各 prompt 的回复中提取，按 prompt 顺序、已去重。"""
     from Function.Knowledge.file_parser import merge_extracted
 
     replies = params.get("replies")
@@ -248,12 +247,11 @@ def knowledge_extract(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_confirm(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.confirm {records?, filename?, category_id?=1}``: store the reviewed
-    records, then index the kept source file for retrieval.
+    """``knowledge.confirm {records?, filename?, category_id?=1}``：存入审阅过的记录，
+    然后为保留下来的源文件建立检索索引。
 
-    Returns ``{"inserted": {"metrics", "rules", "notes"}, "rag": {"chunks", ...}}``.
-    Reports progress per step; a cancel takes effect between steps, so records
-    stored before it stay.
+    返回 ``{"inserted": {"metrics", "rules", "notes"}, "rag": {"chunks", ...}}``。
+    按步骤报告进度；取消在步骤之间生效，因此取消前已写入的记录会保留。
     """
     from Function.Knowledge.file_parser import extract_text
 
@@ -285,14 +283,14 @@ def knowledge_confirm(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_files(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.files {}`` -> ``{"files": [{"filename", "size", "mtime"}]}``, newest first."""
+    """``knowledge.files {}`` -> ``{"files": [{"filename", "size", "mtime"}]}``，最新的在前。"""
     return {"files": list_knowledge_files(_knowledge_dir())}
 
 
 def knowledge_delete_file(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.deleteFile {filename}``: remove a kept source file and its
-    retrieval chunks -> ``{"deleted": true, "chunks"}``. Only source files: the
-    knowledge database beside them cannot be named."""
+    """``knowledge.deleteFile {filename}``：删除一个保留下来的源文件及其检索分块
+    -> ``{"deleted": true, "chunks"}``。只删源文件：旁边的知识数据库文件无法通过
+    该参数指定。"""
     filename = Path(str_param(params, "filename")).name
     target = _knowledge_dir() / filename
     if Path(filename).suffix.lower() not in KNOWLEDGE_FILE_SUFFIXES or not target.is_file():
@@ -303,9 +301,9 @@ def knowledge_delete_file(ctx: MethodContext, params: dict) -> dict:
 
 
 def knowledge_rebuild_embeddings(ctx: MethodContext, params: dict) -> dict:
-    """``knowledge.rebuildEmbeddings {}``: re-embed the document chunks and records
-    whose vectors are stale (embedder changed) -> ``{"rebuilt", "document_chunks",
-    "structured_records"}``. Skill vectors belong to the agent service."""
+    """``knowledge.rebuildEmbeddings {}``：对向量已过期（embedder 变了）的文档分块与
+    记录重新计算 embedding -> ``{"rebuilt", "document_chunks",
+    "structured_records"}``。skill 的向量属于 agent 服务。"""
     ctx.progress(5, "正在重建知识库向量")
     with _knowledge_base() as kb:
         result = kb.rebuild_all_embeddings()
@@ -314,9 +312,9 @@ def knowledge_rebuild_embeddings(ctx: MethodContext, params: dict) -> dict:
 
 
 def embed_status(ctx: MethodContext, params: dict) -> dict:
-    """``embed.status {}``: the active embedder, plus the local BGE model files.
-    A caller installing the model downloads ``model_files`` of ``model_repo``
-    into ``model_dir``, then calls ``embed.reload``."""
+    """``embed.status {}``：当前生效的 embedder，以及本地 BGE 模型文件情况。
+    安装模型的调用方会把 ``model_repo`` 的 ``model_files`` 下载到 ``model_dir``，
+    然后调用 ``embed.reload``。"""
     from Function.Knowledge.neural_embedder import get_embed_info, get_init_error, is_neural
 
     return {
@@ -331,7 +329,7 @@ def embed_status(ctx: MethodContext, params: dict) -> dict:
 
 
 def embed_set_mode(ctx: MethodContext, params: dict) -> dict:
-    """``embed.setMode {mode}`` (auto | cloud | local | hash) -> the embedder info after the switch."""
+    """``embed.setMode {mode}``（auto | cloud | local | hash）-> 切换后的 embedder 信息。"""
     from Function.Knowledge.neural_embedder import get_embed_info, set_embed_mode
 
     mode = str_param(params, "mode").strip().lower()
@@ -342,17 +340,16 @@ def embed_set_mode(ctx: MethodContext, params: dict) -> dict:
 
 
 def embed_cloud_config(ctx: MethodContext, params: dict) -> dict:
-    """``embed.cloudConfig {}`` -> ``{"url", "model", "token_configured"}``."""
+    """``embed.cloudConfig {}`` -> ``{"url", "model", "token_configured"}``。"""
     from Function.Knowledge.neural_embedder import get_cloud_config
 
     return get_cloud_config()
 
 
 def embed_set_cloud_config(ctx: MethodContext, params: dict) -> dict:
-    """``embed.setCloudConfig {url, model, token?, clear_token?, test?}``: store the
-    cloud embedding endpoint (an absent ``token`` keeps the stored one); with
-    ``test`` the endpoint is probed first and the outcome returned as ``test``
-    (a failed probe stores nothing, error kind ``cloud_test_failed``)."""
+    """``embed.setCloudConfig {url, model, token?, clear_token?, test?}``：保存云端
+    embedding 端点（``token`` 缺失时沿用已存的）；给出 ``test`` 时先探测端点，结果以
+    ``test`` 返回（探测失败则不保存任何内容，错误 kind 为 ``cloud_test_failed``）。"""
     from Function.Knowledge.neural_embedder import configure_cloud
 
     token = params.get("token")
@@ -368,13 +365,13 @@ def embed_set_cloud_config(ctx: MethodContext, params: dict) -> dict:
         )
     except ValueError as exc:
         raise RpcError(str(exc), INVALID_PARAMS) from exc
-    except Exception as exc:  # the probe's network or response failure
+    except Exception as exc:  # 探测时的网络或响应失败
         raise RpcError(f"云端嵌入服务测试失败：{exc}", data={"kind": "cloud_test_failed"}) from exc
     return {"test": None, **config}
 
 
 def embed_reload(ctx: MethodContext, params: dict) -> dict:
-    """``embed.reload {}``: pick up BGE model files installed into ``model_dir``."""
+    """``embed.reload {}``：加载安装到 ``model_dir`` 的 BGE 模型文件。"""
     from Function.Knowledge.neural_embedder import (
         get_init_error, is_neural, reset_for_newly_installed_model,
     )

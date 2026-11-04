@@ -1,14 +1,13 @@
-"""Run one business (category-B) tool call against a host that mixes in
-``DataToolsMixin`` and ``ExportToolsMixin``.
+"""对混入了 ``DataToolsMixin`` 与 ``ExportToolsMixin`` 的 host 执行一次业务
+（category-B）工具调用。
 
-This is the single place that turns the model-facing tool arguments into mixin
-calls and shapes the result the model sees. The old agent loop
-(``agent/agent.py``) and the compute worker (``compute/host.py``) both call
-``run_business_tool``.
+这里是唯一把面向模型的工具参数转成 mixin 调用、并塑造模型所见结果的地方。
+旧 agent 循环（``agent/agent.py``）与 compute worker（``compute/host.py``）都
+调用 ``run_business_tool``。
 
-``run_business_tool`` is a generator: it yields UI events (``knowledge_refs``,
-``data_refs`` and whatever the host's ``_run_as_job`` yields) and returns a
-``ToolOutcome``.
+``run_business_tool`` 是一个生成器：它产出 UI 事件（``knowledge_refs``、
+``data_refs`` 以及 host 的 ``_run_as_job`` 产出的任何东西），并返回一个
+``ToolOutcome``。
 """
 from __future__ import annotations
 
@@ -36,16 +35,16 @@ BUSINESS_TOOLS = frozenset({
 @dataclass
 class ToolOutcome:
     text: str
-    # data_refs / knowledge_refs: the envelope ``sources`` of the tool result.
+    # data_refs / knowledge_refs：工具结果 envelope 的 ``sources``。
     refs: list[dict] = field(default_factory=list)
-    # Chart HTML to show after the turn: {"html", "title", "chart_type", "spec"}.
+    # 回合结束后要展示的图表 HTML：{"html", "title", "chart_type", "spec"}。
     charts: list[dict] = field(default_factory=list)
-    # The envelope ``artifacts`` of the tool result.
+    # 工具结果 envelope 的 ``artifacts``。
     artifacts: list[dict] = field(default_factory=list)
 
 
 def as_bool_arg(value: Any) -> bool:
-    """Coerce tool-call booleans without treating the string 'False' as true."""
+    """把工具调用中的布尔值转成 bool，但不把字符串 'False' 当作 true。"""
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -56,7 +55,7 @@ def as_bool_arg(value: Any) -> bool:
 
 
 def normalize_chart_call_args(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Make chart execution and UI metadata use the same non-empty values."""
+    """让图表执行与 UI 元数据使用同一份非空取值。"""
     normalized = dict(args or {})
     chart_type = str(normalized.get("chart_type") or "Bar_Chart").strip()
     if not chart_type:
@@ -72,10 +71,9 @@ def normalize_chart_call_args(args: Dict[str, Any]) -> Dict[str, Any]:
 def run_business_tool(
     host, name: str, args: dict, *, chart_offset: int = 0,
 ) -> Generator[dict, None, ToolOutcome]:
-    """Execute *name* with already-normalized and validated *args*.
+    """用已规范化并校验过的 *args* 执行 *name*。
 
-    ``chart_offset`` is the number of charts already produced earlier in the
-    turn; profile chart titles are numbered after it.
+    ``chart_offset`` 是本回合此前已产出的图表数量；profile 图表的标题在其后编号。
     """
     if name == "query_knowledge":
         question = args.get("question", "")

@@ -1,10 +1,10 @@
-"""Golden dump of the built-in tool registry, produced by the real Python implementation.
+"""内置工具 registry 的 golden dump，由真实 Python 实现产出。
 
     .venv/bin/python scripts/golden/export_registry.py
 
-Writes server/test/golden/registry.json. The TS port (server/src/tools/registry.ts) keeps a
-hand-written table; server/test/registry.test.ts proves it is equal to this dump field by field,
-so a missing, renamed, or mistyped tool/flag/keyword cannot slip through.
+写入 server/test/golden/registry.json。TS 移植版（server/src/tools/registry.ts）
+维护一张手写表；server/test/registry.test.ts 逐字段证明它与本 dump 相等，
+因此缺失、改名或打错类型的 tool/flag/keyword 都无法蒙混过关。
 """
 from __future__ import annotations
 

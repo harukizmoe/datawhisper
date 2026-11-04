@@ -1,4 +1,4 @@
-"""Protocol tests against a real worker subprocess (``compute.tests._fake_worker``)."""
+"""针对真实 worker 子进程（``compute.tests._fake_worker``）的协议测试。"""
 import json
 import queue
 import subprocess
@@ -43,7 +43,7 @@ class Worker:
         self.send(msg)
 
     def next(self, timeout=10) -> dict:
-        # JSON.parse in the Bun client is strict: no NaN/Infinity tokens allowed.
+        # Bun 客户端里的 JSON.parse 是严格的：不允许 NaN/Infinity 记号。
         return json.loads(self.lines.get(timeout=timeout), parse_constant=_reject_constant)
 
     def until_response(self, rid, timeout=10) -> tuple[dict, list[dict]]:
@@ -90,7 +90,7 @@ class RpcProtocolTest(unittest.TestCase):
 
     def test_cancel_stops_running_method(self):
         self.w.request(7, "loop")
-        self.w.next()  # first progress notification: the method is running
+        self.w.next()  # 第一条 progress 通知：方法已在运行
         self.w.send({"jsonrpc": "2.0", "method": "$/cancel", "params": {"id": 7}})
         resp, notes = self.w.until_response(7)
         self.assertEqual(resp["error"]["code"], -32800)
@@ -120,7 +120,7 @@ class RpcProtocolTest(unittest.TestCase):
     def test_malformed_input_does_not_kill_worker(self):
         self.w.send("{not json")
         self.assertEqual(self.w.next()["error"]["code"], -32700)
-        self.w.send({"id": 5, "method": "echo"})  # missing jsonrpc
+        self.w.send({"id": 5, "method": "echo"})  # 缺少 jsonrpc
         msg = self.w.next()
         self.assertEqual((msg["id"], msg["error"]["code"]), (5, -32600))
         self.w.send("[1,2]")
@@ -135,7 +135,7 @@ class RpcProtocolTest(unittest.TestCase):
         self.assertEqual(first["error"]["code"], -32600)
         second = self.w.next()
         self.assertEqual(second["result"], {"slept": 0.5})
-        # Reusing the id after its response is fine.
+        # 应答之后再复用该 id 是可以的。
         self.w.request("dup", "echo", {"again": 1})
         self.assertEqual(self.w.until_response("dup")[0]["result"], {"again": 1})
 
@@ -148,7 +148,7 @@ class RpcProtocolTest(unittest.TestCase):
         self.w.until_response(2)
         self.w.proc.wait(5)
         for line in self.w.raw:
-            json.loads(line)  # every protocol line is JSON
+            json.loads(line)  # 协议流上的每一行都是 JSON
         stderr = self.w.proc.stderr.read().decode()
         for text in ("python print to stdout", "direct sys.stdout write", "raw fd 1 write"):
             self.assertIn(text, stderr)

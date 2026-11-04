@@ -1,32 +1,30 @@
 #!/usr/bin/env python3
-"""Scripted OpenAI-compatible model stub for the behavioural baseline (stdlib only).
+"""用于行为基线的脚本化 OpenAI 兼容模型桩（仅标准库）。
 
-The stub plays one *scenario* at a time.  A scenario is an ordered list of
-assistant turns; every **agent** request (``stream: true`` chat completion)
-consumes the next turn.  Non-streaming requests are treated as *auxiliary*
-calls (memory extraction, prompt suggestion, compaction, ...) and get a fixed
-reply without consuming a turn.  Once the script is exhausted the stub answers
-with a fixed fallback text and flags the request ``fallback: true``.
+该桩一次扮演一个 *scenario*。scenario 是一串有序的 assistant 回合；每个
+**agent** 请求（``stream: true`` 的 chat completion）消耗下一个回合。非流式请求
+被当作 *辅助* 调用（记忆抽取、提示词建议、压缩……），返回固定回复且不消耗回合。
+脚本用尽后，桩以固定的兜底文本作答，并在该请求上标记 ``fallback: true``。
 
-Turn shapes::
+回合形状：::
 
     {"tool_calls": [{"name": "query_data", "arguments": {"sql": "SELECT 1"}}]}
     {"text": "final answer"}
 
-Endpoints
-  GET  /v1/models                    model list (one model, ``--model``)
-  POST /v1/chat/completions          streaming SSE or non-streaming JSON
+端点
+  GET  /v1/models                    模型列表（只有一个模型，即 ``--model``）
+  POST /v1/chat/completions          流式 SSE 或非流式 JSON
   POST /_stub/script                 {"scenario": str, "turns": [...], "aux_reply"?: str, "id_prefix"?: str}
-                                     tool call ids are "<id_prefix>t<turn>_<k>" (default "call_")
-                                     selects the active scenario, resets its turn counter
-  GET  /_stub/requests?scenario=X    logged requests of scenario X (full messages)
+                                     tool call id 形如 "<id_prefix>t<turn>_<k>"（默认 "call_"）
+                                     选中当前激活的 scenario，并重置其回合计数
+  GET  /_stub/requests?scenario=X    某个 scenario 的已记录请求（完整 messages）
   GET  /_stub/health                 {"ok": true}
 
-Every incoming completion request is appended as one JSON line to ``--log``:
+每个进来的 completion 请求都以一行 JSON 追加到 ``--log``：
 ``{seq, scenario, kind, model, stream, tool_choice, tools, messages, turn_index, fallback}``
-where ``tools`` is the list of offered function names in order.
+其中 ``tools`` 是按顺序提供的函数名列表。
 
-Usage: python baseline/stub_llm.py --port 18080 --log /tmp/stub.jsonl
+用法：python baseline/stub_llm.py --port 18080 --log /tmp/stub.jsonl
 """
 
 from __future__ import annotations
@@ -65,7 +63,7 @@ class StubState:
             self.next_turn = 0
 
     def take(self, body: dict) -> tuple[dict, dict]:
-        """Log the request and return (record, turn)."""
+        """记录该请求并返回 (record, turn)。"""
         stream = bool(body.get("stream"))
         tools = [
             ((t or {}).get("function") or {}).get("name", "")

@@ -1,23 +1,21 @@
-"""Newline-delimited JSON-RPC 2.0 over stdio.
+"""基于 stdio 的换行分隔 JSON-RPC 2.0。
 
-The Bun server spawns the worker and owns its lifetime. Framing: one UTF-8 JSON
-object per line on stdin (requests, notifications) and on the protocol stream
-(responses, notifications). The protocol stream is the process's original
-stdout; file descriptor 1 is redirected to stderr at startup so prints from
-Python or C extensions can never corrupt it.
+Bun 服务端拉起该 worker 并掌握其生命周期。分帧方式：stdin 上每行一个 UTF-8
+JSON 对象（请求、通知），协议流上同样如此（响应、通知）。协议流是进程原始的
+stdout；启动时把文件描述符 1 重定向到 stderr，因此 Python 或 C 扩展里的 print
+永远不会污染它。
 
-Worker -> server notifications:
+Worker -> 服务端 通知：
     {"method": "progress", "params": {"id": <request id>, "progress": 0-100, "message": str}}
     {"method": "event",    "params": {"id": <request id>, "event": {...}}}
-Server -> worker notifications:
+服务端 -> Worker 通知：
     {"method": "$/cancel", "params": {"id": <request id>}}
-Request ``shutdown`` answers, stops reading and lets in-flight requests finish.
-Non-finite floats (NaN, ±Infinity) are sent as null: they are not JSON.
+请求 ``shutdown`` 会应答、停止读取，并让进行中的请求跑完。
+非有限浮点数（NaN、±Infinity）以 null 发送：它们不是合法 JSON。
 
-Requests run concurrently on a thread pool and may answer out of order. A
-request that depends on another (e.g. a query after ``source.open``) must be
-sent only after the earlier one has answered. Request ids must be unique among
-in-flight requests; a duplicate is rejected with INVALID_REQUEST.
+请求在线程池上并发执行，可能乱序应答。依赖另一个请求的请求（例如
+``source.open`` 之后的查询）必须等前一个应答之后再发送。请求 id 在
+进行中的请求之间必须唯一；重复的 id 会以 INVALID_REQUEST 拒绝。
 """
 from __future__ import annotations
 
@@ -34,7 +32,7 @@ from typing import Any, Callable, TextIO
 
 log = logging.getLogger(__name__)
 
-# JSON-RPC error codes. -32000.. are application defined.
+# JSON-RPC 错误码。-32000.. 为应用自定义区间。
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
@@ -45,7 +43,7 @@ APP_ERROR = -32000
 
 
 class Cancelled(Exception):
-    """Raised by MethodContext.check() after the caller cancelled the request."""
+    """调用方取消请求后，由 MethodContext.check() 抛出。"""
 
 
 class RpcError(Exception):
@@ -56,7 +54,7 @@ class RpcError(Exception):
 
 
 def str_param(params: dict, key: str, required: bool = True) -> str:
-    """``params[key]`` as a string; an absent optional key reads as ""."""
+    """以字符串形式返回 ``params[key]``；可选键缺失时读作 ""。"""
     value = params.get(key)
     if value is None and not required:
         return ""
@@ -66,7 +64,7 @@ def str_param(params: dict, key: str, required: bool = True) -> str:
 
 
 def int_param(params: dict, key: str, default: int | None = None) -> int:
-    """``params[key]`` as an integer; ``default``, when given, stands in for an absent key."""
+    """以整数形式返回 ``params[key]``；给出 ``default`` 时用它代替缺失的键。"""
     value = params.get(key)
     if value is None and default is not None:
         return default
@@ -76,7 +74,7 @@ def int_param(params: dict, key: str, default: int | None = None) -> int:
 
 
 class MethodContext:
-    """Per-request handle passed to every method."""
+    """传给每个方法的单请求句柄。"""
 
     def __init__(self, server: "Server", request_id: Any):
         self._server = server
@@ -184,11 +182,11 @@ class Server:
             response = _error(ctx.request_id, CANCELLED, "cancelled")
         except RpcError as exc:
             response = _error(ctx.request_id, exc.code, str(exc), exc.data)
-        except Exception as exc:  # noqa: BLE001 - every failure must reach the caller
+        except Exception as exc:  # noqa: BLE001 - 每个失败都必须传回调用方
             log.error("method failed: %s", traceback.format_exc())
             response = _error(ctx.request_id, INTERNAL_ERROR, f"{type(exc).__name__}: {exc}")
-        # Leave the in-flight table before answering: a caller that reuses the id
-        # after the response must not be rejected as a duplicate.
+        # 先移出进行中表再应答：调用方在收到应答后复用同一 id 时，
+        # 不应被当成重复 id 拒绝。
         with self._inflight_lock:
             self._inflight.pop(ctx.request_id, None)
         try:
@@ -205,7 +203,7 @@ def _error(request_id: Any, code: int, message: str, data: Any = None) -> dict:
 
 
 def _json_default(value: Any) -> Any:
-    # numpy/pandas scalars and timestamps leak out of DataFrame code.
+    # numpy/pandas 标量与时间戳会从 DataFrame 代码里漏出来。
     for attr in ("item", "isoformat"):
         fn = getattr(value, attr, None)
         if callable(fn):
@@ -227,8 +225,8 @@ def _dumps(message: dict) -> str:
     try:
         return json.dumps(message, ensure_ascii=False, allow_nan=False, default=_json_default)
     except ValueError:
-        # Rare path: a non-finite float somewhere (numpy scalars convert through
-        # _json_default first, so round-trip once to reach them as Python floats).
+        # 罕见路径：某处有非有限浮点数（numpy 标量会先经 _json_default 转换，
+        # 所以先往返一次让它们变成 Python float 再处理）。
         plain = json.loads(json.dumps(message, ensure_ascii=False, default=_json_default))
         return json.dumps(_finite(plain), ensure_ascii=False, allow_nan=False)
 

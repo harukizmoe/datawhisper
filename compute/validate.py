@@ -1,48 +1,46 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pre-flight validation of tool call arguments.
+"""工具调用参数的前置校验。
 
-Runs BEFORE the tool dispatch, so dangerous inputs (write SQL,
-malformed schemas) never reach the underlying executor.
+在任何工具 dispatch 之前运行，因此危险输入（写 SQL、格式错误的 schema）永远
+到不了底层执行器。
 
-Centralized here so:
-  - The "what's blocked" policy lives in one place
-  - Tests can exercise the rules without spinning up an LLM
-  - Both BusinessAgent and any future bypass path (e.g. /sql fast path)
-    can apply the same guards
+集中放在这里的目的：
+  - "什么被拦截"的策略只有一处
+  - 测试无需起一个 LLM 就能验证这些规则
+  - BusinessAgent 与将来任何旁路（例如 /sql 快速路径）都能套用同样的护栏
 
-SQL validation strategy (AST-level, not keyword matching)
+SQL 校验策略（AST 级，而非关键词匹配）
 ---------------------------------------------------------
-Previous approach: keyword blacklist (DROP/DELETE/…) + "must start with SELECT".
+旧做法：关键词黑名单（DROP/DELETE/…）+ "必须以 SELECT 开头"。
 
-Problems with the old approach:
-  1. False positives: SELECT update_time FROM … or WHERE note = 'please DELETE'
-     were blocked even though they are read-only.
-  2. Bypasses: DuckDB allows reading arbitrary files via read_csv('/etc/passwd'),
-     ATTACH external databases, INSTALL/LOAD extensions, COPY … TO … — all of
-     which can start with SELECT or contain no blocked keywords.
+旧做法的问题：
+  1. 误报：SELECT update_time FROM … 或 WHERE note = 'please DELETE'
+     明明是只读查询却被拦截。
+  2. 绕过：DuckDB 允许通过 read_csv('/etc/passwd') 读任意文件、ATTACH 外部
+     数据库、INSTALL/LOAD 扩展、COPY … TO … —— 这些都可以写成 SELECT 开头，
+     或完全不含被拦关键词。
 
-New approach (A4):
-  - Use sqlglot to parse the SQL into an AST and inspect structure.
-  - Accept only a single SELECT or WITH (CTE) statement.
-  - Recursively scan for banned function calls and COPY nodes.
-  - For file-read functions (read_csv / read_parquet / read_json / read_text /
-    read_blob), do PATH WHITELIST validation: extract the literal path argument,
-    resolve it against the workspace's allowed roots (workdir + uploads +
-    Information + artifacts + cache), reject if not literal or out of whitelist.
-  - Fall back to the old keyword heuristic if sqlglot is unavailable
-    (so the app still works without the optional dependency).
+新做法（A4）：
+  - 用 sqlglot 把 SQL 解析成 AST 并检查结构。
+  - 只接受单条 SELECT 或 WITH（CTE）语句。
+  - 递归扫描被禁函数调用与 COPY 节点。
+  - 对文件读取函数（read_csv / read_parquet / read_json / read_text /
+    read_blob）做路径白名单校验：取出字面量路径参数，相对 workspace 的
+    allowed roots（workdir + uploads + Information + artifacts + cache）解析，
+    非字面量或超出白名单一律拒绝。
+  - sqlglot 不可用时回退到旧的关键词启发式（因此没有这个可选依赖时应用仍可用）。
 
-A6 relaxation (writes allowed, memory-only):
-  - Write statements (CREATE TABLE/VIEW, INSERT, UPDATE, DELETE, DROP TABLE/VIEW,
-    ALTER, TRUNCATE, MERGE) now pass validation. The execution layer redirects
-    them to in-memory snapshots so the user's on-disk data is never modified.
-  - System statements stay blocked: PRAGMA / INSTALL / LOAD / ATTACH / DETACH /
-    COPY TO / SET / BEGIN-COMMIT / CREATE-DROP of FUNCTION, MACRO, INDEX,
-    SCHEMA, SEQUENCE, TYPE.
+A6 放宽（允许写，但只在内存中）：
+  - 写语句（CREATE TABLE/VIEW、INSERT、UPDATE、DELETE、DROP TABLE/VIEW、
+    ALTER、TRUNCATE、MERGE）现在可以通过校验。执行层会把它们重定向到内存
+    快照，用户磁盘上的数据永远不会被改动。
+  - 系统语句仍然拦截：PRAGMA / INSTALL / LOAD / ATTACH / DETACH /
+    COPY TO / SET / BEGIN-COMMIT / 对 FUNCTION、MACRO、INDEX、
+    SCHEMA、SEQUENCE、TYPE 的 CREATE-DROP。
 
-DuckDB connection-level lockdown (second layer, in _utils.py, post-A4):
-  SET enable_external_access = false  # 仍禁网络（HTTP/S3 扩展）
+DuckDB 连接级锁定（第二层，在 _utils.py 中，A4 之后）：
+  SET enable_external_access = false  # 仍然禁网络（HTTP/S3 扩展）
   # A4 起：不再 SET disabled_filesystems='LocalFileSystem' —— 改由本模块的
   # AST 路径白名单做精细控制，工作目录内文件可直读。
 """
@@ -63,24 +61,24 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Tool names whose JSON args carry a `sql` field that runs against the data source.
+# JSON 参数中带 `sql` 字段、会打到数据源的工具名。
 SQL_TOOLS = {"create_analysis_table", "query_data", "generate_chart", "run_analysis"}
 
 
 @dataclass(frozen=True)
 class SqlValidationResult:
-    """Structured SQL validation outcome for UI badges.
+    """供 UI 徽标使用的结构化 SQL 校验结果。
 
     status:
-      - "passed":   sqlglot AST validation succeeded (full trust).
-      - "degraded": sqlglot was unavailable or could not parse the statement, so
-                    a weaker heuristic check ran and passed. Surfaced as a
-                    "sqlglot 错误" badge with an error code (SQLG-001/002).
-      - "failed":   validation rejected the SQL (AST or heuristic) — blocked.
-    message: human-readable detail (empty when passed).
-    used_heuristic: True when the keyword fallback ran instead of the AST.
-    code: stable error code for degraded/failed outcomes (e.g. "SQLG-001"),
-                    documented in Instruction.md; empty when passed.
+      - "passed":   sqlglot AST 校验通过（完全可信）。
+      - "degraded": sqlglot 不可用或无法解析该语句，于是执行了较弱的启发式
+                    检查并通过。以带错误码（SQLG-001/002）的
+                    "sqlglot 错误" 徽标呈现。
+      - "failed":   校验拒绝了该 SQL（AST 或启发式）—— 被拦截。
+    message: 人类可读的细节（通过时为空）。
+    used_heuristic: 走的是关键词兜底而非 AST 时为 True。
+    code: degraded/failed 结果的稳定错误码（如 "SQLG-001"），
+                    记录于 Instruction.md；通过时为空。
     """
 
     status: Literal["passed", "failed", "degraded"]
@@ -93,20 +91,20 @@ class SqlValidationResult:
 SQLG_NOT_INSTALLED = "SQLG-001"   # sqlglot 未安装
 SQLG_PARSE_FAILED = "SQLG-002"    # sqlglot 无法解析该 SQL（方言差异）
 
-# Functions that must NEVER appear in any SQL we execute, regardless of context.
+# 无论如何都绝不能出现在我们执行的任何 SQL 中的函数。
 # 这些是真正的"危险"函数：扩展管理、外部数据库、网络、写入文件、元命令。
 # 注意：read_csv / read_parquet 等"文件读取"函数不再在此列表 —— 它们受
 # _FILE_READ_FUNCTIONS 路径白名单控制（A4）。
 _BANNED_FUNCTIONS = {
-    # File system writes
+    # 文件系统写入
     "copy_to",
-    # Extension management (can load arbitrary native code)
+    # 扩展管理（可加载任意原生代码）
     "install", "load",
-    # External database attachment
+    # 挂载外部数据库
     "attach", "detach",
-    # Meta-commands
+    # 元命令
     "pragma",
-    # Network access (httpfs extension)
+    # 网络访问（httpfs 扩展）
     "http_get", "httpget", "http_post",
 }
 
@@ -192,7 +190,7 @@ def _extract_from_expr(expr, paths: List[str]) -> None:
         paths.append(expr.this)
         return
 
-    # Array of literals: read_csv(['a.csv', 'b.csv'])
+    # 字面量数组：read_csv(['a.csv', 'b.csv'])
     if isinstance(expr, exp.Array):
         for item in expr.expressions or []:
             if isinstance(item, exp.Literal) and item.is_string:
@@ -252,9 +250,9 @@ def _validate_file_read_paths(stmt, allowed_roots: List[Path]) -> Optional[str]:
                 return (f"禁止非字面量路径参数：{node.name}() 的路径参数必须是"
                         "字符串字面量，不接受变量/列引用/拼接表达式。")
 
-        # DuckDB accepts SELECT * FROM 'file.csv' as a file scan. sqlglot
-        # parses it as a quoted Table identifier rather than ReadCSV, so it
-        # must pass through the same Workspace whitelist.
+        # DuckDB 接受 SELECT * FROM 'file.csv' 作为文件扫描。sqlglot 会把它
+        # 解析成带引号的 Table 标识符而非 ReadCSV，因此它必须走同一套
+        # Workspace 白名单。
         elif isinstance(node, exp.Table):
             identifier = getattr(node, "this", None)
             quoted = bool(getattr(identifier, "args", {}).get("quoted"))
@@ -350,22 +348,22 @@ def _check_single_path(path_str: str, norm_roots: List[Path]) -> Optional[str]:
 
 
 def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[Path]) -> Optional[str]:
-    """Run AST-level checks on already-parsed sqlglot statements.
+    """对已解析好的 sqlglot 语句执行 AST 级检查。
 
-    Returns an error string if the SQL is disallowed, else None. Split out of
-    ``_validate_sql_ast`` so ``validate_sql_structured`` can distinguish a true
-    AST pass from a heuristic fallback.
+    若 SQL 不被允许则返回错误字符串，否则返回 None。之所以从
+    ``_validate_sql_ast`` 中拆出，是为了让 ``validate_sql_structured`` 能区分
+    真正的 AST 通过与启发式兜底。
 
-    A6 policy — writes are allowed, execution layer keeps them in memory:
-      Allowed statements: Query (SELECT/WITH/UNION), Create with kind
-      TABLE/VIEW, Insert, Update, Delete, Drop with kind TABLE/VIEW,
-      Alter, TruncateTable, Merge.
-      Still blocked: PRAGMA / Install / Attach / Detach / Copy / Set /
-      Transaction / Command, Create/Drop of FUNCTION, MACRO, INDEX,
-      SCHEMA, SEQUENCE, TYPE — plus multi-statement, banned functions,
-      network URLs and non-whitelisted file-read paths (unchanged).
+    A6 策略 —— 允许写，执行层把它们保持在内存中：
+      允许的语句：Query（SELECT/WITH/UNION）、kind 为
+      TABLE/VIEW 的 Create、Insert、Update、Delete、kind 为 TABLE/VIEW 的 Drop、
+      Alter、TruncateTable、Merge。
+      仍然拦截：PRAGMA / Install / Attach / Detach / Copy / Set /
+      Transaction / Command、对 FUNCTION、MACRO、INDEX、
+      SCHEMA、SEQUENCE、TYPE 的 Create/Drop —— 另外还有多语句、被禁函数、
+      网络 URL 与非白名单文件读取路径（均不变）。
     """
-    # ── Multi-statement check ──────────────────────────────────────────────────
+    # ── 多语句检查 ─────────────────────────────────────────────────────────────
     if len(statements) > 1:
         return "不允许多语句 SQL（检测到分号分隔的多条语句）。"
     if not statements:
@@ -373,9 +371,9 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
 
     stmt = statements[0]
 
-    # ── Top-level statement type ───────────────────────────────────────────────
+    # ── 顶层语句类型 ───────────────────────────────────────────────────────────
     if isinstance(stmt, exp.Query):
-        pass  # read-only: SELECT / WITH / UNION / CTE
+        pass  # 只读：SELECT / WITH / UNION / CTE
     elif isinstance(stmt, exp.Create):
         kind = str(stmt.args.get("kind") or "").upper()
         if kind not in ("TABLE", "VIEW"):
@@ -388,7 +386,7 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
         if kind not in ("TABLE", "VIEW"):
             return f"只允许 DROP TABLE / DROP VIEW，检测到 DROP {kind or '?'}。"
     elif isinstance(stmt, (exp.Insert, exp.Update, exp.Delete, exp.Alter, exp.TruncateTable, exp.Merge)):
-        pass  # in-memory data mutation — allowed under A6
+        pass  # 内存中的数据变更 —— A6 下允许
     else:
         stmt_type = type(stmt).__name__
         return (
@@ -398,47 +396,47 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
             "BEGIN 等系统级语句。"
         )
 
-    # ── Banned function scan (recursive, 非 file-read 类) ─────────────────────
+    # ── 被禁函数扫描（递归，非 file-read 类）─────────────────────────────────
     for node in stmt.walk():
-        # Anonymous function (e.g. read_csv_auto which sqlglot may not recognise)
+        # Anonymous 函数（例如 sqlglot 可能识别不了的 read_csv_auto）
         if isinstance(node, exp.Anonymous):
             fname = (node.name or "").lower()
             if fname in _BANNED_FUNCTIONS:
                 return f"禁止使用函数 {fname}()：该函数可访问文件系统写入/网络/扩展。"
 
-        # Named function nodes
+        # 具名函数节点
         if isinstance(node, exp.Func):
             fname = type(node).__name__.lower()
-            # Also check the sql_name if available
+            # 若可用也检查 sql_name
             sql_name = getattr(node, "sql_name", lambda: "")()
             for candidate in (fname, sql_name.lower()):
                 if candidate in _BANNED_FUNCTIONS:
                     return f"禁止使用函数 {candidate}()：该函数可访问文件系统写入/网络/扩展。"
 
-    # ── COPY statement scan ────────────────────────────────────────────────────
+    # ── COPY 语句扫描 ──────────────────────────────────────────────────────────
     for node in stmt.walk():
         if isinstance(node, exp.Copy):
             return "禁止 COPY 操作：不允许将数据写入文件。"
 
-    # ── File-read path whitelist (A4) ──────────────────────────────────────────
+    # ── 文件读取路径白名单（A4）───────────────────────────────────────────────
     err = _validate_file_read_paths(stmt, allowed_roots)
     if err:
         return err
 
-    return None  # all good
+    return None  # 全部通过
 
 
 def _validate_sql_ast(sql: str, allowed_roots: Optional[List[Path]] = None) -> Optional[str]:
-    """AST-level SQL validation using sqlglot.
+    """用 sqlglot 做 AST 级 SQL 校验。
 
-    Returns an error string if the SQL is disallowed, else None.
-    Falls back to a lightweight heuristic when sqlglot is not installed.
+    若 SQL 不被允许则返回错误字符串，否则返回 None。
+    未安装 sqlglot 时回退到轻量启发式。
 
     Args:
-        sql: SQL string to validate.
-        allowed_roots: List of Path roots that file-read functions (read_csv etc.)
-            are allowed to read from. If None or empty, file reads are rejected
-            entirely (caller should pass uploads/Information as defaults).
+        sql: 待校验的 SQL 字符串。
+        allowed_roots: 文件读取函数（read_csv 等）允许读取的 Path 根目录列表。
+            若为 None 或为空，则完全拒绝文件读取（调用方应传入
+            uploads/Information 作为默认值）。
     """
     return validate_sql_structured(sql, allowed_roots=allowed_roots).message
 
@@ -446,22 +444,21 @@ def _validate_sql_ast(sql: str, allowed_roots: Optional[List[Path]] = None) -> O
 def validate_sql_structured(
     sql: str, allowed_roots: Optional[List[Path]] = None
 ) -> SqlValidationResult:
-    """AST-level SQL validation with a structured three-state outcome.
+    """带结构化三态结果的 AST 级 SQL 校验。
 
-    Mirrors ``_validate_sql_ast`` but distinguishes a full AST pass from a
-    heuristic fallback so the UI can show a "sqlglot 错误" badge when the
-    high-trust sqlglot path was unavailable.
+    与 ``_validate_sql_ast`` 类似，但会区分完整的 AST 通过与启发式兜底，使 UI 在
+    高可信的 sqlglot 路径不可用时能显示 "sqlglot 错误" 徽标。
 
     Args:
-        sql: SQL string to validate.
-        allowed_roots: List of Path roots for file-read whitelist. If None,
-            defaults to [uploads/, Information/] (see ``_default_allowed_roots``).
+        sql: 待校验的 SQL 字符串。
+        allowed_roots: 文件读取白名单的 Path 根目录列表。若为 None，默认使用
+            [uploads/, Information/]（见 ``_default_allowed_roots``）。
     """
     try:
         import sqlglot
         import sqlglot.expressions as exp
     except ImportError:
-        # sqlglot not installed — fall back to conservative heuristic
+        # 未安装 sqlglot —— 回退到保守的启发式
         log.debug("[validate] sqlglot not available, using heuristic fallback")
         err = _validate_sql_heuristic(sql)
         if err:
@@ -473,12 +470,12 @@ def validate_sql_structured(
             code=SQLG_NOT_INSTALLED,
         )
 
-    # ── Parse ──────────────────────────────────────────────────────────────────
+    # ── 解析 ───────────────────────────────────────────────────────────────────
     try:
         statements = sqlglot.parse(sql, dialect="duckdb", error_level=sqlglot.ErrorLevel.RAISE)
     except Exception as exc:
-        # Parse error — could be valid DuckDB but not parseable by sqlglot.
-        # Fall back to heuristic rather than blocking legitimate queries.
+        # 解析错误 —— 可能是合法 DuckDB 但 sqlglot 解析不了。
+        # 回退到启发式，而不是拦截合法查询。
         log.debug("[validate] sqlglot parse error (%s), falling back to heuristic", exc)
         err = _validate_sql_heuristic(sql)
         if err:
@@ -511,7 +508,7 @@ def _default_allowed_roots() -> List[Path]:
 
 
 def _strip_sql_comments_for_prefix(sql: str) -> str:
-    """Remove SQL comments before heuristic prefix/keyword checks."""
+    """在启发式前缀/关键词检查之前去掉 SQL 注释。"""
     text = str(sql or "")
     text = re.sub(r"/\*[\s\S]*?\*/", " ", text)
     text = re.sub(r"(?m)^\s*--.*$", " ", text)
@@ -519,16 +516,15 @@ def _strip_sql_comments_for_prefix(sql: str) -> str:
 
 
 def _validate_sql_heuristic(sql: str) -> Optional[str]:
-    """Lightweight keyword-based fallback used when sqlglot is unavailable.
+    """sqlglot 不可用时使用的轻量关键词兜底校验。
 
-    Less precise than AST validation (can produce false positives on column
-    names / string literals), but keeps security guarantees when the optional
-    dependency is missing.
+    精度不如 AST 校验（在列名/字符串字面量上可能误报），但在这个可选依赖缺失
+    时仍能维持安全保证。
 
-    A6: write keywords (CREATE/INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/MERGE)
-    are allowed — the execution layer keeps writes in memory. The heuristic
-    cannot distinguish CREATE TABLE from CREATE FUNCTION, so a degraded
-    "sqlglot 错误" (SQLG-002) result is returned for anything that parses only here.
+    A6：写关键词（CREATE/INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/MERGE）
+    被允许 —— 执行层把写操作保持在内存中。启发式无法区分 CREATE TABLE 与
+    CREATE FUNCTION，因此凡是只能在这里通过的语句，都返回 degraded 的
+    "sqlglot 错误"（SQLG-002）结果。
 
     注意：heuristic 模式下无法做路径白名单（拿不到 AST 节点），所以一律拒绝
     file-read 函数（保守策略，回到 A4 之前的行为）。
@@ -540,7 +536,7 @@ def _validate_sql_heuristic(sql: str) -> Optional[str]:
     if not sql_lower:
         return "SQL 语句为空。"
 
-    # ── Multi-statement check (split on unquoted semicolons) ──────────────────
+    # ── 多语句检查（按未加引号的分号切分）────────────────────────────────────
     sql_no_trail = sql_stripped.rstrip(";").strip()
     _no_quotes = re.sub(r"'[^']*'|\"[^\"]*\"", "", sql_no_trail)
     if ";" in _no_quotes:
@@ -580,25 +576,25 @@ def validate_tool_args(
     allowed_roots: Optional[List[Path]] = None,
     workspace_authorization: Optional["WorkspacePathAuthorization"] = None,
 ) -> Optional[str]:
-    """Return an error string if args are obviously invalid, else None.
+    """若参数明显非法则返回错误字符串，否则返回 None。
 
-    Policy:
-      - SQL_TOOLS: `sql` is required; AST-level validation (SELECT/WITH only,
-        no banned functions, no multi-statement, file-read path whitelist)
-      - run_analysis: analysis_name + target_column required
-      - propose_ppt_outline / generate_ppt: `slides` (if present) must be a list
-      - propose_dashboard_outline / generate_dashboard: `widgets` (if present) must be a list
+    策略：
+      - SQL_TOOLS：`sql` 必填；做 AST 级校验（仅 SELECT/WITH、
+        无被禁函数、无多语句、文件读取路径白名单）
+      - run_analysis：analysis_name + target_column 必填
+      - propose_ppt_outline / generate_ppt：`slides`（若存在）必须是 list
+      - propose_dashboard_outline / generate_dashboard：`widgets`（若存在）必须是 list
 
     Args:
-        name: tool name.
-        args: tool arguments dict.
-        allowed_roots: legacy optional list of roots for callers without a
-            Workspace identity.
-        workspace_authorization: immutable, workspace_id-bound path capability.
-            When present it is the only source of SQL file-read roots.
-            If None, defaults to [uploads/, Information/]. Pass the workspace's
-            allowed roots (workdir + uploads + Information + artifacts + cache)
-            to enable read_csv('file.xlsx') from the mounted workdir.
+        name: 工具名。
+        args: 工具参数字典。
+        allowed_roots: 兼容旧调用的可选根目录列表，供没有 Workspace 身份的
+            调用方使用。
+        workspace_authorization: 不可变、绑定 workspace_id 的路径能力。
+            存在时它是 SQL 文件读取根目录的唯一来源。
+            若为 None，默认使用 [uploads/, Information/]。传入 workspace 的
+            允许根目录（workdir + uploads + Information + artifacts + cache）
+            即可从挂载的 workdir 中 read_csv('file.xlsx')。
     """
     if workspace_authorization is not None:
         allowed_roots = list(workspace_authorization.allowed_roots)
@@ -650,7 +646,7 @@ def validate_tool_args(
 
 
 def normalize_report_outline_args(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Canonicalize common provider aliases for report section fields."""
+    """把各 provider 常见的别名统一成 report section 字段的规范名。"""
     normalized = dict(args or {})
     raw_sections = normalized.get("sections")
     if not isinstance(raw_sections, list):
@@ -673,12 +669,11 @@ def normalize_report_outline_args(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_ask_user_args(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize common provider variants to the ask_user string contract.
+    """把各 provider 的常见变体统一到 ask_user 的字符串约定。
 
-    Some OpenAI-compatible providers occasionally emit option objects even
-    though the JSON schema declares an array of strings. Accept familiar
-    display fields at this boundary, then let ``validate_tool_args`` reject
-    anything still malformed.
+    有些 OpenAI 兼容 provider 偶尔会输出 option 对象，尽管 JSON schema 声明的
+    是字符串数组。在这个边界上接受常见的展示字段，随后仍由
+    ``validate_tool_args`` 拒绝任何格式依然错误的输入。
     """
     normalized = dict(args or {})
     question = normalized.get("question")
@@ -711,7 +706,7 @@ def normalize_ask_user_args(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def validate_ask_user_args(args: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """Return a stable error code and message for an invalid ``ask_user`` call."""
+    """对非法的 ``ask_user`` 调用返回稳定的错误码与消息。"""
     question = args.get("question")
     if not isinstance(question, str) or not question.strip():
         return (

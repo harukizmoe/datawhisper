@@ -1,4 +1,4 @@
-"""A worker with test-only methods, run as ``python -m compute.tests._fake_worker``."""
+"""带测试专用方法的 worker，以 ``python -m compute.tests._fake_worker`` 运行。"""
 import ctypes
 import os
 import sys

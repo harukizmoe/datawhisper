@@ -1,25 +1,22 @@
 #!/usr/bin/env python3
-"""Record / check the behavioural baseline of the agent service (P0.2).
+"""记录 / 校验 agent 服务的行为基线（P0.2）。
 
-The comparison point is what the MODEL sees, which does not depend on the
-service's HTTP/SSE protocol:
+比较点在于模型看到什么，这与服务的 HTTP/SSE 协议无关：
 
-  * the tool-role message content returned after every tool call,
-  * the tool names offered on every model request (visible tool list per turn),
-  * the ordered tool calls the service actually executed.
+  * 每次工具调用之后回给模型的 tool-role 消息内容，
+  * 每次模型请求所提供的工具名（每回合可见的工具列表），
+  * 服务实际执行的有序工具调用。
 
-The scripted model is ``baseline/stub_llm.py``; scenarios live in
-``baseline/scenarios.json``; fixtures in ``baseline/fixtures/``.  Only the
-``OldFlaskTarget`` class knows the old Flask HTTP+SSE protocol; a driver for the
-new Bun service replaces that class and reuses everything else.
+脚本化模型是 ``baseline/stub_llm.py``；场景在 ``baseline/scenarios.json``；
+fixture 在 ``baseline/fixtures/``。只有 ``OldFlaskTarget`` 类了解旧 Flask 的
+HTTP+SSE 协议；针对新 Bun 服务的驱动替换该类，其余全部复用。
 
-This script only talks HTTP to the service and to the stub; it never imports
-project modules.
+本脚本只通过 HTTP 与服务及 stub 通信；它从不导入项目模块。
 
-Usage:
-  .venv/bin/python baseline/run_baseline.py            # record -> baseline/recordings/
-  .venv/bin/python baseline/run_baseline.py --check    # rerun and diff against recordings
-  options: --only a,b  --keep  --python PATH  --verbose
+用法：
+  .venv/bin/python baseline/run_baseline.py            # 录制 -> baseline/recordings/
+  .venv/bin/python baseline/run_baseline.py --check    # 重跑并与 recordings 对比
+  选项：--only a,b  --keep  --python PATH  --verbose
 """
 
 from __future__ import annotations
@@ -58,7 +55,7 @@ STUB_MODEL = "baseline-stub-model"
 CHAT_TIMEOUT = 900
 
 
-# ───────────────────────────── process helpers ──────────────────────────────
+# ───────────────────────────── 进程辅助 ──────────────────────────────
 
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -110,7 +107,7 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
 
 
 class FixtureServer:
-    """Serves baseline/fixtures over HTTP (used by the fetch_table scenario)."""
+    """通过 HTTP 提供 baseline/fixtures（供 fetch_table 场景使用）。"""
 
     def __init__(self) -> None:
         handler = functools.partial(_QuietFileHandler, directory=str(FIXTURES))
@@ -133,7 +130,7 @@ class _QuietFileHandler(http.server.SimpleHTTPRequestHandler):
 
 
 class Stub:
-    """Client for baseline/stub_llm.py."""
+    """``baseline/stub_llm.py`` 的客户端。"""
 
     def __init__(self, base: str) -> None:
         self.base = base
@@ -151,15 +148,15 @@ class Stub:
         return payload
 
 
-# ─────────────────────── old Flask service (protocol adapter) ───────────────
+# ─────────────────────── 旧 Flask 服务（协议适配层）─────────────────────────
 
 class OldFlaskTarget:
-    """Everything that knows the OLD service's HTTP + SSE protocol.
+    """了解旧服务 HTTP + SSE 协议的全部逻辑。
 
-    A driver for the new service implements the same methods (configure_model,
-    seed_knowledge, new_conversation, attach_fixture, attach_database, send)
-    against its own API; ``send`` must return the protocol-neutral step result
-    ``{"timeline": [...], "final_text": str, "errors": [...]}``.
+    针对新服务的驱动需在自己的 API 之上实现同样的方法（configure_model、
+    seed_knowledge、new_conversation、attach_fixture、attach_database、send）；
+    ``send`` 必须返回协议无关的步骤结果
+    ``{"timeline": [...], "final_text": str, "errors": [...]}``。
     """
 
     def __init__(self, base: str) -> None:
@@ -207,7 +204,7 @@ class OldFlaskTarget:
             raise RuntimeError(f"upload failed: {status} {payload}")
 
     def attach_database(self, sid: str, sqlite_path: Path) -> str:
-        """Connect a SQLite file as a SQL source; returns its source id."""
+        """把一个 SQLite 文件连接为 SQL source；返回其 source id。"""
         status, payload = http_json("POST", f"{self.base}/api/session/{sid}/connect-db", {
             "connection_string": f"sqlite:///{sqlite_path}", "name": "baseline_sqlite",
         })
@@ -254,7 +251,7 @@ def _sse_lines(resp: http.client.HTTPResponse) -> Iterator[bytes]:
             yield line
 
 
-# ───────────────────────────── recording ────────────────────────────────────
+# ───────────────────────────── 录制 ────────────────────────────────────
 
 _TOOL_HEAD = re.compile(r"^\[TOOL_RESULT\] (\S+) (OK|ERROR)\b")
 
@@ -263,10 +260,10 @@ _INNER_NOT_OK = re.compile(r"^\{\"ok\": false\b")
 
 
 def classify_tool_output(content: str) -> str:
-    """ok | error | blocked | other, from the text the model received.
+    """根据模型收到的文本得出 ok | error | blocked | other。
 
-    ``error`` also covers an OK envelope whose payload is ``{"ok": false, ...}``
-    (fetch_table reports fetch failures that way).
+    ``error`` 也覆盖那种外层为 OK、但 payload 是 ``{"ok": false, ...}`` 的
+    envelope（fetch_table 就是这样报告抓取失败的）。
     """
     m = _TOOL_HEAD.match(content or "")
     if m:
@@ -280,11 +277,10 @@ def classify_tool_output(content: str) -> str:
 
 
 def extract_model_view(requests: list[dict]) -> tuple[list[dict], list[dict]]:
-    """(model_requests, tool_results) for one step, from the stub log.
+    """从 stub 日志中取出某个步骤的 (model_requests, tool_results)。
 
-    A tool result is taken from the first agent request in which its
-    tool_call_id appears, i.e. exactly what the model saw right after the call
-    (later requests may carry compacted/archived copies).
+    工具结果取自其 tool_call_id 首次出现的那次 agent 请求，也就是模型在调用后
+    立刻看到的内容（更晚的请求可能携带被压缩/归档的副本）。
     """
     model_requests: list[dict] = []
     tool_results: list[dict] = []
@@ -315,7 +311,7 @@ def extract_model_view(requests: list[dict]) -> tuple[list[dict], list[dict]]:
             except ValueError:
                 arguments = fn.get("arguments")
             content = msg.get("content")
-            if isinstance(content, list):  # content parts
+            if isinstance(content, list):  # content 分片
                 content = "".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
             tool_results.append({
                 "tool_call_id": call_id,
@@ -341,7 +337,7 @@ def substitute(value: Any, mapping: dict[str, str]) -> Any:
 
 def run_scenario(target: OldFlaskTarget, stub: Stub, scenario: dict, subst: dict[str, str],
                  work: Path) -> dict:
-    """Run one scenario; returns {sid, literals (volatile value -> placeholder), recording}."""
+    """运行一个场景；返回 {sid, literals（易变值 -> 占位符）, recording}。"""
     name = scenario["name"]
     sid = target.new_conversation()
     setup = scenario.get("setup", {})
@@ -350,7 +346,7 @@ def run_scenario(target: OldFlaskTarget, stub: Stub, scenario: dict, subst: dict
     if setup.get("upload"):
         target.attach_fixture(sid, UPLOAD_FIXTURE)
     if setup.get("sqlite"):
-        # a private copy per scenario: SQL-source writes must never touch the fixture
+        # 每个场景一份私有副本：对 SQL 源的写入绝不能碰到 fixture
         db_copy = work / f"{name}.sqlite"
         shutil.copyfile(SQLITE_FIXTURE, db_copy)
         source_id = target.attach_database(sid, db_copy)
@@ -386,7 +382,7 @@ def run_scenario(target: OldFlaskTarget, stub: Stub, scenario: dict, subst: dict
 
 
 def assess(scenario: dict, steps: list[dict]) -> tuple[str, dict]:
-    """Per covered tool: ok | error | blocked | not_executed; plus scenario status."""
+    """逐个被覆盖的工具给出 ok | error | blocked | not_executed；并给出场景状态。"""
     coverage: dict[str, list[str]] = {}
     fallback = any(r["fallback"] for s in steps for r in s["model_requests"])
     for tool in scenario.get("covers", []):
@@ -396,7 +392,7 @@ def assess(scenario: dict, steps: list[dict]) -> tuple[str, dict]:
                 if res["tool"] == tool:
                     outcomes.append(res["status"])
             if not step["model_requests"] and f"start:{tool}" in step["executed_tools"]:
-                # confirm fast path: no model call, output surfaces as the final text
+                # confirm 快速路径：不调用模型，输出直接作为最终文本
                 outcomes.append("error" if step["errors"] else "ok")
         coverage[tool] = outcomes or ["not_executed"]
     flat = [o for v in coverage.values() for o in v]
@@ -411,16 +407,15 @@ def assess(scenario: dict, steps: list[dict]) -> tuple[str, dict]:
     return status, coverage
 
 
-# ─────────────────────────── normalization ──────────────────────────────────
+# ─────────────────────────── 归一化 ──────────────────────────────────
 #
-# Applied to every string of a recording in three passes:
-#   1. run-time stamps: ISO / compact timestamps and epoch values whose date is
-#      within one day of the run (data timestamps such as ARIMA forecast dates
-#      in 2024 are left alone);
-#   2. context literals: data root, work dir, repo root, session ids, source
-#      ids, fixture server URL, and the run date in several spellings;
-#   3. generic patterns (ids, hashes, ports, durations, temp paths).
-# Values under keys in VOLATILE_KEYS are replaced wholesale.
+# 对 recording 中的每个字符串分三遍处理：
+#   1. 运行时戳：ISO / 紧凑时间戳，以及日期在运行当天一天内的 epoch 值
+#      （2024 年的数据时间戳，例如 ARIMA 预测日期，保持不动）；
+#   2. 上下文常量：数据根目录、工作目录、仓库根、会话 id、source
+#      id、fixture 服务 URL，以及多种拼写的运行日期；
+#   3. 通用模式（id、哈希、端口、时长、临时路径）。
+# VOLATILE_KEYS 中键下的值整体替换。
 
 VOLATILE_KEYS = {"elapsed_seconds", "created_at", "updated_at", "duration", "duration_ms",
                  "timestamp", "generated_at", "mtime", "size_bytes"}
@@ -461,7 +456,7 @@ class Normalizer:
             literals[f"{day.year}年{day.month}月{day.day}日"] = "<TODAY>"
             literals[f"{day.year}年{day.month:02d}月{day.day:02d}日"] = "<TODAY>"
         literals.update(extra_literals)
-        # longest first so a root path wins over its prefixes
+        # 长的在前，使根路径优先于它的前缀
         self.literals = sorted(literals.items(), key=lambda kv: -len(kv[0]))
 
     def _is_run_date(self, y: str, m: str, d: str) -> bool:
@@ -500,7 +495,7 @@ class Normalizer:
         return value
 
 
-# ─────────────────────────────── main ───────────────────────────────────────
+# ─────────────────────────────── 主流程 ───────────────────────────────────────
 
 def dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -522,8 +517,8 @@ def start_services(work: Path, python: str, verbose: bool) -> tuple[subprocess.P
               "MINIMAX_API_KEY"):
         env.pop(k, None)
     env.update({
-        "BAA_DATA_DIR": str(work / "data"),      # isolated data root: never the user's data
-        "BAA_SKIP_DEPENDENCY_CHECK": "1",       # no pip, no .deps_installed stamp in the repo
+        "BAA_DATA_DIR": str(work / "data"),      # 隔离的数据根：绝不用用户的数据
+        "BAA_SKIP_DEPENDENCY_CHECK": "1",       # 不 pip，也不在仓库里留 .deps_installed 标记
         "PORT": str(app_port),
         "BAA_HOST": "127.0.0.1",
         "PYTHONHASHSEED": "0",

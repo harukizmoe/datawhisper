@@ -1,4 +1,4 @@
-"""RPC method table of the compute worker."""
+"""compute worker 的 RPC 方法表。"""
 from __future__ import annotations
 
 import os
@@ -78,7 +78,7 @@ def _tool_method(name: str):
 
 
 def _with_sources(fn: Callable[[MethodContext, SourceRegistry, dict], Any]):
-    """A method of *fn*, which works on open sources, bound to the worker's registry."""
+    """把 *fn*（处理已打开 source 的方法）绑定到 worker 的 registry 上，返回同名方法。"""
     def method(ctx: MethodContext, params: dict) -> Any:
         return fn(ctx, _sources, params)
 

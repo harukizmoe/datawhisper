@@ -1,4 +1,4 @@
-"""Entry point: ``python -m compute`` (spawned by the Node server)."""
+"""入口：``python -m compute``（由 Node 服务端拉起）。"""
 import logging
 import os
 import sys

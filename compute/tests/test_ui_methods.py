@@ -1,61 +1,59 @@
-"""UI-side compute methods (P1.3) against a real ``python -m compute`` worker.
+"""针对真实 ``python -m compute`` worker 的 UI 侧 compute 方法（P1.3）。
 
-Route inventory: the old ``api/*.py`` routes that worked on pandas, DuckDB,
-``data/sources`` or ``Function/``, and what replaces each. "TS" is the agent
-service's internal API (P6) doing it without compute. The other blueprints
-(auth, admin, models, mcp, skills, commands, hooks, memory, teams, workflows,
-workflow_runs, jobs, lifecycle, local_services, forecast, gpu, feishu_bot,
-business_canvas, desktop, output, chat apart from the agent turn and the PNG
-export) do no DataFrame work: TS, or dropped where they serve login, admin,
-quotas, hosted models or Web pages.
+路由清单：列出旧 ``api/*.py`` 中会操作 pandas、DuckDB、``data/sources`` 或
+``Function/`` 的路由，以及各自被什么取代。"TS" 指由 agent 服务的内部 API（P6）
+不经 compute 直接完成。其余 blueprint（auth、admin、models、mcp、skills、
+commands、hooks、memory、teams、workflows、workflow_runs、jobs、lifecycle、
+local_services、forecast、gpu、feishu_bot、business_canvas、desktop、output、
+以及 chat 中除 agent 回合与 PNG 导出之外的部分）不做 DataFrame 工作：由 TS 处理，
+或在只服务登录、管理、配额、托管模型或 Web 页面之处直接删除。
 
-| Old route | Replacement |
+| 旧路由 | 替代者 |
 |---|---|
-| POST /api/session/<sid>/upload | ``upload.prepare`` -> ``source.open`` (+ ``source.schema``); storing the file, warehouse autosave: TS |
-| POST /api/session/<sid>/upload-jobs/<jid>/finalize | inside ``upload.prepare``: the large-workbook parse runs inline, its descriptor carries ``db_path`` |
-| POST /api/session/<sid>/load-sample | dropped: cloud demo data |
-| POST /api/session/<sid>/connect-db | ``source.open {kind: "sql"}`` (password encoding, readable connection errors); saved form values: TS |
+| POST /api/session/<sid>/upload | ``upload.prepare`` -> ``source.open``（+ ``source.schema``）；保存文件、warehouse 自动保存：TS |
+| POST /api/session/<sid>/upload-jobs/<jid>/finalize | 并入 ``upload.prepare``：大工作簿的解析就地运行，其 descriptor 带 ``db_path`` |
+| POST /api/session/<sid>/load-sample | 删除：云端演示数据 |
+| POST /api/session/<sid>/connect-db | ``source.open {kind: "sql"}``（password 编码、可读的连接错误）；已保存的表单值：TS |
 | POST /api/session/<sid>/connect-gsheets | ``source.open {kind: "gsheets"}`` |
 | POST /api/session/<sid>/connect-api | ``source.open {kind: "http"}`` |
-| POST /api/session/<sid>/connect-feishu | ``source.open {kind: "feishu"}``; listing a Bitable's tables: TS (Feishu OpenAPI) |
-| GET /api/datasource-configs, DELETE /api/datasource-configs/<type> | TS: saved form values |
-| GET /api/session/<sid>/sources, POST /api/session/<sid>/sources/<id>/toggle | TS: the session's sources; the active ones travel as ``context.sources`` |
+| POST /api/session/<sid>/connect-feishu | ``source.open {kind: "feishu"}``；列出 Bitable 的表：TS（飞书 OpenAPI） |
+| GET /api/datasource-configs, DELETE /api/datasource-configs/<type> | TS：已保存的表单值 |
+| GET /api/session/<sid>/sources, POST /api/session/<sid>/sources/<id>/toggle | TS：会话的 source 列表；活动 source 通过 ``context.sources`` 传递 |
 | DELETE /api/session/<sid>/sources/<id>, DELETE /api/session/<sid>/datasource | ``source.close`` |
-| GET /api/data-warehouses, POST /api/session/<sid>/data-warehouse/save, DELETE /api/data-warehouses/<f> | TS: a warehouse is a saved list of source descriptors |
-| POST /api/session/<sid>/data-warehouse/load | ``source.open`` per saved descriptor |
-| POST /api/session/<sid>/load (its data sources) | ``source.open`` / ``workspace.sync``; the saved-session routes themselves: TS, old session files: P8 |
-| GET /api/session/<sid>/preview | ``source.preview`` per active source |
+| GET /api/data-warehouses, POST /api/session/<sid>/data-warehouse/save, DELETE /api/data-warehouses/<f> | TS：warehouse 就是一份保存下来的 source descriptor 列表 |
+| POST /api/session/<sid>/data-warehouse/load | 对每个保存的 descriptor 调 ``source.open`` |
+| POST /api/session/<sid>/load（其数据源部分） | ``source.open`` / ``workspace.sync``；已保存会话路由本身：TS，旧会话文件：P8 |
+| GET /api/session/<sid>/preview | 对每个活动 source 调 ``source.preview`` |
 | GET /api/session/<sid>/preview-table | ``source.previewTable`` |
 | POST /api/session/<sid>/sources/<id>/analysis-tables | ``source.setAnalysisTables`` |
-| POST /api/session/<sid>/workspace/mount | ``workspace.sync`` -> ``source.open``; Workspace identity, permission, binding: TS |
-| POST /api/session/<sid>/workspace/jobs/<jid>/finalize | inside ``workspace.sync``: large imports run inline |
-| POST /api/session/<sid>/workspace/unmount | ``source.close``; the rest TS |
-| POST /api/session/<sid>/workspace/checkpoints/<id>/restore | file history: TS; re-import: ``workspace.sync`` |
-| the other /api/session/<sid>/workspace* routes | TS: Workspace metadata and files |
+| POST /api/session/<sid>/workspace/mount | ``workspace.sync`` -> ``source.open``；Workspace 身份、权限、绑定：TS |
+| POST /api/session/<sid>/workspace/jobs/<jid>/finalize | 并入 ``workspace.sync``：大导入就地运行 |
+| POST /api/session/<sid>/workspace/unmount | ``source.close``；其余 TS |
+| POST /api/session/<sid>/workspace/checkpoints/<id>/restore | 文件历史：TS；重新导入：``workspace.sync`` |
+| 其余 /api/session/<sid>/workspace* 路由 | TS：Workspace 元数据与文件 |
 | GET/POST /api/knowledge/categories, PUT/DELETE /api/knowledge/categories/<cid>, POST .../<cid>/toggle | ``knowledge.list/add/update/delete/toggle {kind: "category"}`` |
-| /api/knowledge/metrics, /rules, /notes: list, add, update, delete, toggle | ``knowledge.list/add/update/delete/toggle {kind: "metric" / "rule" / "note"}`` |
-| POST /api/knowledge/parse | ``knowledge.parse`` -> TS sends the prompts to the user's model -> ``knowledge.extract`` |
+| /api/knowledge/metrics、/rules、/notes 的 list、add、update、delete、toggle | ``knowledge.list/add/update/delete/toggle {kind: "metric" / "rule" / "note"}`` |
+| POST /api/knowledge/parse | ``knowledge.parse`` -> TS 把 prompt 发给用户的模型 -> ``knowledge.extract`` |
 | POST /api/knowledge/confirm | ``knowledge.confirm`` |
-| GET /api/knowledge/files, DELETE /api/knowledge/files/<f> | ``knowledge.files``, ``knowledge.deleteFile`` |
+| GET /api/knowledge/files, DELETE /api/knowledge/files/<f> | ``knowledge.files``、``knowledge.deleteFile`` |
 | GET /api/knowledge/search | ``knowledge.search`` |
-| POST /api/knowledge/restore, POST /api/knowledge/restore-file | dropped: browser-owned recovery of the managed Web deployment |
-| GET/POST /api/session/<sid>/temp-prompt, POST .../temp-prompt/toggle | TS: per-session prompt text and its model pass |
-| POST /api/system/embed-rebuild | ``knowledge.rebuildEmbeddings``; Skill vectors: TS, with skill discovery (P4) |
+| POST /api/knowledge/restore, POST /api/knowledge/restore-file | 删除：托管 Web 部署下由浏览器负责的恢复 |
+| GET/POST /api/session/<sid>/temp-prompt, POST .../temp-prompt/toggle | TS：按会话的提示词文本及其模型透传 |
+| POST /api/system/embed-rebuild | ``knowledge.rebuildEmbeddings``；Skill 向量：TS，连同 skill discovery（P4） |
 | GET /api/system/bge-model/status, GET /api/system/embed-mode | ``embed.status`` |
-| POST /api/system/bge-model/download | TS downloads ``embed.status``'s ``model_files`` into ``model_dir``, then ``embed.reload`` |
+| POST /api/system/bge-model/download | TS 把 ``embed.status`` 的 ``model_files`` 下载到 ``model_dir``，然后 ``embed.reload`` |
 | POST /api/system/embed-mode | ``embed.setMode`` |
 | GET/PUT /api/system/embed-cloud-config | ``embed.cloudConfig`` / ``embed.setCloudConfig`` |
-| POST /api/dashboard/generate | ``tool.generate_dashboard`` (P1.2): the route only fronted the tool |
-| POST /api/dashboard/<id>/refresh, POST /api/dashboard/<id>/widget/<wid>/refresh | ``dashboard.refresh`` (``widget_id`` for one widget) |
+| POST /api/dashboard/generate | ``tool.generate_dashboard``（P1.2）：该路由原本只是工具的壳 |
+| POST /api/dashboard/<id>/refresh, POST /api/dashboard/<id>/widget/<wid>/refresh | ``dashboard.refresh``（只刷一个 widget 时传 ``widget_id``） |
 | GET /api/dashboard/<id>/export-html | ``dashboard.exportHtml`` |
-| GET/PUT/DELETE /api/dashboard/<id>, GET /api/dashboards | TS: JSON files in ``<data>/outputs/Dashboard`` |
-| GET /dashboard/<id> | dropped: Web page |
-| POST /api/session/<sid>/chat | TS agent turn: the turn's schema via ``source.schema``, tools via ``tool.*`` (P1.2) |
+| GET/PUT/DELETE /api/dashboard/<id>, GET /api/dashboards | TS：``<data>/outputs/Dashboard`` 下的 JSON 文件 |
+| GET /dashboard/<id> | 删除：Web 页面 |
+| POST /api/session/<sid>/chat | TS 的 agent 回合：回合 schema 走 ``source.schema``，工具走 ``tool.*``（P1.2） |
 | GET /api/chart/<id>/png | ``chart.png`` |
-| GET /api/chart/<id>, GET /api/export/<f>, GET /api/session/<sid>/tool-results/<id> | TS: file serving |
+| GET /api/chart/<id>, GET /api/export/<f>, GET /api/session/<sid>/tool-results/<id> | TS：文件服务 |
 
-Column statistics had no route of their own; ``source.tableDetail`` and
-``tool.profile_data`` cover them.
+列统计原本没有自己的路由；由 ``source.tableDetail`` 与 ``tool.profile_data`` 覆盖。
 """
 import base64
 import csv
@@ -77,7 +75,7 @@ BAR_SQL = "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY 
 
 
 class UiTestBase(unittest.TestCase):
-    """One worker, with a data directory of its own, per test class."""
+    """每个测试类一个 worker，并带一份自己的数据目录。"""
 
     worker_env_extra: dict = {}
 
@@ -87,7 +85,7 @@ class UiTestBase(unittest.TestCase):
         cls.data_root = cls.tmp / "data"
         cls.data_root.mkdir()
         env = {k: v for k, v in worker_env(cls.data_root).items() if not k.startswith("BAA_CLOUD_EMBED_")}
-        # Hash embeddings: no model files, no network.
+        # Hash embedding：没有模型文件，也不联网。
         env.update({"BAA_EMBED_MODE": "hash", **cls.worker_env_extra})
         cls.client = Client(env, cls.tmp / "worker.log")
         cls._ids = itertools.count(1)
@@ -132,7 +130,7 @@ class UiTestBase(unittest.TestCase):
         return int(result["text"].split()[-1])
 
     def cancel_after_first_progress(self, method: str, params: dict) -> dict:
-        """Send a request, cancel it once it reports progress; returns the response."""
+        """发送请求，一旦它报告进度就取消；返回应答。"""
         rid = self.client.send(method, params)
         deadline = time.monotonic() + 60
         while not self.client.notes(rid, "progress"):
@@ -163,7 +161,7 @@ def write_csv(path: Path, rows: int) -> None:
 
 
 class UploadTest(UiTestBase):
-    # baseline.xlsx (18 KB) stays on the direct path, the generated workbook does not.
+    # baseline.xlsx（18 KB）仍走直接路径，而生成的工作簿不会。
     worker_env_extra = {"BAA_EXCEL_JOB_THRESHOLD": "100000"}
     SHEETS, ROWS = 4, 15_000
 
@@ -243,7 +241,7 @@ class UploadTest(UiTestBase):
         self.assert_error("upload.prepare", {"file_path": str(text)}, "unsupported_format", INVALID_PARAMS)
         self.assert_error("upload.prepare", {"file_path": str(self.tmp / "missing.csv")}, "file_not_found")
         self.assert_error("upload.prepare", {}, code=INVALID_PARAMS)
-        # Opening reports why a source failed.
+        # 打开失败时会说明失败原因。
         error = self.assert_error("source.open", {"source_id": "bad", "descriptor": {
             "kind": "csv", "file_path": str(self.tmp / "gone.csv")}}, "open_failed")
         self.assertIn("FileNotFoundError", error["data"]["error"])
@@ -336,7 +334,7 @@ class DashboardTest(UiTestBase):
 
     @classmethod
     def store(cls, charts: list[dict]) -> None:
-        """What the agent service does with the charts of a result."""
+        """agent 服务对结果中的图表所做的事。"""
         for chart in charts:
             (cls.chart_dir / f"{chart['id']}.html").write_text(chart["html"], encoding="utf-8")
 
@@ -403,7 +401,7 @@ class DashboardTest(UiTestBase):
 
 
 class WorkspaceSyncTest(UiTestBase):
-    # CSVs above 5 KB import through the inline job, smaller ones directly.
+    # 超过 5 KB 的 CSV 通过内联 job 导入，更小的直接导入。
     worker_env_extra = {"BAA_CSV_JOB_THRESHOLD": "5000"}
 
     def workdir(self) -> Path:
@@ -413,7 +411,7 @@ class WorkspaceSyncTest(UiTestBase):
 
     def test_sync_imports_new_and_changed_files(self):
         workdir = self.workdir()
-        shutil.copyfile(FIXTURES / "sales.csv", workdir / "orders.csv")  # 13 KB: job path
+        shutil.copyfile(FIXTURES / "sales.csv", workdir / "orders.csv")  # 13 KB：走 job 路径
         shutil.copyfile(FIXTURES / "stores.csv", workdir / "shops.csv")
         shutil.copyfile(FIXTURES / "baseline.xlsx", workdir / "baseline.xlsx")
         params = {"workspace_id": "ws-1", "workdir": str(workdir)}
@@ -601,7 +599,7 @@ class EmbedTest(UiTestBase):
         self.assertEqual((saved["cloud_url"], saved["cloud_model"]), ("https://embed.example.test", "bge-m3"))
         self.assert_error("embed.setCloudConfig", {"url": "ftp://embed.example.test", "model": "bge-m3"},
                           code=INVALID_PARAMS)
-        # Testing needs a token; nothing is sent without one.
+        # 测试需要 token；没有 token 时不会发送任何内容。
         self.assert_error("embed.setCloudConfig", {"url": "https://embed.example.test", "model": "bge-m3", "test": True},
                           code=INVALID_PARAMS)
 

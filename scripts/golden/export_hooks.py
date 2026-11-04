@@ -1,11 +1,11 @@
-"""Golden cases for the P3.3 user-hook port, produced by the real Python implementation.
+"""P3.3 用户 hook 移植版的 golden 用例，由真实 Python 实现产出。
 
     .venv/bin/python scripts/golden/export_hooks.py
 
-Writes server/test/golden/hooks.json: condition evaluation over several contexts, load_settings
-validation outcomes (serialized settings or the HookConfigError message), HookContext expansion,
-Hook.should_run, the once registry, event normalization and shlex tokenization
-(the quote/escape rules conditions and the command executor rely on).
+写入 server/test/golden/hooks.json：多种上下文下的条件求值、load_settings
+校验结果（序列化后的 settings 或 HookConfigError 消息）、HookContext 展开、
+Hook.should_run、once 注册表、事件归一化以及 shlex 分词
+（条件与命令执行器所依赖的引号/转义规则）。
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def context_json(ctx: models.HookContext) -> dict:
     return {camel(name): getattr(ctx, name) for name in FIELDS}
 
 
-# --------------------------------------------------------------------------- contexts
+# --------------------------------------------------------------------------- 上下文
 
 CONTEXTS = {
     "rich": models.HookContext(
@@ -131,11 +131,11 @@ CONTEXTS = {
 }
 
 CONDITION_EXPRESSIONS = [
-    # empty / whitespace
+    # 空 / 空白
     "",
     "   ",
     "\t\n",
-    # single token truthiness
+    # 单 token 的真值判断
     "tool_name",
     "message",
     "tool_ok",
@@ -161,7 +161,7 @@ CONDITION_EXPRESSIONS = [
     "extra.nested.nope",
     "elapsed_seconds",
     "error",
-    # == and !=
+    # == 与 !=
     "tool_name == query_data",
     "tool_name == Query_Data",
     "tool_name == \"query_data\"",
@@ -201,7 +201,7 @@ CONDITION_EXPRESSIONS = [
     "args.cancel == true",
     "extra.manual == true",
     "extra.false == false",
-    # contains / startswith / endswith (case-insensitive)
+    # contains / startswith / endswith（不区分大小写）
     "message contains 销售",
     "message contains 销售 数据",
     "message contains \"销售 数据\"",
@@ -230,7 +230,7 @@ CONDITION_EXPRESSIONS = [
     "tool_name exists ignored extra",
     "message exists",
     "extra.none exists",
-    # backslashes and quotes
+    # 反斜杠与引号
     r'extra.path == "C:\temp\x"',
     r"extra.path == 'C:\temp\x'",
     r"extra.path == C:\temp\x",
@@ -238,15 +238,15 @@ CONDITION_EXPRESSIONS = [
     r'message == "unclosed',
     "tool_name == trailing\\",
     "message == 'single unclosed",
-    # spaces inside quotes
+    # 引号内的空格
     'message startswith "  padded"',
     "message == padded",
     'tool_args.query == "a b\tc"',
-    # malformed / unknown operators
+    # 格式错误 / 未知的运算符
     "tool_name ~ query_data",
     "tool_name in query,data",
     "tool_name exists",
-    # boolean combinators
+    # 布尔组合
     "tool_name == query_data && message contains 销售",
     "tool_name == nope && message contains 销售",
     "tool_name == nope || message contains 销售",
@@ -276,7 +276,7 @@ def condition_cases() -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- loader
+# --------------------------------------------------------------------------- loader（加载）
 
 def base_hook(**overrides):
     hook = {
@@ -403,7 +403,7 @@ def loader_cases() -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- expansion
+# --------------------------------------------------------------------------- 展开
 
 EXPANSION_CONTEXT = models.HookContext(
     event_name="post_tool_use",
@@ -498,7 +498,7 @@ def expansion_cases() -> list[dict]:
     ]
 
 
-# --------------------------------------------------------------------------- should_run
+# --------------------------------------------------------------------------- should_run（是否执行）
 
 def make_hook(**overrides) -> models.Hook:
     data = {
@@ -547,7 +547,7 @@ def should_run_cases() -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- once registry
+# --------------------------------------------------------------------------- once 注册表
 
 CONTEXT_KEYS = {name: camel(name) for name in FIELDS}
 CONTEXT_FROM_JSON = {camel(name): name for name in FIELDS}
@@ -675,7 +675,7 @@ def once_sequences() -> list[dict]:
     return sequences
 
 
-# --------------------------------------------------------------------------- events / shlex
+# --------------------------------------------------------------------------- 事件 / shlex
 
 EVENT_INPUTS = [
     "",
@@ -793,7 +793,7 @@ def shlex_cases() -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- main
+# --------------------------------------------------------------------------- 主流程
 
 def main() -> None:
     os.environ["HOOK_ENV_PROBE"] = "from-env"

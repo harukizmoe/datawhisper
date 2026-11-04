@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Dashboard HTML export: build a self-contained HTML file from a dashboard dict.
+"""Dashboard HTML 导出：由 dashboard dict 生成一个自包含的 HTML 文件。
 
-Usage:
+用法：
     from compute.dashboard_html_export import build_export_html, export_filename
     html = build_export_html(dashboard, chart_store)
 """
@@ -15,7 +15,7 @@ import logging
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Color scheme brand colors (matches COLOR_SCHEMES in charts/color_schemes.py)
+# Color scheme 品牌色（与 charts/color_schemes.py 中的 COLOR_SCHEMES 一致）
 # ---------------------------------------------------------------------------
 _SCHEME_COLORS: dict[str, dict] = {
     "mckinsey": {"primary": "#002060", "accent": "#0070C0", "bg": "#F0F4FA"},
@@ -140,7 +140,7 @@ body {
 
 
 # ---------------------------------------------------------------------------
-# KPI card HTML
+# KPI 卡片 HTML
 # ---------------------------------------------------------------------------
 def _kpi_card_html(widget: dict) -> str:
     title = _html_lib.escape(widget.get("title", ""))
@@ -173,7 +173,7 @@ def _kpi_card_html(widget: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Chart widget HTML (uses srcdoc for self-containment)
+# 图表 widget HTML（用 srcdoc 保证自包含）
 # ---------------------------------------------------------------------------
 def _chart_widget_html(widget: dict, chart_store: dict, min_height_px: int = 320) -> str:
     title = _html_lib.escape(widget.get("title", ""))
@@ -181,7 +181,7 @@ def _chart_widget_html(widget: dict, chart_store: dict, min_height_px: int = 320
     error = widget.get("error")
     grid = widget.get("grid", {})
 
-    # grid-column / grid-row from grid spec
+    # 由 grid 规格得到 grid-column / grid-row
     gx = int(grid.get("x", 0)) + 1
     gw = int(grid.get("w", 6))
     gy = int(grid.get("y", 0)) + 1
@@ -199,7 +199,7 @@ def _chart_widget_html(widget: dict, chart_store: dict, min_height_px: int = 320
         body = f'<div class="widget-error">{msg}</div>'
     else:
         raw_html = chart_store[chart_id]
-        # escape for srcdoc attribute: & -> &amp; " -> &quot;
+        # 为 srcdoc 属性转义：& -> &amp; " -> &quot;
         srcdoc = raw_html.replace("&", "&amp;").replace('"', "&quot;")
         body = (
             f'<div class="widget-body" style="height:{height_px - 40}px">'
@@ -216,29 +216,29 @@ def _chart_widget_html(widget: dict, chart_store: dict, min_height_px: int = 320
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# 公开 API
 # ---------------------------------------------------------------------------
 def export_filename(dashboard: dict) -> str:
-    """Download file name of the exported dashboard."""
+    """导出 dashboard 的下载文件名。"""
     return re.sub(r"[^\w\-]", "_", dashboard.get("name", "dashboard")) + ".html"
 
 
 def build_export_html(dashboard: dict, chart_store: dict) -> str:
-    """Return a self-contained HTML string for the given dashboard.
+    """为给定 dashboard 返回自包含的 HTML 字符串。
 
     Args:
-        dashboard: dict loaded from the dashboard JSON file.
-        chart_store: dict mapping chart_id -> full HTML string (in-memory store).
+        dashboard: 从 dashboard JSON 文件加载的 dict。
+        chart_store: chart_id -> 完整 HTML 字符串 的 dict（内存中的 store）。
 
     Returns:
-        A single HTML string that can be saved as a .html file and opened offline.
+        单个 HTML 字符串，可保存为 .html 文件并离线打开。
     """
     name = dashboard.get("name", "Dashboard")
     color_scheme = dashboard.get("color_scheme", _DEFAULT_SCHEME)
     created_at = dashboard.get("created_at", "")
     export_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # format created_at nicely
+    # 把 created_at 格式化得好看些
     try:
         dt = datetime.datetime.fromisoformat(created_at)
         created_str = dt.strftime("%Y-%m-%d %H:%M")
@@ -251,13 +251,13 @@ def build_export_html(dashboard: dict, chart_store: dict) -> str:
     kpi_widgets   = [w for w in widgets if w.get("chart_type") == "KPI_Card"]
     chart_widgets = [w for w in widgets if w.get("chart_type") != "KPI_Card"]
 
-    # KPI strip
+    # KPI 条
     kpi_html = ""
     if kpi_widgets:
         cards = "\n".join(_kpi_card_html(w) for w in kpi_widgets)
         kpi_html = f'<section class="kpi-strip">\n{cards}\n</section>'
 
-    # chart grid
+    # 图表网格
     chart_html = ""
     if chart_widgets:
         items = "\n".join(

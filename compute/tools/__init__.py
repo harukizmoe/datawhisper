@@ -1,9 +1,8 @@
-"""Business tool implementations shared by the old agent and the compute worker.
+"""旧 agent 与 compute worker 共用的业务工具实现。
 
-``data`` and ``export`` hold the tool mixins; ``dispatch`` maps a tool call
-(name + model-facing args) onto them. The chart and PPT engines are imported by
-bare module name (``chart_generate``, ``PPT``), so their directories must be on
-``sys.path`` before any tool runs.
+``data`` 与 ``export`` 存放工具的 mixin；``dispatch`` 把一次工具调用（名称 +
+面向模型的参数）映射到这些 mixin。图表与 PPT 引擎以裸模块名（``chart_generate``、
+``PPT``）导入，因此它们所在目录必须在任何工具运行之前进入 ``sys.path``。
 """
 import sys
 from pathlib import Path

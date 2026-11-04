@@ -1,10 +1,9 @@
-"""``tool.*`` methods against a real ``python -m compute`` worker.
+"""针对真实 ``python -m compute`` worker 的 ``tool.*`` 方法测试。
 
-The parity test replays every category-B tool call recorded by the P0.2
-baseline (``baseline/recordings``) on the same fixtures and compares the text
-with what the old agent's handler produced. The rest covers the worker-only
-behaviour: inline job progress, cancellation, per-source serialization,
-multi-source routing and the ingest methods.
+一致性测试会在同一批 fixture 上重放 P0.2 基线（``baseline/recordings``）记录的
+每一次 category-B 工具调用，并把文本与旧 agent handler 的产出比较。其余测试
+覆盖 worker 独有的行为：内联 job 进度、取消、按 source 串行化、多源路由以及
+ingest 方法。
 """
 import base64
 import csv
@@ -35,8 +34,8 @@ _spec = importlib.util.spec_from_file_location("run_baseline", BASELINE / "run_b
 run_baseline = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run_baseline)
 
-# Confirm fast paths of the old agent (agent/agent.py "Confirm fast-paths"):
-# the output tool runs without a model turn and its text is the step's final_text.
+# 对应旧 agent（agent/agent.py 的 "Confirm fast-paths"）的快速路径：
+# 输出工具不经过模型回合就直接运行，其文本即为该步骤的 final_text。
 FAST_PATHS = {
     "excel_confirm": ("export_excel", lambda o: {
         "tables": o.get("excel_tables") or ["*"], "filename": o.get("excel_filename", "")}),
@@ -50,13 +49,13 @@ FAST_PATHS = {
 
 
 def handler_output(model_text: str) -> dict:
-    """Undo ``agent.tools.results.make_tool_result`` for a recorded tool message.
+    """对记录下来的工具消息，反向还原 ``agent.tools.results.make_tool_result``。
 
-    The model received ``[TOOL_RESULT] <tool> OK|ERROR: <summary>`` plus a JSON
-    envelope ``{"type", "ok", "error", "data", "sources", "artifacts"}``. ``data``
-    is the handler output unless the result spilled to a ``tr_*`` artifact (then
-    it is only a preview and cannot be compared). Returns ``{"text", "refs"}``
-    where ``refs`` is the envelope's ``sources``.
+    模型收到的是 ``[TOOL_RESULT] <tool> OK|ERROR: <summary>`` 加上一个 JSON
+    envelope ``{"type", "ok", "error", "data", "sources", "artifacts"}``。除非
+    结果被溢出到 ``tr_*`` artifact（那时 ``data`` 只是预览，无法比较），否则
+    ``data`` 就是 handler 的输出。返回 ``{"text", "refs"}``，其中 ``refs`` 是
+    envelope 的 ``sources``。
     """
     header, _, payload = model_text.partition("\n")
     if not header.startswith("[TOOL_RESULT] "):
@@ -102,7 +101,7 @@ kb.close()
 
 
 class Client:
-    """JSON-RPC client over a worker; keeps every notification in arrival order."""
+    """基于 worker 的 JSON-RPC 客户端；按到达顺序保留每一条通知。"""
 
     def __init__(self, env: dict, log_path: Path):
         self._log = open(log_path, "w")
@@ -163,7 +162,7 @@ class ToolsTestBase(unittest.TestCase):
         return source_id, opened["tables"]
 
     def open_xlsx(self) -> str:
-        # Uploads keep their file name as the source name ("baseline.xlsx").
+        # 上传会以文件名作为 source 名（"baseline.xlsx"）。
         folder = Path(tempfile.mkdtemp(dir=self.tmp))
         path = folder / "baseline.xlsx"
         shutil.copyfile(FIXTURES / "baseline.xlsx", path)
@@ -172,7 +171,7 @@ class ToolsTestBase(unittest.TestCase):
     def open_sqlite(self) -> str:
         path = Path(tempfile.mkdtemp(dir=self.tmp)) / "baseline.sqlite"
         shutil.copyfile(FIXTURES / "baseline.sqlite", path)
-        # connect-db name used by the baseline driver
+        # baseline 驱动使用的 connect-db 名称
         return self.open_source({
             "kind": "sql", "connection_string": f"sqlite:///{path}", "name": "baseline_sqlite",
         })[0]
@@ -192,7 +191,7 @@ class ToolsTestBase(unittest.TestCase):
 
 
 class BaselineParityTest(ToolsTestBase):
-    """Every recorded category-B call, replayed through ``tool.*``."""
+    """重放每一次记录下来的 category-B 调用，全部走 ``tool.*``。"""
 
     @classmethod
     def setUpClass(cls):
@@ -222,7 +221,7 @@ class BaselineParityTest(ToolsTestBase):
 
     @staticmethod
     def _calls(recording: dict):
-        """(tool, args, expected {text, refs?}) in recorded order."""
+        """按记录顺序产出 (tool, args, 期望的 {text, refs?})。"""
         for step in recording["steps"]:
             for item in step["tool_results"]:
                 if item["tool"] in BUSINESS_TOOLS:
@@ -235,7 +234,7 @@ class BaselineParityTest(ToolsTestBase):
     def _replay(self, recording: dict, calls: list, compared: dict) -> None:
         first = recording["steps"][0]
         tables = (first.get("options") or {}).get("data_context", {}).get("tables")
-        if tables:  # SQL scenario: selection made in the data preview
+        if tables:  # SQL 场景：在数据预览中已做选择
             source_id = self.open_sqlite()
             context = self.context(source_id, tables={source_id: [t["table"] for t in tables]})
         else:
@@ -276,7 +275,7 @@ class WorkerBehaviourTest(ToolsTestBase):
         cls.big_id, cls.big_table = None, None
 
     def _big(self) -> tuple[str, str]:
-        # >= the profile/clean/chart job threshold (50k rows)
+        # >= profile/clean/chart 的 job 阈值（5 万行）
         if self.big_id is None:
             type(self).big_id, type(self).big_table = self.open_csv("big", _daily_rows(50_000))
         return self.big_id, self.big_table
@@ -317,7 +316,7 @@ class WorkerBehaviourTest(ToolsTestBase):
         self.client.worker.send({"jsonrpc": "2.0", "method": "$/cancel", "params": {"id": rid}})
         resp = self.client.wait(rid)
         self.assertEqual(resp.get("error", {}).get("code"), CANCELLED, resp)
-        # the source is usable again afterwards
+        # 之后该 source 仍然可正常使用
         after = self.client.result("tool.query_data", {
             "context": self.context(source_id), "args": {"sql": f'SELECT COUNT(*) AS n FROM "{table}"'}})
         self.assertIn("1500", after["text"])
@@ -334,7 +333,7 @@ class WorkerBehaviourTest(ToolsTestBase):
             if m.get("method") == "progress" and m["params"]["id"] in (first, second)
         ]
         self.assertEqual(len(order), 6)
-        # all progress of one call precedes all progress of the other
+        # 一次调用的所有 progress 都在另一次调用的 progress 之前
         self.assertIn(order, ([first] * 3 + [second] * 3, [second] * 3 + [first] * 3))
 
     def test_multi_source_prefixes(self):

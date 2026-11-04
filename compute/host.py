@@ -1,23 +1,22 @@
-"""Run the business tool mixins inside the compute worker.
+"""在 compute worker 内运行业务工具 mixin。
 
-``run_tool`` builds a ``ToolHost`` (the attributes ``DataToolsMixin`` and
-``ExportToolsMixin`` read) from the request ``context``, leases the active
-sources for the whole call, drives ``compute.tools.dispatch.run_business_tool``
-and packs the outcome into the ``tool.*`` RPC result.
+``run_tool`` 会依据请求的 ``context`` 构造一个 ``ToolHost``（即
+``DataToolsMixin`` 与 ``ExportToolsMixin`` 读取的那些属性），为整次调用租用
+活动 source，驱动 ``compute.tools.dispatch.run_business_tool``，并把结果打包
+成 ``tool.*`` 的 RPC 返回值。
 
-Context (all optional except where noted)::
+Context（除注明外均可选）：::
 
-    {"sources": [source_id, ...],   # active sources, in order (src1__, src2__, ...)
-     "primary": source_id,          # default sources[0]
-     "tables": {source_id: [table, ...]},  # SQL analysis-table selection
+    {"sources": [source_id, ...],   # 活动 source，按顺序（src1__、src2__、...）
+     "primary": source_id,          # 默认 sources[0]
+     "tables": {source_id: [table, ...]},  # SQL 分析表选择
      "user_id": str, "workspace_id": str, "session_id": str,
      "lang": "zh" | "en", "color_scheme": str,
-     "chart_ids": [chart_id, ...],  # session charts, for export_report
-     "chart_dir": str}              # where <chart_id>.html of those charts live
+     "chart_ids": [chart_id, ...],  # 会话图表，供 export_report 使用
+     "chart_dir": str}              # 这些图表的 <chart_id>.html 所在目录
 
-Long work runs inline: the mixins' job paths (taken iff the old thresholds trip)
-report progress as ``progress`` notifications and stop with CANCELLED when the
-caller cancels.
+耗时工作就地同步执行：mixin 的 job 路径（仅当旧的阈值被触发时才走）以
+``progress`` 通知报告进度，并在调用方取消时以 CANCELLED 终止。
 """
 from __future__ import annotations
 
@@ -46,16 +45,15 @@ _CHART_ID = re.compile(r"^[\w-]{1,80}$")
 
 
 class _InlineJobs:
-    """Stands in for the old per-session JobRunner: its presence makes the
-    mixins take their job path whenever a threshold trips."""
+    """代替旧的按会话 JobRunner：它的存在会让 mixin 在阈值触发时走 job 路径。"""
 
 
 _INLINE_JOBS = _InlineJobs()
 
 
 class InlineJobContext:
-    """The ``JobContext`` surface job workers use, bound to the request. An
-    inline job holds no Workspace runtime of its own (``runtime``)."""
+    """job worker 使用的 ``JobContext`` 接口面，绑定到本次请求。内联 job 没有
+    自己的 Workspace runtime（``runtime``）。"""
 
     runtime = None
 
@@ -73,9 +71,8 @@ class InlineJobContext:
 
 
 class CallChartStore:
-    """Chart store seen by one call: session charts are read from
-    ``chart_dir/<id>.html``; charts written by the call are captured and
-    returned to the caller, which persists them."""
+    """单次调用看到的图表存储：会话图表从 ``chart_dir/<id>.html`` 读取；本次
+    调用写入的图表被捕获并返回给调用方，由调用方负责持久化。"""
 
     def __init__(self, chart_dir: str):
         self._dir = Path(chart_dir) if chart_dir else None
@@ -124,8 +121,7 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         self.files: list[str] = []
         self.dashboard_id = ""
 
-    # The combined schema and merged source come from the leased view, built
-    # only when a tool asks for them.
+    # 合并后的 schema 与合并 source 来自租用的视图，只在工具需要时才构建。
     @property
     def _combined_schema(self) -> str:
         return self._lease.view().combined_schema() if self._all_sources else ""
@@ -134,7 +130,7 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
     def _merged_source(self):
         return self._lease.view().merged_source() if len(self._all_sources) >= 2 else None
 
-    # Every mixin path that writes or drops a table resets the schema cache.
+    # 任何写入或删除表的 mixin 路径都会重置 schema 缓存。
     @property
     def _schema_cache(self) -> str | None:
         return self._schema_cache_value
@@ -157,7 +153,7 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         return sql_path_authorization(self._workspace_id)
 
     def _run_as_job(self, fn, job_type: str, label: str = ""):
-        """Run a mixin job worker inline; same status dict as the old bridge."""
+        """就地执行 mixin 的 job worker；状态字典与旧桥接层一致。"""
         yield from ()
         try:
             result = fn(InlineJobContext(self._rpc))
@@ -193,7 +189,7 @@ def parse_context(params: dict) -> tuple[dict, dict]:
 
 
 def active_sources(context: dict) -> tuple[list[str], str | None]:
-    """(ordered active source ids, primary id)."""
+    """返回（按顺序的活动 source id 列表, primary id）。"""
     sources = context.get("sources") or []
     if not isinstance(sources, list) or not all(isinstance(s, str) and s for s in sources):
         raise RpcError("'context.sources' must be a list of source ids", INVALID_PARAMS)
@@ -205,10 +201,9 @@ def active_sources(context: dict) -> tuple[list[str], str | None]:
 
 
 def sql_path_authorization(workspace_id: str) -> WorkspacePathAuthorization | None:
-    """The SQL file-read capability of a call in *workspace_id*: the mounted
-    Workspace's roots; None (the default roots) without a Workspace. A fixed but
-    unavailable Workspace must fail closed instead of silently falling back to
-    global uploads/Information, so it gets no roots at all."""
+    """*workspace_id* 下某次调用的 SQL 文件读取能力：挂载 Workspace 的根目录；
+    没有 Workspace 时为 None（即默认根目录）。固定但不存在的 Workspace 必须
+    失败关闭，而不是悄悄回退到全局 uploads/Information，因此它拿到的根目录为空。"""
     authorization = workspace_manager.path_authorization(workspace_id)
     if workspace_id and authorization is None:
         return WorkspacePathAuthorization(workspace_id=workspace_id, allowed_roots=(), metadata_revision=0)
@@ -216,8 +211,8 @@ def sql_path_authorization(workspace_id: str) -> WorkspacePathAuthorization | No
 
 
 def prepare_args(name: str, args: dict, workspace_id: str) -> dict:
-    """Normalize and validate model args exactly as the old agent loop did
-    before dispatch; a rejection carries the old ``[ARG ERROR]`` tool text."""
+    """完全按旧 agent 循环在 dispatch 之前的方式规范化并校验模型参数；被拒时
+    携带旧的 ``[ARG ERROR]`` 工具文案。"""
     if name == "generate_chart":
         args = normalize_chart_call_args(args)
     elif name == "export_report":
@@ -229,8 +224,8 @@ def prepare_args(name: str, args: dict, workspace_id: str) -> dict:
 
 
 def apply_table_selection(lease: Lease, tables: Any) -> None:
-    """Apply the SQL analysis-table selection (as the old ``/chat`` data
-    context did) and refuse to run while an active SQL source has none."""
+    """应用 SQL 分析表选择（与旧的 ``/chat`` 数据上下文做法一致）；当某个活动
+    SQL source 尚未选择分析表时拒绝运行。"""
     from data.sources.sql import SQLDataSource
 
     if tables is None:
@@ -262,7 +257,7 @@ def apply_table_selection(lease: Lease, tables: Any) -> None:
 
 
 def drive(gen, rpc: MethodContext, events: list[dict]):
-    """Run a tool generator to completion, forwarding each yielded event."""
+    """把工具生成器跑到结束，并转发它产出的每个事件。"""
     try:
         while True:
             event = next(gen)
@@ -313,8 +308,8 @@ def run_tool(rpc: MethodContext, registry: SourceRegistry, name: str, params: di
 
 
 def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: dict) -> dict:
-    """``fetch_table`` after the caller fetched the URL: parse the body into
-    tables and register them as source ``params.source_id``."""
+    """``fetch_table`` 在调用方取回 URL 之后的阶段：把 body 解析成表，并注册为
+    source ``params.source_id``。"""
     from data.table_extract import MAX_FETCH_BYTES, TableExtractError, parse_body
 
     from .tools.ingest import (
@@ -349,8 +344,8 @@ def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: 
 
 
 def run_load_feishu_bitable(rpc: MethodContext, registry: SourceRegistry, params: dict) -> dict:
-    """``load_feishu_bitable`` after the caller read the records over the
-    Feishu OpenAPI: register them as source ``params.source_id``."""
+    """``load_feishu_bitable`` 在调用方通过 Feishu OpenAPI 读取记录之后的阶段：
+    把它们注册为 source ``params.source_id``。"""
     from .tools.ingest import bitable_loaded_text, bitable_source
 
     context, args = parse_context(params)
@@ -371,8 +366,8 @@ def run_load_feishu_bitable(rpc: MethodContext, registry: SourceRegistry, params
 
 
 def _add_source(registry: SourceRegistry, sources: list[str], source_id: str, source) -> str:
-    """Register *source* and return the combined schema of the active sources
-    plus the new one (the view the old agent switched to mid-turn)."""
+    """注册 *source*，并返回活动 source 加上新 source 之后的合并 schema
+    （即旧 agent 在回合中途切换到的视图）。"""
     with registry.lease(sources) as lease:
         try:
             registry.add(source_id, source)

@@ -1,9 +1,9 @@
-"""Golden cases for the P3.3 hook policies, produced by the real Python implementations.
+"""P3.3 hook 策略的 golden 用例，由真实 Python 实现产出。
 
     .venv/bin/python scripts/golden/export_hook_policies.py
 
-Writes server/test/golden/hook-policies.json: text-fallback parsing cases (agent/agent.py
-`_parse_text_fallback_tool_calls`) and the output-tool guard table (`_OUTPUT_TOOL_GUARDS`).
+写入 server/test/golden/hook-policies.json：文本兜底解析用例（agent/agent.py 的
+`_parse_text_fallback_tool_calls`）以及输出工具护栏表（`_OUTPUT_TOOL_GUARDS`）。
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ PARSE_CASES: list[str] = [
 
 
 def guard_table() -> dict[str, list[str]]:
-    """`_OUTPUT_TOOL_GUARDS` is a local of the run method; read its literal from the source with ast."""
+    """`_OUTPUT_TOOL_GUARDS` 是 run 方法里的局部变量；用 ast 从源码中读出它的字面量。"""
     import ast
 
     tree = ast.parse((ROOT / "agent" / "agent.py").read_text(encoding="utf-8"))

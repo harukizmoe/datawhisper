@@ -1,15 +1,17 @@
-"""Golden cases for skills / skill discovery / commands / instructions / memory (read side), produced by
-the real Python implementation.
+"""skills / skill discovery / commands / instructions / memory（读取侧）的 golden
+用例，由真实 Python 实现产出。
 
     .venv/bin/python scripts/golden/export_skills.py
 
-Writes server/test/golden/{skills,skill-discovery,commands,instructions,memory}.json. The TS ports
-(server/src/agent/{skills,skill-discovery,commands,instructions,memory}.ts) must reproduce every case.
+写入 server/test/golden/{skills,skill-discovery,commands,instructions,memory}.json。
+各 TS 移植版（server/src/agent/{skills,skill-discovery,commands,instructions,memory}.ts）
+必须复现每个用例。
 
-Inputs: the repo `skills/` and `commands/`, the static trees under server/test/fixtures/, and "dynamic"
-trees (huge files, symlinks, CRLF, invalid UTF-8, op sequences) that are described as data in the golden
-file itself so the TS tests rebuild exactly the same tree in a temp dir (see server/test/support/fs-spec.ts).
-All paths in the output are relative to the repo root (static) or to the temp tree root (dynamic).
+输入：仓库的 `skills/` 与 `commands/`、server/test/fixtures/ 下的静态树，以及
+"动态"树（超大文件、符号链接、CRLF、非法 UTF-8、op 序列）——后者以数据形式写在
+golden 文件自身里，好让 TS 测试在临时目录中重建完全相同的树（见
+server/test/support/fs-spec.ts）。输出中的所有路径都相对仓库根（静态树）或临时树
+根（动态树）。
 """
 from __future__ import annotations
 
@@ -32,7 +34,7 @@ FIX = ROOT / "server" / "test" / "fixtures"
 OUT = ROOT / "server" / "test" / "golden"
 NOWHERE = Path("/nonexistent-golden-dir")
 
-# `Function.Knowledge.neural_embedder` pulls in model backends; discovery only needs 5 names from it.
+# `Function.Knowledge.neural_embedder` 会拉起模型后端；discovery 只需要它里面的 5 个名字。
 _embedder = types.ModuleType("Function.Knowledge.neural_embedder")
 _embedder.embed_batch = lambda texts: []
 _embedder.embed_query = lambda text: []
@@ -69,10 +71,10 @@ def rel(path: object, base: Path = ROOT) -> str | None:
     return Path(os.path.relpath(str(path), base)).as_posix()
 
 
-# ───────────────────────────── dynamic tree specs ─────────────────────────────
+# ───────────────────────────── 动态树规格 ─────────────────────────────
 
 def materialize(root: Path, files: dict) -> None:
-    """Entry forms: str | {text} | {b64} | {repeat:{head,unit,times,tail}} | {link} | {dir:true}; optional mtime."""
+    """条目形式：str | {text} | {b64} | {repeat:{head,unit,times,tail}} | {link} | {dir:true}；可选 mtime。"""
     for relpath, entry in files.items():
         path = root / relpath
         if isinstance(entry, str):
@@ -100,13 +102,13 @@ def skill_md(name: str, desc: str = "d", prompt: str = "p", extra: str = "") -> 
     return f"---\nname: {name}\ndescription: {desc}\n{extra}---\n{prompt}\n"
 
 
-# ───────────────────────────── skills ─────────────────────────────
+# ───────────────────────────── skills 读取 ─────────────────────────────
 
 DIGEST_OVER = 2000
 
 
 def skill_json(skill: SkillDef, base: Path, *, digest: bool = False) -> dict:
-    """Prompts longer than DIGEST_OVER chars are stored as sha256/length/head instead of in full."""
+    """长于 DIGEST_OVER 个字符的 prompt 以 sha256/length/head 形式保存，而不是全文。"""
     digest = digest or len(skill.prompt) > DIGEST_OVER
     out = {
         "name": skill.name, "display_name": skill.display_name, "description": skill.description,
@@ -163,7 +165,7 @@ def skills_section() -> dict:
         names = ["alpha", "beta", "gamma", "x", "y", "z", "u", "w", "foo", "same", "nope", "Bad-Name", ""]
         static_cases.append({"id": case_id, "dirs": dirs, **run_skill_loader(resolved, sfix, names)})
 
-    # parse_skill_file directly, for every file in the static trees
+    # 直接对静态树中的每个文件调 parse_skill_file
     parse_cases = []
     for path in sorted(sfix.rglob("*.md"), key=lambda p: str(p)):
         if path.is_file():
@@ -231,7 +233,7 @@ def skills_section() -> dict:
             dirs = {k: tmp_root / v for k, v in case["dirs"].items()}
             case.update(run_skill_loader(dirs, tmp_root, []))
 
-    # hot reload: get() re-parses; broken or renamed edits fall back to the cached copy
+    # 热重载：get() 会重新解析；被改坏或改名的修改回退到缓存副本
     hot = {"id": "hot-reload", "dirs": {"builtin": "b"}, "files": {"b/hr/SKILL.md": skill_md("hr", "v1", "prompt v1")}, "ops": [
         {"op": "load"}, {"op": "get", "name": "hr"},
         {"op": "write", "path": "b/hr/SKILL.md", "entry": skill_md("hr", "v2", "prompt v2 $ARGUMENTS")}, {"op": "get", "name": "hr"},
@@ -262,7 +264,7 @@ def skills_section() -> dict:
                 results.append(None)
         hot["results"] = results
 
-    # render_skill_prompt / activation
+    # render_skill_prompt / 激活
     requests = ["", "   ", "分析 销量\n", "  padded \n", "$ARGUMENTS", "a $& b $1 $$", "line1\nline2",
                 "　全角空格　", "\ufeffbom", "\x1c\x85 sep \x1f", "😀 emoji", "$ARGUMENTS $ARGUMENTS"]
     render = []
@@ -298,12 +300,12 @@ def skills_section() -> dict:
     exposed_sets = [[], ["get_schema"], ["get_schema", "query_data", "run_analysis"], ["generate_chart", "nope"], known[:10]]
     for fixture in ("valid/beta/SKILL.md", "valid/alpha.md"):
         skill = parse_skill_file(sfix / fixture)
-        # tools-missing cannot activate; build the activation from the registered subset only
+        # tools-missing 时无法激活；只从已注册的子集构建激活对象
         act = SkillExecutor().activate(skill, "")
         for exposed in exposed_sets:
             filters.append({"fixture": fixture, "exposed": exposed, "result": sorted(act.filter_exposed_tools(set(exposed)))})
 
-    # normalize_skill_tags and SkillDef validation straight from the models
+    # 直接从 models 取 normalize_skill_tags 与 SkillDef 校验
     from agent.skills.models import normalize_skill_tags
     tag_cases = [None, [], ["a"], [" A ", "b-c"], "x", ["a", 1], ["a", "a"], ["A", "a"], [""], ["1a"], ["a_b"],
                  ["a" * 32], ["a" * 33], [f"t{i}" for i in range(12)], [f"t{i}" for i in range(13)], ("a", "b"), [" "]]
@@ -336,7 +338,7 @@ def skills_section() -> dict:
     mode_skill = SkillDef(name="m", description="d", prompt="p", path=Path("m.md"), tags=("mode-business", "mode-ml"))
     modes = {m: mode_skill.supports_analysis_mode(m) for m in ("business", " Business ", "ML", "empirical", "", "mode-business", "x")}
 
-    # agent.py policy helpers, executed from the real source without importing the 4900-line module
+    # agent.py 的策略辅助函数：从真实源码执行，但不 import 那个 4900 行的模块
     tree = ast.parse((ROOT / "agent" / "agent.py").read_text(encoding="utf-8"))
     wanted = {"_REQUIRED_SUCCESSFUL_SKILL_TOOLS", "_missing_required_skill_tools", "_missing_skill_response_contract",
               "_skill_requires_text_only"}
@@ -351,7 +353,7 @@ def skills_section() -> dict:
     namespace_globals = namespace
     policy_missing, policy_contract, policy_text_only = [], [], []
     fn_missing = namespace["_missing_required_skill_tools"]
-    # functions reference module globals; give them the namespace as globals
+    # 这些函数引用了模块全局变量；把命名空间当作它们的 globals
     for fn in ("_missing_required_skill_tools", "_missing_skill_response_contract", "_skill_requires_text_only"):
         namespace[fn].__globals__.update(namespace)
     for skill_name in ("regression", "ab-test-analysis", "other", "", None, "Regression"):
@@ -395,7 +397,7 @@ def skills_section() -> dict:
     }
 
 
-# ───────────────────────────── skill discovery ─────────────────────────────
+# ───────────────────────────── skill 发现 ─────────────────────────────
 
 DIM = 256
 SIGNATURE = ["sig-a"]
@@ -476,7 +478,7 @@ def discovery_section(skills: dict) -> dict:
             ("two  spaces here", "here"), ("日本語", "日本語"), ("a", "a"), ("--x--", "x"), ("abc-de", "de abc"),
         ]]
 
-        # embedding-cache behaviour: only changed descriptions are re-embedded, stale entries pruned
+        # embedding 缓存行为：只有描述变了的才重新计算 embedding，过期条目被清除
         sequence = []
         cache_path = py_sd._SKILL_CACHE_PATH
         sub = corpus[:6]
@@ -514,7 +516,7 @@ def strip_embedding(results: list[dict]) -> list[dict]:
     return [{k: v for k, v in r.items() if k != "embedding"} for r in results]
 
 
-# ───────────────────────────── commands ─────────────────────────────
+# ───────────────────────────── commands 解析 ─────────────────────────────
 
 def command_json(c) -> dict:
     return {
@@ -555,12 +557,12 @@ def commands_section() -> dict:
             "diagnostics": [{"path": rel(d.path), "source": d.source, "error": d.error} for d in loader.diagnostics()],
             "resolve": {p: registry.canonical_name(p) for p in probes},
         })
-    # loader with fallback builtins (empty/missing commands dir)
+    # 带兜底 builtins 的 loader（commands 目录为空/缺失）
     CommandLoader.clear_cache()
     fb_loader = CommandLoader(builtins=fallback, user_dir=NOWHERE)
     fb_registry = fb_loader.load()
 
-    # parse_command_file on every fixture file, both trust levels
+    # 对每个 fixture 文件、两种 trust 级别都调用 parse_command_file
     parse_cases = []
     for base in sorted((cfix).glob("*/*")):
         if not base.is_dir():
@@ -675,7 +677,7 @@ def commands_section() -> dict:
     }
 
 
-# ───────────────────────────── instructions ─────────────────────────────
+# ───────────────────────────── instructions 读取 ─────────────────────────────
 
 def run_instructions(case_root: Path, tag: str) -> str:
     user, ws = case_root / "user", case_root / "ws"
@@ -691,7 +693,7 @@ def instructions_section() -> dict:
     for case in sorted(p for p in ifix.iterdir() if p.is_dir()):
         static.append({"id": case.name, "has_workspace": (case / "ws").is_dir(), "output": run_instructions(case, case.name)})
 
-    def file(n):  # a long single line of n characters
+    def file(n):  # 一条 n 个字符长的单行
         return {"repeat": {"unit": "x", "times": n}}
 
     u = "[USER INSTRUCTIONS]\n"
@@ -738,7 +740,7 @@ def instructions_section() -> dict:
             case["has_workspace"] = (tmp_root / "ws").is_dir()
             case["output"] = run_instructions(tmp_root, case["id"])
 
-    # mtime cache: same mtime = served from cache (even if the content changed); new mtime/deletion invalidates
+    # mtime 缓存：mtime 相同 = 直接用缓存（即便内容变了）；新的 mtime/删除会使缓存失效
     seq = {"id": "mtime-cache", "files": {"user/ZHIXI.md": {"text": "user v1\n", "mtime": 1000}, "ws/ZHIXI.md": {"text": "ws v1\n@include <inc.md>\n", "mtime": 1000}, "ws/inc.md": {"text": "inc v1\n", "mtime": 1000}},
            "ops": [
                {"op": "render"},
@@ -774,14 +776,14 @@ def instructions_section() -> dict:
             "static": static, "dynamic": dynamic, "cache": seq}
 
 
-# ───────────────────────────── memory ─────────────────────────────
+# ───────────────────────────── memory 读取 ─────────────────────────────
 
 def memory_json(record: dict) -> dict:
     return {k: record[k] for k in ("name", "type", "scope", "title", "body", "why", "how_to_apply", "created_at", "updated_at", "last_seen_at", "source_session")}
 
 
 def run_memory(case_root: Path, tag: str) -> dict:
-    """Runs the Python read path on a copy (it rewrites MEMORY.md) and returns records/section/read results."""
+    """在副本上运行 Python 读取路径（它会重写 MEMORY.md），返回 records/section/read 结果。"""
     with tempfile.TemporaryDirectory() as tmp:
         copy = Path(tmp) / "case"
         shutil.copytree(case_root, copy, symlinks=True)
@@ -837,7 +839,7 @@ def memory_section() -> dict:
             tmp_root = Path(tmp)
             materialize(tmp_root, case["files"])
             case.update(run_memory(tmp_root, case["id"]))
-            # only the aggregate is interesting for the big cases
+            # 大用例只有聚合结果值得关注
             if len(case["files"]) > 20:
                 case["records"] = [{"name": r["name"], "type": r["type"], "title": r["title"], "updated_at": r["updated_at"]} for r in case["records"]]
                 case["reads"] = {}

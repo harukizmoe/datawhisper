@@ -1,9 +1,10 @@
-"""Golden cases for the numeric provenance audit, produced by the real Python implementation.
+"""数值溯源审计的 golden 用例，由真实 Python 实现产出。
 
     .venv/bin/python scripts/golden/export_number_audit.py
 
-Writes server/test/golden/number-audit.json. The TS port (server/src/agent/number-audit.ts) must
-return exactly the same `(unsupported, total)` for every case.
+写入 server/test/golden/number-audit.json。TS 移植版
+（server/src/agent/number-audit.ts）对每个用例必须返回完全相同的
+`(unsupported, total)`。
 """
 from __future__ import annotations
 
@@ -18,21 +19,21 @@ sys.path.insert(0, str(ROOT))
 from agent.number_audit import audit_report_numbers  # noqa: E402
 
 HAND: list[dict] = [
-    # transcription error the gate exists for
+    # 这道闸门存在的意义：转录错误
     {"report": "总订单 2,956 单", "evidence": ["rows: 1,956"], "context": []},
     {"report": "总订单 1,956 单", "evidence": ["rows: 1956"], "context": []},
-    # rounding matches the evidence source (half up, not half even)
+    # 舍入与证据源一致（half up，而非 half even）
     {"report": "占比 40.7", "evidence": ["ratio=40.73"], "context": []},
     {"report": "均值 2.5", "evidence": ["x=2.45"], "context": []},
     {"report": "均值 12.4", "evidence": ["x=12.35"], "context": []},
     {"report": "均值 12.3", "evidence": ["x=12.25"], "context": []},
     {"report": "值 1234.6", "evidence": ["1234.55"], "context": []},
-    # derived integer deltas (both operands >= 100)
+    # 派生出的整数差值（两个操作数都 >= 100）
     {"report": "删除 556 行", "evidence": ["2954669", "2954113"], "context": []},
     {"report": "合计 920 行", "evidence": ["919", "1"], "context": []},
     {"report": "合计 1020 行", "evidence": ["520", "500"], "context": []},
     {"report": "差 400 行", "evidence": ["900", "500"], "context": []},
-    # skipped: percentages, magnitude suffixes, ranges, years, small ints, tiny decimals
+    # 被跳过：百分比、数量级后缀、区间、年份、小整数、极小小数
     {"report": "增长 2,954.5%", "evidence": [], "context": []},
     {"report": "销售额 295.5 万", "evidence": [], "context": []},
     {"report": "销售额 295.5万元 3000亿 5000倍 8000‰", "evidence": [], "context": []},
@@ -43,19 +44,19 @@ HAND: list[dict] = [
     {"report": "第 99 名，共 42 项，系数 2.5，比例 0.8", "evidence": [], "context": []},
     {"report": "PM2.5 浓度 v1.3 版本 L966 NO2 4567", "evidence": [], "context": []},
     {"report": "全角 １２３４５ 和 ％ 后缀 1234 ％", "evidence": [], "context": []},
-    # context texts (user numbers, SQL thresholds) count as evidence
+    # 上下文文本（用户说的数字、SQL 阈值）也算作证据
     {"report": "AQI 大于 150 的天数 365", "evidence": ["days: 365"], "context": ["WHERE aqi > 150"]},
     {"report": "用户说有 8,800 人", "evidence": [], "context": ["我们大约有 8800 人"]},
-    # substring evidence is generous
+    # 子串匹配的证据是宽容的
     {"report": "编号 12345678", "evidence": ["id=12345678-extra"], "context": []},
     {"report": "数 123456", "evidence": ["x 1234567 y"], "context": []},
-    # decimals with trailing zeros / equal numerically
+    # 带尾随零的小数 / 数值相等
     {"report": "金额 1500.00", "evidence": ["1500"], "context": []},
     {"report": "金额 1500", "evidence": ["1500.0"], "context": []},
     {"report": "金额 3.40", "evidence": ["3.4"], "context": []},
-    # more than the listing cap (15 unsupported)
+    # 超过列出的上限（15 个 unsupported）
     {"report": " ".join(f"{1000 + i * 7}" for i in range(30)), "evidence": [], "context": []},
-    # duplicates keep first-appearance order and are deduped
+    # 重复项保持首次出现的顺序并被去重
     {"report": "4,321 和 4321 和 4,321 以及 9,876", "evidence": [], "context": []},
     {"report": "", "evidence": ["1000"], "context": []},
     {"report": "无数字的段落", "evidence": ["1000"], "context": []},

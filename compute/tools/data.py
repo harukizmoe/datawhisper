@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Mixin: data-oriented tools (schema, query, analysis, chart, clean, profile)."""
+"""Mixin：面向数据的工具（schema、查询、分析、图表、清洗、剖析）。"""
 import logging
 import re
 import sqlite3
@@ -33,7 +33,7 @@ def _execute_analysis(
     analysis_options: dict | None = None,
     progress_callback=None,
 ):
-    """Run one analysis without holding an Agent or data-source reference."""
+    """在不持有 Agent 或 data-source 引用的情况下运行一个分析。"""
     from Function.Analyze.registry import get as get_analysis
 
     entry = get_analysis(analysis_name)
@@ -58,11 +58,11 @@ def _execute_analysis(
 
 
 class DataToolsMixin:
-    """All methods here rely on self.data_source, self._schema_cache,
-    self.ppt_color_scheme — set by the host (``agent.agent.BusinessAgent``
-    or ``compute.host.ToolHost``)."""
+    """这里的所有方法都依赖 self.data_source、self._schema_cache、
+    self.ppt_color_scheme —— 由宿主（``agent.agent.BusinessAgent``
+    或 ``compute.host.ToolHost``）设置。"""
 
-    # ── Knowledge base lookup ─────────────────────────────────────────────────
+    # ── 知识库查询 ─────────────────────────────────────────────────────────────
 
     def _tool_query_knowledge_results(self, question: str) -> dict:
         if not bool(getattr(self, "_knowledge_allowed_this_turn", False)):
@@ -120,7 +120,7 @@ class DataToolsMixin:
         return "\n".join(lines)
 
     def _knowledge_refs_from_results(self, results: dict, limit: int = 8) -> list[dict]:
-        """Compact, UI-safe citation metadata for the knowledge tool step."""
+        """知识工具步骤所使用的紧凑、UI 安全的引用元数据。"""
         if results.get("error"):
             return []
 
@@ -180,7 +180,7 @@ class DataToolsMixin:
         results = self._tool_query_knowledge_results(question)
         return self._format_knowledge_results(results)
 
-    # ── Basic data access ─────────────────────────────────────────────────────
+    # ── 基础数据访问 ───────────────────────────────────────────────────────────
 
     def _tool_get_schema(self) -> str:
         if not self.data_source and not getattr(self, "_combined_schema", None):
@@ -191,8 +191,8 @@ class DataToolsMixin:
         return self._schema_cache
 
     def _tool_get_table_detail(self, table_name: str) -> str:
-        """Return full column list + row count for a single table (SQL databases)."""
-        # Try each active source until one knows the table
+        """返回单张表的完整列清单 + 行数（SQL 数据库）。"""
+        # 依次尝试各活动 source，直到某个认识这张表
         for src in getattr(self, "_all_sources", [self.data_source]):
             if src is None:
                 continue
@@ -205,7 +205,7 @@ class DataToolsMixin:
                 tables = []
             if table_name in tables:
                 return fn(table_name)
-        # Fallback: try primary source regardless
+        # 兜底：无论如何再试主 source
         if self.data_source:
             fn = getattr(self.data_source, "get_table_detail", None)
             if fn:
@@ -214,14 +214,13 @@ class DataToolsMixin:
 
     @staticmethod
     def _strip_src_prefix(sql: str, src_index: int) -> str:
-        """Remove ``src{N}__`` prefixes injected by get_combined_schema.
+        """去掉 get_combined_schema 注入的 ``src{N}__`` 前缀。
 
-        Called just before executing SQL against a specific DataSource so the
-        engine sees only bare table names it actually owns.
+        在对具体 DataSource 执行 SQL 之前调用，使引擎只看到它真正拥有的裸表名。
         """
         import re as _re
         prefix = f"src{src_index}__"
-        # Replace quoted  "src1__tablename"  and bare  src1__tablename
+        # 替换带引号的 "src1__tablename" 以及裸的 src1__tablename
         sql = _re.sub(
             rf'"?{_re.escape(prefix)}([^"\s,)]+)"?',
             lambda m: f'"{m.group(1)}"',
@@ -230,54 +229,53 @@ class DataToolsMixin:
         return sql
 
     def _route_query(self, sql: str):
-        """Return (DataSource, rewritten_sql) for the source that owns the tables
-        referenced in *sql*.
+        """返回 (DataSource, rewritten_sql)，指向拥有 *sql* 中所引用表的 source。
 
-        Routing priority
+        路由优先级
         ----------------
-        1. **Cross-source SQL** (SQL contains ``src{N}__`` prefixes from two or
-           more distinct source indices) → execute on ``_merged_source`` as-is.
-           The merged connection already has all tables registered with prefixes.
-        2. **Single-source prefixed SQL** (all ``src{N}__`` prefixes point to the
-           same index N) → strip prefix, execute on ``sources[N-1]`` directly.
-        3. **Bare table names** (no prefix) → heuristic match against each
-           source's table list; first match wins.  Falls back to primary source.
+        1. **跨源 SQL**（SQL 中含有来自两个及以上不同 source 下标的
+           ``src{N}__`` 前缀）→ 原样在 ``_merged_source`` 上执行。
+           合并连接已经把全部表按前缀注册好了。
+        2. **单 source 前缀 SQL**（所有 ``src{N}__`` 前缀都指向同一个下标 N）
+           → 去前缀，直接在 ``sources[N-1]`` 上执行。
+        3. **裸表名**（无前缀）→ 拿各 source 的表清单做启发式匹配，先命中者胜。
+           都不命中则回退到主 source。
 
-        Returns a (DataSource, sql) tuple.  Callers must use the returned *sql*.
+        返回 (DataSource, sql) 元组。调用方必须使用返回的 *sql*。
         """
         import re as _re
         sources = getattr(self, "_all_sources", None)
         if not sources or len(sources) == 1:
             return self.data_source, sql
 
-        # ── Detect src{N}__ prefixes in SQL ─────────────────────────────────
+        # ── 检测 SQL 中的 src{N}__ 前缀 ─────────────────────────────────
         prefix_pat = _re.compile(r'src(\d+)__', _re.IGNORECASE)
         prefix_hits = prefix_pat.findall(sql)
 
         if prefix_hits:
             unique_indices = set(int(h) for h in prefix_hits)
 
-            # ── Mode 1: cross-source — two or more different src indices ────
+            # ── 模式 1：跨源 —— 两个及以上不同的 src 下标 ────
             if len(unique_indices) > 1:
                 merged = getattr(self, "_merged_source", None)
                 if merged is not None:
                     log.debug("[route] cross-source SQL → MergedDataSource")
                     return merged, sql
-                # Merged source unavailable — fall through to heuristic as best-effort
+                # 合并 source 不可用 —— 作为尽力而为回退到启发式
                 log.warning("[route] cross-source SQL but _merged_source is None, "
                             "falling back to primary source")
                 return self.data_source, sql
 
-            # ── Mode 2: single-source prefix — strip and route directly ─────
+            # ── 模式 2：单一 source 前缀 —— 去前缀并直接路由 ─────
             idx = next(iter(unique_indices))   # 1-based
             if 1 <= idx <= len(sources):
                 src = sources[idx - 1]
                 rewritten = self._strip_src_prefix(sql, idx)
                 log.debug("[route] src%d prefix → source=%s", idx, getattr(src, "name", "?"))
                 return src, rewritten
-            # Index out of range — fall through
+            # 下标越界 —— 继续往下走
 
-        # ── Mode 3: bare table name heuristic ───────────────────────────────
+        # ── 模式 3：裸表名启发式 ───────────────────────────────────────────
         sql_upper = sql.upper()
         for src in sources:
             try:
@@ -288,7 +286,7 @@ class DataToolsMixin:
                 log.debug("[route] bare-name heuristic → source=%s", getattr(src, "name", "?"))
                 return src, sql
 
-        # Fallback: primary source, unchanged SQL
+        # 兜底：主 source，SQL 不变
         return self.data_source, sql
 
     def _tool_query_data(self, sql: str) -> str:
@@ -305,7 +303,7 @@ class DataToolsMixin:
             r'(?i)\bjoin\s+([A-Za-z_][\w$]*)',
         ):
             tables.extend(re.findall(pattern, sql or ""))
-        # Keep order, remove duplicates and internal aliases.
+        # 保持顺序，去掉重复项与内部别名。
         seen = set()
         clean_tables = []
         for t in tables:
@@ -332,8 +330,8 @@ class DataToolsMixin:
         if error:
             log.warning("[tools] query_data  ERROR  source=%s  sql=%.80r  error=%s",
                         getattr(src, "name", "?"), sql_preview, error[:200])
-            # If primary source failed and we have alternatives, try them
-            # (only for bare-name queries — prefixed queries target a specific source)
+            # 若主 source 失败且还有备选，就逐个再试
+            # （只对裸表名查询 —— 带前缀的查询指向特定 source）
             import re as _re
             if not _re.search(r'src\d+__', sql, _re.IGNORECASE):
                 sources = getattr(self, "_all_sources", None) or []
@@ -351,7 +349,7 @@ class DataToolsMixin:
         return src.format_result(df), self._data_refs_for_sql(sql, src, len(df))
 
     def _query_data_job_connection_info(self, src):
-        """Return (db_path, lock) for sources that are safe to query from a worker."""
+        """对可以从 worker 中安全查询的 source 返回 (db_path, lock)。"""
         db_path = getattr(src, "_db_path", None)
         if not db_path or not hasattr(src, "_db_lock"):
             return None, None
@@ -364,7 +362,7 @@ class DataToolsMixin:
         return db_path, getattr(src, "_db_lock", None)
 
     def _estimate_query_rows_for_job(self, db_path: Path, sql: str, lock=None) -> int | None:
-        """Estimate result size using a fresh DuckDB connection."""
+        """用一个新的 DuckDB 连接估算结果规模。"""
         import duckdb
 
         query = (sql or "").strip().rstrip(";")
@@ -389,9 +387,8 @@ class DataToolsMixin:
         import duckdb
         import pandas as pd
 
-        # A6 guard: a job's fresh connection writes straight to the file DB,
-        # bypassing the in-memory shadow — refuse writes here so the shadow
-        # path (request thread) stays the only write route.
+        # A6 护栏：job 的新连接会直接写到文件 DB，绕过内存影子，因此这里
+        # 拒绝写操作，让影子路径（请求线程）保持为唯一的写入通道。
         from data.sources._utils import is_write_sql
         if is_write_sql(sql):
             return pd.DataFrame(), "写操作不支持在后台 job 中执行（内存缓存路径）。"
@@ -418,8 +415,8 @@ class DataToolsMixin:
             log.warning("[tools] query_data  no data source  sql=%.80r", sql_preview)
             return "No data source. Please connect a database or upload an Excel file first.", []
 
-        # A6: write SQL must go through the source's shadow path on the
-        # request thread — never a background job's direct file connection.
+        # A6：写 SQL 必须在请求线程走 source 的影子路径 ——
+        # 绝不能走后台 job 的直接文件连接。
         from data.sources._utils import is_write_sql
         if is_write_sql(rewritten_sql):
             return self._tool_query_data_with_refs(sql)
@@ -544,7 +541,7 @@ class DataToolsMixin:
         ), refs
 
     def _analysis_table_connection(self, src, table_name: str):
-        """Return (conn, lock, cleanup_callback) when table is safe to DROP."""
+        """当该表可以安全 DROP 时返回 (conn, lock, cleanup_callback)。"""
         table_name = str(table_name or "").strip()
         if not table_name:
             return None, None, None, "empty table name"
@@ -557,7 +554,7 @@ class DataToolsMixin:
         if existing and table_name not in existing:
             return None, None, None, "table not found"
 
-        # SQLDataSource and fallback in-memory analysis tables.
+        # SQLDataSource 与兜底的内存分析表。
         cache_tables = getattr(src, "_cache_tables", None)
         if isinstance(cache_tables, set) and table_name in cache_tables:
             conn = getattr(src, "_duck", None) or getattr(src, "_conn", None) or getattr(src, "_cache_conn", None)
@@ -569,7 +566,7 @@ class DataToolsMixin:
 
             return conn, getattr(src, "_lock", None), cleanup, ""
 
-        # MergedDataSource tracks derived tables separately.
+        # MergedDataSource 单独记录派生表。
         analysis_tables = getattr(src, "_analysis_tables", None)
         if isinstance(analysis_tables, list) and table_name in analysis_tables:
             conn = getattr(src, "_conn", None)
@@ -582,8 +579,8 @@ class DataToolsMixin:
 
             return conn, getattr(src, "_lock", None), cleanup, ""
 
-        # WorkspacePersistentDataSource: registered source tables are listed in
-        # registry.json; unregistered tables are derived/analysis objects.
+        # WorkspacePersistentDataSource：注册过的源表列在 registry.json 中；
+        # 未注册的表是派生/分析对象。
         db_path = getattr(src, "_db_path", None)
         conn = getattr(src, "_conn", None)
         if db_path is not None and conn is not None:
@@ -667,20 +664,20 @@ class DataToolsMixin:
             lines.append("说明：只允许删除可证明为分析/派生表的对象；原始源表和无法判定的表会被保护。")
         return "\n".join(lines)
 
-    # ── DataFrame → DataSource writer (backward-compatible) ──────────────────
+    # ── DataFrame → DataSource 写入器（向后兼容）─────────────────────────────
 
     def _write_analysis_df(self, df, table_name: str) -> None:
-        """Write df into the connected data source as a queryable table.
+        """把 df 写进已连接的数据源，成为可查询的表。
 
-        Tries the new connector API first; falls back to direct SQLite write
-        for older connector.py versions that lack the _df parameter.
+        优先尝试新的 connector API；对缺少 _df 参数的旧版 connector.py，
+        回退到直接写 SQLite。
         """
         ds = self.data_source
 
         try:
             created = ds.create_analysis_table(sql=None, table_name=table_name, _df=df)
-            # Some connectors report failures as text instead of raising.  Do
-            # not let a caller subsequently claim a derived table was written.
+            # 有些 connector 用文本而非抛异常来报告失败。不要让调用方
+            # 之后还宣称派生表已写入。
             if isinstance(created, str) and (
                 "失败" in created or "error" in created.lower()
             ):
@@ -688,7 +685,7 @@ class DataToolsMixin:
             self._schema_cache = None
             return
         except TypeError:
-            pass  # old connector — fall through to direct SQLite write
+            pass  # 旧 connector —— 继续走直接写 SQLite
 
         conn = getattr(ds, "_conn", None)
         if conn is None:
@@ -701,7 +698,7 @@ class DataToolsMixin:
         df.to_sql(table_name, conn, if_exists="replace", index=False)
         self._schema_cache = None
 
-    # ── Analysis tool ─────────────────────────────────────────────────────────
+    # ── 分析工具 ───────────────────────────────────────────────────────────────
 
     def _tool_run_analysis(
         self,
@@ -748,7 +745,7 @@ class DataToolsMixin:
         n_deciles: int = 10,
         analysis_options: dict | None = None,
     ):
-        """Run large time-series analyses as cancellable JobRunner work."""
+        """把大型时序分析作为可取消的 JobRunner 任务运行。"""
         analysis_options = deepcopy(analysis_options)
         if analysis_name == "Time_Series_TimesFM3":
             analysis_options = dict(analysis_options or {})
@@ -839,7 +836,7 @@ class DataToolsMixin:
         target_column: str,
         n_deciles: int,
     ) -> str:
-        """Persist computed tables on the request thread and format the result."""
+        """在请求线程持久化计算出的表，并格式化结果。"""
 
         if len(ret) == 4:
             result_df, breakdown_df, extra_df, markdown = ret
@@ -852,8 +849,8 @@ class DataToolsMixin:
             self._write_analysis_df(result_df, "analysis_result")
             if not breakdown_df.empty or analysis_name == "Time_Series_TimesFM3":
                 self._write_analysis_df(breakdown_df, "analysis_breakdown")
-            # Always write the third table so LLM SQL queries don't fail on missing table.
-            # Write an empty-but-structured DataFrame when the result is empty.
+            # 总是写入第三张表，避免 LLM 的 SQL 查询因缺表而失败。
+            # 结果为空时写入一个空但带结构的 DataFrame。
             if extra_df is not None:
                 extra_table_name = _out_tbls[2] if len(_out_tbls) > 2 else "analysis_extra"
                 self._write_analysis_df(extra_df, extra_table_name)
@@ -978,14 +975,14 @@ class DataToolsMixin:
         except Exception:
             return ""
 
-    # ── Chart selector ────────────────────────────────────────────────────────
+    # ── 图表选择器 ─────────────────────────────────────────────────────────────
 
     def _tool_select_chart(self, user_intent: str, available_columns: list = None) -> str:
-        """Query the embedded chart registry and return ranked candidates with exact field_mapping specs."""
+        """查询内置的图表注册表，返回排序后的候选及其精确的 field_mapping 规格。"""
         try:
             from LLM.chart_selector import select_charts, format_selection_result
             cols = list(available_columns or [])
-            # Auto-enrich with schema column names when the caller didn't supply them
+            # 调用方没给列名时，用 schema 中的列名自动补齐
             if not cols and self.data_source:
                 schema = self._tool_get_schema()
                 cols = re.findall(r"^\s{2,4}(\w+)\b", schema, re.MULTILINE)
@@ -994,7 +991,7 @@ class DataToolsMixin:
         except Exception as exc:
             return f"Chart selection error: {exc}"
 
-    # ── Chart tool ────────────────────────────────────────────────────────────
+    # ── 图表工具 ───────────────────────────────────────────────────────────────
 
     def _render_chart_from_df(
         self, df, chart_type: str, field_mapping: dict, title: str = "",
@@ -1098,13 +1095,13 @@ class DataToolsMixin:
             return {"error": job.get("error") or "background job failed"}
         return result_holder.get("chart", {"error": "background result was not available"})
 
-    # ── Table discovery helpers ───────────────────────────────────────────────
+    # ── 表发现辅助函数 ─────────────────────────────────────────────────────────
 
     def _discover_all_tables(self) -> list:
         if not self.data_source:
             return []
-        # Preferred: connector.list_tables() — returns ALL tables incl. runtime
-        # analysis/derived tables (DuckDB information_schema based).
+        # 首选：connector.list_tables() —— 返回全部表，包括运行时分析/派生表
+        # （基于 DuckDB information_schema）。
         list_fn = getattr(self.data_source, "list_tables", None)
         if callable(list_fn):
             try:
@@ -1113,7 +1110,7 @@ class DataToolsMixin:
                     return list(tables)
             except Exception:
                 pass
-        # Fallback: parse the schema text (works for any connector).
+        # 兜底：解析 schema 文本（对任何 connector 都有效）。
         schema = self._tool_get_schema()
         return re.findall(r"^Table:\s+(\S+)", schema, re.MULTILINE)
 
@@ -1122,7 +1119,7 @@ class DataToolsMixin:
         raw = [t for t in tables if not t.startswith("analysis_") and t != "cleaned_data"]
         return raw[0] if raw else (tables[0] if tables else "")
 
-    # ── Profile & clean ───────────────────────────────────────────────────────
+    # ── 剖析与清洗 ─────────────────────────────────────────────────────────────
 
     def _profile_dataframe(self, df, table_name: str, columns: list = None) -> dict:
         from Function.Clean.data_profile import profile

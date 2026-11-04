@@ -1,10 +1,9 @@
-"""Turn fetched web tables / Feishu Bitable records into a new data source and
-the tool text the model sees (``fetch_table``, ``browser_extract_tables``,
-``load_feishu_bitable``).
+"""把抓取到的网表 / 飞书多维表格记录转成新的数据源，并生成模型看到的工具
+文案（``fetch_table``、``browser_extract_tables``、``load_feishu_bitable``）。
 
-The network and credential part (SSRF-checked fetch, Feishu OpenAPI) stays
-with the caller; these helpers only parse, build the DuckDB-backed source and
-format the result. Shared by the old agent loop and the compute worker.
+网络与凭证部分（带 SSRF 检查的 fetch、飞书 OpenAPI）由调用方负责；这些辅助函数
+只做解析、构建 DuckDB 支撑的 source 以及格式化结果。旧 agent 循环与 compute
+worker 共用。
 """
 from __future__ import annotations
 
@@ -36,8 +35,8 @@ def fetch_error_text(code: str, message: str) -> str:
 
 
 def extracted_source(grids: list, source_name: str, origin_label: str):
-    """``(source, tables, meta)`` for extracted grids; ``source`` is None when
-    no usable table survives normalization (answer with ``NO_TABLES_TEXT``)."""
+    """为提取出的 grids 返回 ``(source, tables, meta)``；归一化后没有任何可用表时
+    ``source`` 为 None（此时用 ``NO_TABLES_TEXT`` 应答）。"""
     from data.sources.extracted import ExtractedTableDataSource
     from data.table_extract import normalize_grids
 
@@ -77,8 +76,8 @@ def extracted_source_text(source_id: str, source, tables: dict, meta: dict, sche
 
 
 def bitable_source(read_result: dict[str, Any], source_name: str):
-    """``(source, display name)`` for the records returned by
-    ``data.feishu_bitable_service.read_bitable_records``."""
+    """为 ``data.feishu_bitable_service.read_bitable_records`` 返回的记录给出
+    ``(source, 显示名)``。"""
     from data.sources.feishu_bitable import FeishuBitableDataSource
 
     name = str(source_name or "").strip() or f"飞书多维表格 {read_result['table_id']}"

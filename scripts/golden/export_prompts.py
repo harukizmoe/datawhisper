@@ -1,13 +1,13 @@
-"""Golden cases + extracted static text for the system-prompt port, produced by the real Python code.
+"""系统提示词移植版的 golden 用例 + 抽取出的静态文本，由真实 Python 代码产出。
 
     .venv/bin/python scripts/golden/export_prompts.py
 
-Writes
-  * server/test/golden/prompts.json            -- every case the TS port must reproduce exactly
-  * server/src/agent/prompt-text/*.txt|json    -- the static prompt blocks, byte-identical to agent/prompts.py
-    (the TS port imports them as text; regenerate rather than hand-edit)
+写入
+  * server/test/golden/prompts.json            —— TS 移植版必须逐字复现的每个用例
+  * server/src/agent/prompt-text/*.txt|json    —— 静态提示词块，与 agent/prompts.py 逐字节相同
+    （TS 移植版以文本方式导入它们；需要时重新生成，不要手改）
 
-Run from anywhere; output is deterministic (rerun => zero diff).
+可在任意目录运行；输出是确定性的（重跑 => 零 diff）。
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ import agent.prompts as P  # noqa: E402
 GOLDEN_OUT = ROOT / "server" / "test" / "golden" / "prompts.json"
 TEXT_DIR = ROOT / "server" / "src" / "agent" / "prompt-text"
 
-# python attribute -> file name inside prompt-text/
+# python 属性 -> prompt-text/ 内的文件名
 BLOCKS = {
     "CORE_RULES": "core-rules.txt",
     "DATA_RULES": "data-rules.txt",
@@ -40,7 +40,7 @@ BLOCKS = {
     "UNNAMED_COLUMN_RULES": "unnamed-column-rules.txt",
     "DIAGRAM_RULES": "diagram-rules.txt",
     "SKILL_CATALOG_RULES": "skill-catalog-rules.txt",
-    # built at import time by prompts._build_analyze_guide / _build_chart_ids
+    # 由 prompts._build_analyze_guide / _build_chart_ids 在 import 时构建
     "_ANALYZE_GUIDE": "analyze-guide.txt",
     "_CHART_IDS": "chart-ids.txt",
 }
@@ -90,18 +90,18 @@ def context_cases() -> list[dict]:
         seen.append(k)
         ctx = P.PromptContext(**k)
         out.append({"context": ctx_json(ctx), "prompt": P.get_system_prompt(ctx)})
-    # the no-argument / None forms
+    # 无参数 / None 的调用形式
     out.append({"context": None, "prompt": P.get_system_prompt(None)})
-    # knowledge_summary is accepted and ignored
+    # knowledge_summary 会被接受并忽略
     ctx = P.PromptContext(has_knowledge=True)
     assert P.get_system_prompt(ctx, knowledge_summary="SECRET") == P.get_system_prompt(ctx)
     return out
 
 
 MESSAGES: list[str] = [
-    # --- empty / degenerate ---
+    # --- 空 / 退化输入 ---
     "", " ", "\n", "\t \n", "?", "...", "。",
-    # --- greetings (knowledge gate: non-business fullmatch) ---
+    # --- 问候语（knowledge 闸门：非业务 fullmatch）---
     "你好", "您好", "你好！", "你好?", "你好？？", "你好。", "你好 ", "  你好  ", "你好呀", "你好吗",
     "你是谁", "你是谁？", "你叫什么", "你叫什么名字", "介绍一下你自己", "介绍你自己", "介绍一下你自己。",
     "who are you", "Who Are You?", "WHO  ARE  YOU", "what is your name", "What's your name?",
@@ -109,29 +109,29 @@ MESSAGES: list[str] = [
     "thanks", "thank", "Thanks!", "thanks a lot", "谢谢", "谢谢！", "谢谢你", "help", "Help?", "帮助", "帮助。",
     "help me analyze sales", "hello\n", "\nhello\n", "hello\n\nthere", "hi\u3000", "\u3000hi",
     "hı", "HİLLO", "hİ", "hı!", "Hi\x85", "\x85hi", "\x1chi\x1f", "hi\ufeff", "\ufeffhi",
-    # --- workspace ---
+    # --- 工作区 ---
     "请读取工作目录下的文件", "打开工作区", "查找文件 report", "读取文件 data.csv", "打开文件夹", "列出磁盘上的文件",
     "查看本地文件", "list my local file", "list my local   file", "local\tfile", "local\nfile", "localfile",
     "on disk", "on   disk please", "ondisk", "check the Workspace", "WORKDIR", "workdir=/tmp", "my folder",
     "Folder structure", "directory listing", "Directory", "目录", "文件夹里有什么", "磁盘空间", "硬盘",
     "local\u00a0file", "local\u3000file", "local\x85file", "local\x1cfile", "local\ufefffile", "on\u2028disk",
-    "WORKSPACE", "wοrkspace",  # greek omicron
+    "WORKSPACE", "wοrkspace",  # 希腊字母 omicron
     "sales.csv", "sales.CSV", "sales.xlsx", "sales.xls", "sales.xlsm", "sales.doc", "sales.docx", "sales.txt",
     "notes.md", "report.pdf", "report.PDF", "report.pdfx", "report.pdf文件", "report.pdf_", "report.pdf1",
     "report.pdf.bak", "report.pdf。", "report.pdf，", "见 a.csv", "a.csv\u00e9", "a.csv\u4e2d", "a.csv\u0661",
     "a.csv\u0301", "a.csv\u2160", "a.csv\u00b2", "a.csv\u00aa", "a.csv\u02b0", "a.csv\u1100",
     "销售数据.xlsx 分析", "data.json", "data.xlsb", "xlsx", ".csv", "a. csv", "a.docs", "a.doc.", "a.xls\n",
     "A.XLSX", "a.Docx", "a.TxT",
-    # --- hooks ---
+    # --- hook 配置 ---
     "配置 webhook", "设置 Webhook 回调", "hooks", "hook", "Hook config", "callback url", "回调地址", "自动化流程",
     "automation", "钩子配置", "配置这个链接", "配置这个 url", "配置这个URL", "配置这个 https://x.com/a 的链接",
     "配置这个" + "字" * 20 + "链接", "配置这个" + "字" * 21 + "链接", "配置这个\n链接", "配置这个\r链接",
     "配置这个\u2028链接", "配置这个\u0085链接", "配置这个链接", "配置这个", "配置这个abc", "gohooks", "webhooks!",
     "HOOKS", "wehook", "call back", "callbacks",
-    # --- browser ---
+    # --- 浏览器 ---
     "google it", "Google", "baidu", "Bing search", "search for revenue", "SEARCH", "搜索一下", "调研竞品", "查找资料",
     "查一下", "打开浏览器", "browser", "Browser use", "research", "websearch", "百度一下", "谷歌", "浏览", "查找", "research the market",
-    # --- ingest (url + hint) ---
+    # --- ingest（URL + 提示）---
     "https://example.com", "https://example.com 抓取表格", "抓取 http://a.b/c 的数据", "HTTP://X.COM/T csv",
     "导入 https://x.com/a.csv", "fetch https://x.com", "scrape the page https://x.com/p", "crawl http://x",
     "把 https://x.com/t 转成表", "把 https://x.com/t 转成一个数据表", "把 https://x.com/t 转成" + "字" * 6 + "表",
@@ -141,18 +141,18 @@ MESSAGES: list[str] = [
     "提取 https://x.com", "爬取 https://x.com/p", "抓下来 https://x", "表格", "数据", "csv", "import", "important https://x",
     "https://importer.example", "https://x.com/路径 数据", "https://x?a=1&b=2 table", "http s://x.com 表格",
     "https://x\ufeff", "https://\ufeff 表格", "https://\x85 表格", "https://\x1c 表格", "https://\u2028 表格",
-    # --- charts ---
+    # --- 图表 ---
     "画个图表", "生成图表", "可视化销售数据", "画图", "绘图", "看板", "dashboard", "Dashboard设计", "create a chart",
     "plot the data", "visualize", "visualise", "Visualization", "visualiz", "visualis", "visuali", "visualise it",
     "VISUALISE", "VİSUALİZE", "vısualıze", "chartreuse", "charts", "bar chart", "条形图", "折线图", "饼图", "chrt",
-    # --- diagrams ---
+    # --- 示意图 ---
     "商业模式画布", "价值主张画布", "BCG 矩阵", "bcg矩阵", "BCG matrix", "bcg   matrix", "bcg\nmatrix", "SWOT 分析",
     "swot", "波特五力", "porter five forces", "Porter's five forces", "porter\nfive", "四象限", "strategic canvas",
     "strategic  business canvas", "business model canvas", "draw.io", "drawio", "draw io", "draw-io", "diagram",
     "Diagram of flow", "画布", "框架图", "战略图", "绘制矩阵", "绘制一个矩阵", "绘制画布", "绘制分析", "绘制市场分析图",
     "绘制\n矩阵", "绘制\r矩阵", "绘制\u2028矩阵", "BCG\u00a0矩阵", "bcg\u3000matrix", "bcg\ufeffmatrix", "bcg\x85matrix",
     "BCG\x1fmatrix", "porter 的 five", "porterfive", "ＢＣＧ矩阵",
-    # --- knowledge: business analysis ---
+    # --- knowledge：业务分析 ---
     "分析一下销售趋势", "统计订单数", "查询用户", "计算利润", "汇总", "总结", "对比去年", "比较两组", "趋势", "变化", "增长率",
     "下降", "占比", "分布", "排名", "预测", "回归", "相关性", "异常", "诊断", "洞察", "指标", "口径", "规则", "成本", "收入",
     "利润", "订单", "客户", "用户", "销售", "运营", "转化", "留存", "流失", "效率", "绩效", "预算", "业务", "报表", "数据",
@@ -160,7 +160,7 @@ MESSAGES: list[str] = [
     "analyzer", "analyz", "analys", "trend", "forecast", "revenue", "profit", "cost", "sales", "customer", "retention",
     "churn", "Churn rate", "ANALİZE", "anaıyze", "ANALYſE", "analyse sales", "sales\u212a", "\u212apı", "KPİ", "kpı",
     "今天天气怎么样", "讲个笑话", "写一首诗", "1+1等于几", "天气", "random chatter", "the quick brown fox",
-    # --- knowledge: file navigation vs analysis ---
+    # --- knowledge：文件导航 vs 分析 ---
     "打开文件", "读取文件", "查找文件", "列出文件", "浏览目录", "上传文件", "删除文件夹", "移动文件", "重命名文件",
     "open file", "read the file", "find folder", "list directory", "Browse Directory", "upload file", "delete file",
     "move folder", "rename file", "open", "file", "open " + "x" * 20 + "file", "open " + "x" * 21 + "file",
@@ -171,7 +171,7 @@ MESSAGES: list[str] = [
     "Open File Trend", "OPEN FOLDER ANALYZE", "open directory forecast", "open directory compare", "open directory calculate",
     "find file 趋势", "find file 回归", "find file 洞察", "find file 诊断", "find file 汇总", "find file 总结",
     "find file 报表", "移动文件 排名", "重命名文件 比较", "list file 统计",
-    # --- mixed / long / unicode ---
+    # --- 混合 / 长文本 / unicode ---
     "请帮我分析 https://x.com/a.csv 的销售数据并画图", "帮我搜索一下并抓取表格 https://a.com",
     "x" * 5000, "分析" * 3000, "hello " * 1000, "\n".join(["line"] * 50), "😀 分析 😀", "😀" * 10, "𠮷野家 销售",
     "ＳＱＬ", "ＳＱＬ select", "Ｋpi", "re-visit", "naïve analysis", "çok güzel", "İstanbul sales", "ISTANBUL SALES",

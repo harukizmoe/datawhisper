@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Dashboards: build from widget specs, re-run widget SQL, persist as JSON.
+"""Dashboards：由 widget 规格构建、重跑 widget 的 SQL、以 JSON 持久化。
 
-A dashboard is ``<data>/outputs/Dashboard/<id>.json``. Every widget's SQL runs
-against one data source; chart widgets render into the given chart store
-(``store[chart_id] = html``), KPI cards keep their value fields inline.
-Shared by the ``generate_dashboard`` tool, the ``dashboard.*`` RPC methods and
-the old Flask routes.
+一个 dashboard 就是 ``<data>/outputs/Dashboard/<id>.json``。每个 widget 的 SQL
+都针对同一个 data source 执行；图表 widget 渲染进给定的 chart store
+（``store[chart_id] = html``），KPI 卡片把值字段内联保存。
+``generate_dashboard`` 工具、``dashboard.*`` RPC 方法与旧 Flask 路由共用此模块。
 """
 import datetime
 import json
@@ -62,7 +61,7 @@ def _sql_guard(sql: str, workspace_authorization=None) -> str | None:
 
 
 def _render_kpi_from_df(df, error: str | None = None) -> dict:
-    """Return KPI_Card value fields from an already-fetched DataFrame."""
+    """从已取到的 DataFrame 生成 KPI_Card 的值字段。"""
     if error:
         return {"kpi_value": "—", "kpi_sub": "", "kpi_trend": None, "error": error}
     try:
@@ -98,7 +97,7 @@ def _render_kpi_from_df(df, error: str | None = None) -> dict:
 def _render_widget_from_df(
     chart_store, color_scheme: str, spec: dict, df, error: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """Generate chart HTML from an already-fetched DataFrame."""
+    """从已取到的 DataFrame 生成图表 HTML。"""
     if error:
         return None, error
     try:
@@ -133,7 +132,7 @@ def _render_widget_from_df(
 def prefetch_dashboard_widget_data(
     data_source, widgets_spec: list, workspace_authorization=None,
 ) -> list[dict]:
-    """Fetch widget SQL results on the caller thread before any worker rendering."""
+    """在任何 worker 渲染之前，于调用方线程取回 widget 的 SQL 结果。"""
     prefetched = []
     for spec in widgets_spec:
         sql = spec.get("sql", "")
@@ -160,8 +159,8 @@ def prefetch_dashboard_widget_data(
 def render_widget(
     data_source, chart_store, color_scheme: str, widget: dict, workspace_authorization=None,
 ) -> dict:
-    """Re-run one widget's SQL and render it in place. Returns the widget id with
-    its refreshed fields: ``kpi_*``/``error`` for KPI cards, else ``chart_id``/``error``."""
+    """重跑单个 widget 的 SQL 并就地渲染。返回 widget id 及其刷新的字段：
+    KPI 卡片为 ``kpi_*``/``error``，其余为 ``chart_id``/``error``。"""
     item = prefetch_dashboard_widget_data(data_source, [widget], workspace_authorization)[0]
     if widget.get("chart_type") == "KPI_Card":
         kpi = _render_kpi_from_df(item["df"], item["error"])
@@ -180,7 +179,7 @@ def build_dashboard(
     name: str, widgets_spec: list, color_scheme: str,
     workspace_authorization=None,
 ) -> dict:
-    """Build a dashboard from an already-leased data-source snapshot."""
+    """基于已租用的 data-source 快照构建 dashboard。"""
     prefetched = prefetch_dashboard_widget_data(
         data_source, widgets_spec, workspace_authorization,
     )
@@ -198,7 +197,7 @@ def build_dashboard_from_prefetched_widgets(
     chart_store, *, session_id: str, workspace_id: str, name: str,
     widget_inputs: list, color_scheme: str, owner_uid: str = "",
 ) -> dict:
-    """Build dashboard JSON from caller-thread SQL results."""
+    """用调用方线程已取到的 SQL 结果构建 dashboard JSON。"""
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = re.sub(r'[^\w\-]', '_', name)
     dashboard_id = f"{safe_name}_{ts}"

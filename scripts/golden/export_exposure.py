@@ -1,22 +1,22 @@
-"""Golden matrix for the P3.4 tool exposure algorithm, produced by the real Python implementation.
+"""P3.4 工具暴露算法的 golden 矩阵，由真实 Python 实现产出。
 
     .venv/bin/python scripts/golden/export_exposure.py
 
-Writes server/test/golden/exposure.json. Every case runs the same four-stage pipeline the Python
-agent runs per model call:
+写入 server/test/golden/exposure.json。每个用例都跑与 Python agent 每次模型调用
+相同的四阶段流水线：
 
     agent.tools.exposure.filter_tools_for_turn
     agent.workflow_stage.infer_workflow_stage + filter_tools_for_stage
     agent.agent._scope_tool_result_reader
     agent.tools.exposure.limit_tools_for_turn
 
-plus the discovery TTL bookkeeping from `data.session.ChatSession`
-(`record_discovered_tools`) and `SessionState.restore_rewind_state`.
+再加上来自 `data.session.ChatSession`（`record_discovered_tools`）与
+`SessionState.restore_rewind_state` 的 discovery TTL 记账。
 
-Schemas are synthetic: every case lists tool *names* only (`{"function": {"name": ...}}`), because
-exposure never reads anything else. `toolSets` keeps the payload small; the TS test rebuilds the
-exact same schema order. Expected lists keep canonical input order (prompt-cache stability is part
-of the contract), so the TS side must match them exactly, not as sets.
+Schema 是合成的：每个用例只列出工具的 *名字*（`{"function": {"name": ...}}`），
+因为 exposure 从不读取其他字段。`toolSets` 让 payload 保持精简；TS 测试会重建
+完全相同的 schema 顺序。期望列表保持规范输入顺序（提示词缓存稳定性属于契约的
+一部分），因此 TS 侧必须完全按序匹配，而不是按集合比较。
 """
 from __future__ import annotations
 
@@ -60,8 +60,8 @@ COMMANDS = [
     "mcp", "new", "robot", "sessions", "skills", "status", "stop", "teams", "workspace",
 ]
 
-# Realistic user turns. Chinese and English; together they exercise every discovery branch,
-# every per-tool keyword set, and the workspace/web/diagram/CRUD collision resolvers.
+# 真实的用户回合。中英文兼有；合起来覆盖每个 discovery 分支、
+# 每套按工具的 keyword，以及 workspace/web/diagram/CRUD 的冲突解析器。
 MESSAGES = [
     "帮我分析一下这个季度的销售数据",
     "分析各区域销售额的同比变化",
@@ -244,7 +244,7 @@ SKILLS = [
     "ab-test-analysis", "regression",
 ]
 
-# Recent discovery LRU, most recent last, including names outside the current intent.
+# 最近的 discovery LRU，最新的在最后，包含当前意图之外的名字。
 RECENT_DISCOVERY = [
     "workspace_glob", "browser_search", "memory_read", "team_status",
     "workflow_list", "task_list", "set_ppt_color_scheme", "clean_data",
@@ -394,11 +394,11 @@ def run_case(case: dict) -> dict:
 def build_cases() -> list[dict]:
     cases: list[dict] = []
 
-    # ── A. every user message, base policy ────────────────────────────────────────────────
+    # ── A. 每条用户消息，基础策略 ────────────────────────────────────────────────────────
     for index, message in enumerate(MESSAGES):
         cases.append(make_case(f"msg-{index:03d}", message))
 
-    # ── B. each slash command, with and without data/workspace/teams ──────────────────────
+    # ── B. 每个 slash 命令，分别在有/无 data、workspace、teams 的情况下 ──────────────────
     command_messages = {
         "checkpoint": "checkpoint 保存一下当前进度",
         "clear": "clear 清空当前对话",
@@ -430,7 +430,7 @@ def build_cases() -> list[dict]:
             activation=act(command=command), has_data_source=True,
         ))
 
-    # ── C. trusted Skills (4 built-ins that own a command + representative others) ────────
+    # ── C. 受信任的 Skill（4 个自带命令的内置项 + 若干代表项）─────────────────────────
     skill_messages = {
         "export": "把分析结果导出成 Excel",
         "report": "帮我写一份季度分析报告",
@@ -454,7 +454,7 @@ def build_cases() -> list[dict]:
             has_data_source=True, has_workspace=True, teams_enabled=True,
         ))
 
-    # Skill-declared tool restriction intersections (an empty list must mean "no restriction").
+    # Skill 声明的工具限制取交集（空列表必须表示"不限制"）。
     for index, allowed in enumerate([
         ["query_data", "get_schema"],
         ["run_analysis", "query_data", "select_chart"],
@@ -474,7 +474,7 @@ def build_cases() -> list[dict]:
         tool_set="all+mcp", allowed_mcp=MCP_NAMES[:2], has_data_source=True,
     ))
 
-    # ── D. has_data_source x has_workspace x teams_enabled ────────────────────────────────
+    # ── D. has_data_source × has_workspace × teams_enabled ────────────────────────────────
     for data_source in (False, True):
         for workspace in (False, True):
             for teams in (False, True):
@@ -484,7 +484,7 @@ def build_cases() -> list[dict]:
                         has_data_source=data_source, has_workspace=workspace, teams_enabled=teams,
                     ))
 
-    # ── E. visibility cap, priority ranking, MCP pass-through ─────────────────────────────
+    # ── E. 可见性上限、优先级排序、MCP 直通 ─────────────────────────────────────────────
     wide_message = (
         "团队 任务 工作流 飞书 浏览器 文件 图表 记忆 画布 搜索 网页 报告 导出 数据画像 清洗"
     )
@@ -536,7 +536,7 @@ def build_cases() -> list[dict]:
         "cap-small-toolset", "", tool_set="essentials", max_tools=3,
     ))
 
-    # ── F. read_tool_result visibility / enum scoping ─────────────────────────────────────
+    # ── F. read_tool_result 的可见性 / enum 取范围 ─────────────────────────────────────
     artifacts_none: list[dict] = []
     artifacts_one = [{"artifact_id": "tr_0123456789abcdef"}]
     artifacts_many = [{"artifact_id": f"tr_{index:032x}"} for index in range(25)]
@@ -567,7 +567,7 @@ def build_cases() -> list[dict]:
         "artifact-empty-message", "", artifacts=artifacts_mixed,
     ))
 
-    # ── G. workflow stages ────────────────────────────────────────────────────────────────
+    # ── G. workflow 阶段 ────────────────────────────────────────────────────────────────
     stage_cases = [
         ("general", {}, [], False),
         ("inspect-knowledge", {"has_data_source": True}, [], False),
@@ -595,7 +595,7 @@ def build_cases() -> list[dict]:
             **options,
         ))
 
-    # ── H. explicit discovery input (older turns) ────────────────────────────────────────
+    # ── H. 显式 discovery 输入（更早的回合）────────────────────────────────────────────
     cases.append(make_case(
         "discovered-carried", "你好",
         discovered=["workspace_bash", "profile_data", "browser_click"],
