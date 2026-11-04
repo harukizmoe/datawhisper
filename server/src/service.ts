@@ -10,6 +10,10 @@ import { assembleTools } from "./tools/assemble.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
 import { type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
+import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
+import { WorkExecutorRegistry } from "./jobs/work-task.ts";
+import { createWorkflows, workflowsExtension, type Workflows } from "./workflows/service.ts";
+import { createAgentNodeExecutor } from "./workflows/agent-node.ts";
 import { ModelService } from "./models/service.ts";
 import type { SubmitResponse } from "./protocol.ts";
 
@@ -30,6 +34,10 @@ export type Service = {
   readonly context: Context;
   /** 传输无关的会话业务；IPC 方法表与测试都通过它驱动。 */
   readonly conversations: Conversations;
+  /** 长任务（旧 jobs）：每个 job 就是一条 `datawhisper.job` task 的记录。 */
+  readonly jobs: Jobs;
+  /** 工作流运行：运行 task + 节点子 task，节点由 agent 执行器跑在一轮独立会话里。 */
+  readonly workflows: Workflows;
   /** `conversations.submitTurn` 的便捷入口（测试里常用）。 */
   submitTurn(id: string | number, body: unknown): Promise<SubmitResponse>;
   /** Harness 关闭时落定：`stop()` 之后，或存储失败之后（`kind: "failed"`）。 */
@@ -87,7 +95,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
   );
   harness.resume();
 
-
+  const workExecutors = new WorkExecutorRegistry();
+  const jobs = createJobs({ harness, context, executors: workExecutors });
   const conversations = createConversations({
     harness,
     modelService,
@@ -96,6 +105,16 @@ export async function startService(config: Config, options: ServiceOptions = {})
     tools,
     turnState: options.turnState,
   });
+
+  // 工作流：节点跑在独立会话里；扩展装进同一个 registry，下一次调度即可见（必须在 `resume()` 之后装，
+  // 否则恢复的运行看不到 task 定义）。
+  const workflows = createWorkflows({
+    harness,
+    context,
+    executeNode: createAgentNodeExecutor({ harness, context, conversations }),
+  });
+  registry.install(jobsExtension(jobs));
+  registry.install(workflowsExtension(workflows));
 
   let harnessClosed = false;
   const closed = harness.closed.then((end) => {
@@ -108,6 +127,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
     compute,
     modelService,
     context,
+    jobs,
+    workflows,
     conversations,
     submitTurn: (id, body) => conversations.submitTurn(id, body),
     closed,
