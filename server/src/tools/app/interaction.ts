@@ -269,14 +269,18 @@ export function createInteractionTools(deps: AppToolDeps): AppTool[] {
               ? "Matched tools will be available on the next model step."
               : "No connected MCP tool matched this query.",
           };
-          return okResult("search_mcp_tools", renderValue(result as unknown as JsonValue), {
-            tool: "search_mcp_tools",
-            query: result.query,
-            catalog_version: result.catalog_version,
-            matches: matches as unknown as JsonValue,
-            count: matches.length,
-            hint: result.hint,
-          });
+          return {
+            ...okResult("search_mcp_tools", renderValue(result as unknown as JsonValue), {
+              tool: "search_mcp_tools",
+              query: result.query,
+              catalog_version: result.catalog_version,
+              matches: matches as unknown as JsonValue,
+              count: matches.length,
+              hint: result.hint,
+            }),
+            // MCP 工具以 `deferred: true` 注册；只有这里把名字交给 `modelTools.add`，下一次模型请求才会提供它们。
+            ...(matches.length === 0 ? {} : { control: { addTools: matches.map((match) => match.name) } }),
+          };
         } catch (error) {
           return fail("search_mcp_tools", error);
         }

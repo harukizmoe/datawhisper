@@ -10,7 +10,7 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { defineTool, type ConversationDocToken, type JsonObject, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineTool, type ConversationDocToken, type JsonObject, type ToolControl, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { WorkspaceFs } from "./workspace/fs.ts";
 import type { PlanStoreDoc, TaskBoardDoc, TeamStoreDoc } from "./docs.ts";
 import type { MemoryDirs } from "../../agent/memory.ts";
@@ -126,10 +126,16 @@ export function makeAppTool<Args extends object>(spec: {
   readonly description: string;
   readonly parameters: object;
   readonly replay: "safe" | "unsafe";
-  readonly execute: (args: Args) => Promise<{ output: { type: "text"; text: string }[]; details: AppToolDetails } | {
+  readonly execute: (args: Args) => Promise<{
+    output: { type: "text"; text: string }[];
+    details: AppToolDetails;
+    /** 本轮之后的控制信号；目前只有 `search_mcp_tools` 用来加载 `deferred` 的 MCP 工具。 */
+    control?: ToolControl;
+  } | {
     isError: true;
     output: { type: "text"; text: string }[];
     details: AppToolDetails;
+    control?: ToolControl;
   }>;
 }): AppTool {
   return defineTool<object, AppToolDetails>({
