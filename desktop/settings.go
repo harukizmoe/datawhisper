@@ -35,6 +35,8 @@ type settingsState struct {
 	confirmProvider string
 	notice          string // 最近一次操作的提示，显示成 toast
 	noticeErr       bool   // notice 是失败提示
+	// tab 是设置页的分区：0 是模型与用量，1 是通用（外观、语言、文件）。
+	tab int
 
 	// 密钥编辑：永远只写不读；保存后清空输入框。
 	keyProvider string
@@ -162,23 +164,31 @@ func (a *app) syncDefaultForm(view *api.ModelsView) {
 	}
 }
 
-// settings 构建设置页：提供商、新增/编辑表单、默认模型与用量。它是整个右栏，所以外面只有一个滚动容器。
+// settings 构建设置页：模型/用量（服务提供）与通用（本地的外观、语言与文件）。两个分区用 Tabs 切换，
+// 「通用」不依赖服务，服务没起来时也能改外观与语言。
 func (a *app) settings(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(10, 24).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			ui.Text(c, "Settings").Bold().FontSize(20)
+			ui.Text(c, a.tr("settings.title")).Bold().FontSize(20)
 			label, color := a.statusLabel(t)
 			ui.Text(c, "●").TextColor(color)
 			ui.Text(c, label).TextColor(t.TextMuted)
 			ui.Spacer(c)
-			if a.client != nil && ui.Button(c, "Refresh settings").Clicked() {
+			if a.client != nil && ui.Button(c, a.tr("settings.refresh")).Clicked() {
 				a.loadSettings()
 			}
 			if a.st.loading && a.st.loaded {
 				ui.Spinner(c)
 			}
 		})
+		ui.Row(c).Padding(8, 24).Children(func() {
+			ui.Tabs(c, &a.st.tab, a.tr("settings.models"), a.tr("settings.general"))
+		})
+		if a.st.tab == settingsTabGeneral {
+			a.generalSettings(c, t)
+			return
+		}
 		if a.client == nil {
 			a.settingsUnavailable(c, t)
 			return
@@ -186,7 +196,7 @@ func (a *app) settings(c *ui.Context) {
 		if a.st.loading && !a.st.loaded {
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(24, 32).Children(func() {
 				ui.Spinner(c)
-				ui.Text(c, "Loading the model settings…").TextColor(t.TextMuted)
+				ui.Text(c, a.tr("settings.loading")).TextColor(t.TextMuted)
 			})
 			return
 		}
@@ -195,8 +205,8 @@ func (a *app) settings(c *ui.Context) {
 			ui.Column(c).Padding(24, 32).Gap(18).MaxWidth(900).Children(func() {
 				if a.st.err != "" {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "Could not load the settings: "+a.st.err).TextColor(t.Danger).Grow(1).MinWidth(0)
-						if ui.Button(c, "Try again").Clicked() {
+						ui.Text(c, a.tr("settings.loadFailed", "error", a.st.err)).TextColor(t.Danger).Grow(1).MinWidth(0)
+						if ui.Button(c, a.tr("settings.tryAgain")).Clicked() {
 							a.loadSettings()
 						}
 					})
@@ -209,6 +219,86 @@ func (a *app) settings(c *ui.Context) {
 			})
 		})
 		a.confirmModal(c, t)
+	})
+}
+
+// settingsTabGeneral 是设置页「通用」分区的索引。
+const settingsTabGeneral = 1
+
+// generalSettings 是外观、语言与文件：全部在本地，不需要服务就绪。改动立即生效，并写进 <dataDir>/ui.json。
+func (a *app) generalSettings(c *ui.Context, t *ui.Theme) {
+	a.showNotice(c)
+	ui.Scroll(c).Grow(1).MinWidth(0).Children(func() {
+		ui.Column(c).Padding(24, 32).Gap(22).MaxWidth(900).Children(func() {
+			a.appearanceSection(c, t)
+			a.languageSection(c, t)
+			a.filesSection(c, t)
+			if a.prefsErr != "" {
+				ui.Text(c, a.tr("settings.saveFailed", "error", a.prefsErr)).FontSize(12).TextColor(themeColor(t, "danger"))
+			}
+		})
+	})
+}
+
+// appearanceSection 是外观的三选一：跟随系统、浅色、深色。
+func (a *app) appearanceSection(c *ui.Context, t *ui.Theme) {
+	themes := []string{themeSystem, themeLight, themeDark}
+	labels := []string{a.tr("settings.system"), a.tr("settings.light"), a.tr("settings.dark")}
+	choice := 0
+	for i, pref := range themes {
+		if a.prefs.Theme == pref {
+			choice = i
+		}
+	}
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Text(c, a.tr("settings.appearance")).Bold().FontSize(16)
+		ui.Text(c, a.tr("settings.themeTip")).FontSize(12).TextColor(themeColor(t, "muted"))
+		if ui.Segmented(c, &choice, labels...).MaxWidth(360).Label(a.tr("settings.appearance")).Changed() {
+			a.setTheme(themes[choice])
+		}
+	})
+}
+
+// languageSection 是界面语言的三选一：跟随系统、English、简体中文。
+func (a *app) languageSection(c *ui.Context, t *ui.Theme) {
+	langs := []string{langSystem, langEN, langZH}
+	labels := []string{a.tr("settings.system"), languageLabel(langEN), languageLabel(langZH)}
+	choice := 0
+	for i, pref := range langs {
+		if a.prefs.Language == pref {
+			choice = i
+		}
+	}
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Text(c, a.tr("settings.language")).Bold().FontSize(16)
+		ui.Text(c, a.tr("settings.languageTip")).FontSize(12).TextColor(themeColor(t, "muted"))
+		if ui.Segmented(c, &choice, labels...).MaxWidth(360).Label(a.tr("settings.language")).Changed() {
+			a.setLanguage(langs[choice])
+		}
+	})
+}
+
+// filesSection 显示数据目录与服务日志的位置，并给出打开它们的按钮。
+func (a *app) filesSection(c *ui.Context, t *ui.Theme) {
+	row := func(label, path, openLabel string, open func()) {
+		ui.Column(c).Gap(6).Children(func() {
+			ui.Text(c, label).Bold()
+			ui.Row(c).Gap(8).AlignItems(ui.Center).MaxWidth(640).Children(func() {
+				shown := path
+				if shown == "" {
+					shown = a.tr("settings.notSet")
+				}
+				ui.Text(c, shown).FontSize(12).TextColor(themeColor(t, "muted")).Selectable().Grow(1).MinWidth(0).SingleLine()
+				if ui.Button(c, openLabel).Disabled(path == "").Clicked() {
+					open()
+				}
+			})
+		})
+	}
+	ui.Column(c).Gap(10).Children(func() {
+		ui.Text(c, a.tr("settings.files")).Bold().FontSize(16)
+		row(a.tr("settings.dataDir"), a.dataDir, a.tr("settings.openFolder"), a.openDataDir)
+		row(a.tr("settings.serviceLog"), a.logPath, a.tr("settings.openLog"), a.openServiceLog)
 	})
 }
 
@@ -227,24 +317,24 @@ func (a *app) showNotice(c *ui.Context) {
 
 func (a *app) settingsUnavailable(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Padding(24, 32).Gap(8).Children(func() {
-		ui.Text(c, "Model settings are available once the agent service is ready.").TextColor(t.TextMuted)
+		ui.Text(c, a.tr("settings.unavailable")).TextColor(t.TextMuted)
 		label, _ := a.statusLabel(t)
 		if a.service.State == supervisor.StateReady {
-			ui.Textf(c, "%s: process %d", label, a.service.PID)
+			ui.Text(c, a.tr("settings.process", "status", label, "pid", strconv.Itoa(a.service.PID)))
 		} else {
 			ui.Text(c, label)
 		}
 		if a.logPath != "" {
-			ui.Text(c, "Log: "+a.logPath).FontSize(12).TextColor(t.TextMuted).Selectable()
+			ui.Text(c, a.tr("settings.log", "path", a.logPath)).FontSize(12).TextColor(t.TextMuted).Selectable()
 		}
 	})
 }
 
 func (a *app) providersSection(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(10).Children(func() {
-		ui.Text(c, "Model providers").Bold().FontSize(16)
+		ui.Text(c, a.tr("settings.providers")).Bold().FontSize(16)
 		if a.st.view == nil || len(a.st.view.Providers) == 0 {
-			ui.Text(c, "No provider is configured. Add one below.").TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.noProvider")).TextColor(t.TextMuted)
 			return
 		}
 		for i := range a.st.view.Providers {
@@ -449,7 +539,7 @@ func (a *app) keyEditor(c *ui.Context, t *ui.Theme, p api.ModelProvider) {
 
 func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 	if a.st.editing == nil {
-		if ui.Button(c, "Add provider").Clicked() {
+		if ui.Button(c, a.tr("settings.addProvider")).Clicked() {
 			a.startAddProvider()
 		}
 		return
@@ -515,7 +605,7 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 				TextColor(t.Warning).FontSize(12)
 		}
 		if len(d.models) > 0 {
-			ui.Text(c, "Models").Bold().Margin(4, 0, 0, 0)
+			ui.Text(c, a.tr("settings.models")).Bold().Margin(4, 0, 0, 0)
 			a.editorModelsTable(c, t, d)
 		}
 		if a.st.testMsg != "" {

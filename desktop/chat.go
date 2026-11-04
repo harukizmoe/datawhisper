@@ -152,20 +152,20 @@ func (a *app) chatPage(c *ui.Context) {
 		a.message(c, messages[i])
 	}).Grow(1).Padding(16, 24).Gap(12).Justify(ui.End).Children(func() {
 		if len(messages) == 0 {
-			hint := "Ask a question about your data."
+			hint := a.tr("chat.empty")
 			if a.conv != 0 && !a.connected {
-				hint = "Loading the conversation…"
+				hint = a.tr("chat.loading")
 			}
 			ui.Text(c, hint).TextColor(t.TextMuted).Margin(ui.Auto)
 		}
 	})
 	if a.chat.Failure != "" && !a.chat.Busy {
-		ui.Text(c, "The last reply did not finish: "+a.chat.Failure).FontSize(12).TextColor(t.Warning).Padding(4, 24)
+		ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(12).TextColor(t.Warning).Padding(4, 24)
 	}
 	if a.sendErr != "" {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 24).Children(func() {
 			ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
-			if a.needModel && ui.Button(c, "Open settings").Clicked() {
+			if a.needModel && ui.Button(c, a.tr("chat.openSettings")).Clicked() {
 				a.openSettings()
 			}
 		})
@@ -177,14 +177,14 @@ func (a *app) chatPage(c *ui.Context) {
 func (a *app) chatHeader(c *ui.Context) {
 	t := c.Theme()
 	a.syncModelControls()
-	title := "New chat"
+	title := a.tr("menu.newChat")
 	if a.conv != 0 {
 		title = a.sessionTitle(a.conv)
 	}
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(10, 24).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 		// Grow+MinWidth(0) 让它把多余宽度让给右侧控件，SingleLine 在放不下时以省略号结尾。
 		ui.Text(c, title).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(title)
-		if a.conv != 0 && ui.Button(c, "Rename").Tooltip("Rename this chat").Clicked() {
+		if a.conv != 0 && ui.Button(c, a.tr("chat.rename")).Tooltip(a.tr("chat.renameTip")).Clicked() {
 			a.openRename()
 		}
 		if options := a.modelOptions(); len(options) > 0 {
@@ -199,11 +199,11 @@ func (a *app) chatHeader(c *ui.Context) {
 				a.chooseThinking(a.cv.thinkingChoice)
 			}
 		}
-		label := "Data"
+		label := a.tr("chat.data")
 		if a.src.open {
-			label = "Hide data"
+			label = a.tr("chat.hideData")
 		}
-		if ui.Button(c, label).Tooltip("Data sources, workspace and artifacts of this chat").Clicked() {
+		if ui.Button(c, label).Tooltip(a.tr("chat.dataTip")).Clicked() {
 			a.toggleSources()
 		}
 		label2, color := a.statusLabel(t)
@@ -416,25 +416,25 @@ func (a *app) composer(c *ui.Context) {
 		}
 		if a.chat.Busy && a.connected {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6, 24).Children(func() {
-				ui.Text(c, "The reply is still running.").FontSize(12).TextColor(t.TextMuted).Shrink(0)
-				ui.Segmented(c, &a.cv.busyMode, "Queue", "Steer").Shrink(0).Label("What Enter does while the reply runs")
-				hint := "Enter queues this message for after the reply."
+				ui.Text(c, a.tr("chat.busy")).FontSize(12).TextColor(t.TextMuted).Shrink(0)
+				ui.Segmented(c, &a.cv.busyMode, a.tr("chat.queue"), a.tr("chat.steer")).Shrink(0).Label(a.tr("chat.enterMode"))
+				hint := a.tr("chat.enterQueues")
 				if a.cv.busyMode == 1 {
-					hint = "Enter adds this message to the running reply."
+					hint = a.tr("chat.enterSteers")
 				}
 				ui.Text(c, hint).FontSize(11).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
 				if a.chat.Queued > 0 {
-					ui.Text(c, fmt.Sprintf("%d queued", a.chat.Queued)).FontSize(11).TextColor(t.TextMuted).Shrink(0)
+					ui.Text(c, a.tr("chat.queued", "count", strconv.Itoa(a.chat.Queued))).FontSize(11).TextColor(t.TextMuted).Shrink(0)
 				}
 			})
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(12, 24).Children(func() {
 			// MinWidth(0) 让输入框在窄窗口里真的能被压缩，否则按钮会被挤出窗口并裁成 “Sen…”。
-			in := ui.TextInput(c, &a.input).Label("Message").Placeholder("Ask about your data").Grow(1).MinWidth(0).AutoFocus()
-			if a.chat.Busy && a.connected && ui.Button(c, "Stop").Shrink(0).Tooltip("Stop the reply and withdraw queued messages").Clicked() {
+			in := ui.TextInput(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Grow(1).MinWidth(0).AutoFocus()
+			if a.chat.Busy && a.connected && ui.Button(c, a.tr("chat.stop")).Shrink(0).Tooltip(a.tr("chat.stopTip")).Clicked() {
 				a.abort()
 			}
-			send := ui.PrimaryButton(c, "Send").Shrink(0).Disabled(!a.canSend())
+			send := ui.PrimaryButton(c, a.tr("chat.send")).Shrink(0).Disabled(!a.canSend())
 			if send.Clicked() || in.Submitted() {
 				// 输入还只是一个 /命令前缀时，Enter 先补全，不直接发送。
 				if !a.completeSlash() {

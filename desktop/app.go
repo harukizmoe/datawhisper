@@ -78,6 +78,23 @@ type app struct {
 	win *mygo.Window
 	// rich 是图表与富内容的网页层（图表、HTML 产物、仪表盘、画布），见 richcontent.go。
 	rich richContent
+
+	// 界面外壳的偏好与动作（prefs.go、shell.go）：外观、语言、菜单、托盘与文件拖放。
+	prefs     uiPrefs
+	prefsPath string
+	prefsErr  string // 最近一次写偏好失败的原因
+	// prefsLocked 表示偏好来自 -theme/-lang：这一次运行照它走，但不写回 ui.json。
+	prefsLocked bool
+	dataDir     string
+	// lang 是解析后的界面语言（langEN 或 langZH）；preferred 是系统语言列表，跟随系统时用。
+	lang      string
+	preferred []string
+	hooks     shellHooks
+	menu      *mygo.Menu
+	tray      *mygo.Tray
+	// lightTheme 与 darkTheme 是缓存的 ui 主题，每帧复用同一份。
+	lightTheme *ui.Theme
+	darkTheme  *ui.Theme
 }
 
 // pendingSend 保存一条消息的 requestId 直到它被受理：失败后重发同样的文本会复用它，这样服务在失败前已经
@@ -339,6 +356,8 @@ func (a *app) refreshConversations() {
 
 // view 构建整个窗口：侧边栏，以及聊天页或设置页；聊天页可以再分出右侧的数据面板。
 func (a *app) view(c *ui.Context) {
+	// 外观在构建任何东西之前定下来：显式选了浅色或深色时，整帧都用选的那一种。
+	a.useTheme(c)
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		a.sidebar(c)
 		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
@@ -359,6 +378,8 @@ func (a *app) view(c *ui.Context) {
 	// 弹窗画在窗口根上，不被数据面板的分割线裁掉。
 	a.chatModals(c)
 	a.richModals(c)
+	// 菜单项的勾选与可用状态跟着界面走（数据面板是否打开、能不能导入）。
+	a.syncMenu()
 }
 
 func (a *app) sidebar(c *ui.Context) {
@@ -366,26 +387,26 @@ func (a *app) sidebar(c *ui.Context) {
 	ui.Column(c).Width(240).Shrink(0).PaddingY(12).Gap(8).Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 		ui.Text(c, "DataWhisper").Bold().Padding(0, 16)
 		ui.Row(c).Padding(0, 12).Children(func() {
-			if ui.Button(c, "New chat").Grow(1).Clicked() {
+			if ui.Button(c, a.tr("sidebar.newChat")).Grow(1).Clicked() {
 				a.newChat()
 			}
 		})
 		if ui.Sidebar(c, &a.nav, func() {
-			ui.SidebarSection(c, "Chats", nil, func() {
+			ui.SidebarSection(c, a.tr("sidebar.chats"), nil, func() {
 				for _, session := range a.sessions {
 					title := a.sessionTitle(session.ID)
 					ui.SidebarItem(c, navOf(session.ID), nil, title)
 				}
 				switch {
 				case a.listErr != "":
-					ui.Text(c, "Could not load the conversations").FontSize(12).TextColor(t.Danger).Padding(4, 8)
+					ui.Text(c, a.tr("sidebar.listFailed")).FontSize(12).TextColor(t.Danger).Padding(4, 8)
 				case a.listLoaded && len(a.sessions) == 0:
-					ui.Text(c, "No conversations yet").FontSize(12).TextColor(t.TextMuted).Padding(4, 8)
+					ui.Text(c, a.tr("sidebar.empty")).FontSize(12).TextColor(t.TextMuted).Padding(4, 8)
 				}
 			})
-			ui.SidebarSection(c, "App", nil, func() {
-				ui.SidebarItem(c, navData, nil, "Data")
-				ui.SidebarItem(c, navSettings, nil, "Settings")
+			ui.SidebarSection(c, a.tr("sidebar.app"), nil, func() {
+				ui.SidebarItem(c, navData, nil, a.tr("sidebar.data"))
+				ui.SidebarItem(c, navSettings, nil, a.tr("sidebar.settings"))
 			})
 		}).Grow(1).Label("Navigation").Changed() {
 			a.navigate()
@@ -397,15 +418,15 @@ func (a *app) sidebar(c *ui.Context) {
 func (a *app) statusLabel(t *ui.Theme) (string, ui.Color) {
 	switch a.service.State {
 	case supervisor.StateReady:
-		return "Ready", t.Success
+		return a.tr("status.ready"), t.Success
 	case supervisor.StateStarting:
-		return "Starting", t.Warning
+		return a.tr("status.starting"), t.Warning
 	case supervisor.StateRestarting:
-		return "Restarting", t.Warning
+		return a.tr("status.restarting"), t.Warning
 	case supervisor.StateFailed:
-		return "Failed", t.Danger
+		return a.tr("status.failed"), t.Danger
 	}
-	return "Stopped", t.TextMuted
+	return a.tr("status.stopped"), t.TextMuted
 }
 
 // banner 在有东西妨碍聊天时说明原因：服务正在启动、重启或已失败，或者会话的订阅断了；另外在重启之后的一小
@@ -417,29 +438,29 @@ func (a *app) banner(c *ui.Context) {
 	busy, retry := false, false
 	switch a.service.State {
 	case supervisor.StateStopped:
-		text, tone = "The agent service is not running.", t.TextMuted
+		text, tone = a.tr("banner.stopped"), t.TextMuted
 	case supervisor.StateStarting:
-		text, tone, busy = "Starting the agent service…", t.Accent, true
+		text, tone, busy = a.tr("banner.starting"), t.Accent, true
 	case supervisor.StateRestarting:
-		text, tone, busy = fmt.Sprintf("The agent service stopped (%v). Restarting it…", a.service.Err), t.Warning, true
+		text, tone, busy = a.tr("banner.restarting", "error", fmt.Sprint(a.service.Err)), t.Warning, true
 	case supervisor.StateFailed:
-		text, tone, retry = fmt.Sprintf("The agent service could not be started: %v.", a.service.Err), t.Danger, a.retry != nil
+		text, tone, retry = a.tr("banner.failed", "error", fmt.Sprint(a.service.Err)), t.Danger, a.retry != nil
 		if a.logPath != "" {
-			text += " Its log is " + a.logPath + "."
+			text += a.tr("banner.failedLog", "path", a.logPath)
 		}
 	case supervisor.StateReady:
 		switch {
 		case a.streamErr != "" && a.streamRetrying:
-			text, tone, busy = "Reconnecting to the conversation… ("+a.streamErr+")", t.Warning, true
+			text, tone, busy = a.tr("banner.reconnecting", "error", a.streamErr), t.Warning, true
 		case a.streamErr != "":
-			text, tone = "The conversation could not be opened: "+a.streamErr, t.Danger
+			text, tone = a.tr("banner.streamFailed", "error", a.streamErr), t.Danger
 		case a.recovered:
 			now := c.Now()
 			if a.recoveredAt.IsZero() {
 				a.recoveredAt = now
 			}
 			if left := reconnectedFor - now.Sub(a.recoveredAt); left > 0 {
-				text, tone = "Reconnected: the agent service restarted and the conversation is up to date.", t.Success
+				text, tone = a.tr("banner.reconnected"), t.Success
 				c.After(left)
 			} else {
 				a.recovered = false
@@ -454,7 +475,7 @@ func (a *app) banner(c *ui.Context) {
 			ui.Spinner(c)
 		}
 		ui.Text(c, text).Grow(1).MinWidth(0)
-		if retry && ui.Button(c, "Retry").Clicked() {
+		if retry && ui.Button(c, a.tr("banner.retry")).Clicked() {
 			a.retry()
 		}
 	})

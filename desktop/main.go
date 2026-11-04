@@ -6,6 +6,9 @@
 //	go run . -data-dir /tmp/dw -capture /tmp/dw/frames   # 另外在每种服务状态各存一张窗口 PNG
 //	go run . -data-dir /tmp/dw -open 15 -capture /tmp/dw/frames -capture-delay 8s -capture-quit
 //	                                                      # 打开会话 15、等服务就绪 8 秒后截一张图就退出（截图脚本）
+//	go run . -theme dark -lang zh-Hans -page settings-general
+//	                                                      # 本次运行用深色与简体中文，直接落在设置页的「通用」分区；
+//	                                                      # 这两个参数不写回 <dataDir>/ui.json（截图与手工验证用）
 //
 // 打包后的应用不用 -service：它先看可执行文件旁边的 bin/（macOS 是 Contents/Resources/bin/），在那里找到
 // 随包的 datawhisper-server 和 datawhisper-compute 就使用它们，并把资源目录设为服务的工作目录。
@@ -42,11 +45,46 @@ func main() {
 	openConv := flag.Int("open", 0, "show this conversation on startup (0: a new chat)")
 	width := flag.Int("width", 1180, "window width in DIPs")
 	height := flag.Int("height", 760, "window height in DIPs")
+	page := flag.String("page", "", "start on the Settings page: settings, or settings-general for the appearance and language tab")
+	theme := flag.String("theme", "", "the appearance for this run only: system, light or dark (ui.json still decides on the next run)")
+	lang := flag.String("lang", "", "the interface language for this run only: system, en or zh-Hans (ui.json still decides on the next run)")
 	flag.Parse()
 
-	a := &app{openOnReady: *openConv}
-	sup, err := newSupervisor(*service, *bun, *dataDir, *python, *computeCwd, a)
+	dataDirResolved, err := resolveDataDir(*dataDir)
+	if err != nil {
+		log.Fatalf("data directory: %v", err)
+	}
+	a := &app{openOnReady: *openConv, dataDir: dataDirResolved, prefsPath: uiPrefsPath(dataDirResolved)}
+	a.prefs = loadUIPrefs(a.prefsPath)
+	// 这两个参数只影响这一次运行（截图与手工验证用），因此不写回 ui.json。
+	if *theme != "" {
+		if !validTheme(*theme) {
+			log.Fatalf("-theme must be system, light or dark, not %q", *theme)
+		}
+		a.prefs.Theme, a.prefsLocked = *theme, true
+	}
+	if *lang != "" {
+		if !validLanguage(*lang) {
+			log.Fatalf("-lang must be system, en or zh-Hans, not %q", *lang)
+		}
+		a.prefs.Language, a.prefsLocked = *lang, true
+	}
+	// 界面的两种语言先登记，SetLocale 才能在这两者之间挑。外观在建窗口之前定下来，避免第一帧闪一下。
+	mygo.App.SetLanguages(langEN, langZH)
+	mygo.Theme.SetSource(themeSource(a.prefs.Theme))
+
+	sup, err := newSupervisor(*service, *bun, dataDirResolved, *python, *computeCwd, a)
 	mygo.App.WhenReady(func() {
+		switch *page {
+		case "settings":
+			a.nav = navSettings
+		case "settings-general":
+			// 截图与手工验证用：直接落在「通用」分区。
+			a.nav, a.st.tab = navSettings, settingsTabGeneral
+		}
+		a.preferred = mygo.App.PreferredLanguages()
+		a.lang = resolveLang(a.prefs.Language, a.preferred)
+		mygo.App.SetLocale(appLocale(a.prefs.Language))
 		view := a.view
 		if *captureDir != "" {
 			capture = &capturer{dir: *captureDir, readyDelay: *captureDelay, quit: mygo.App.Quit, quitAfter: *captureQuit, reqs: make(chan supervisor.State, 32)}
@@ -70,8 +108,16 @@ func main() {
 		a.post = win.Update
 		a.rich.post = win.Update
 		a.rich.host = windowHost{win: win, changed: win.Update}
+		// 菜单栏、托盘、文件拖放，以及系统语言与外观变化的监听。
+		a.attachShell(win)
 		// 窗口关闭会带走它自己的 web view；这里显式释放一遍，删掉媒体登记项。
-		win.OnClosed(func() { a.rich.releaseAll() })
+		win.OnClosed(func() {
+			a.rich.releaseAll()
+			if a.tray != nil {
+				a.tray.Destroy()
+				a.tray = nil
+			}
+		})
 		if capture != nil {
 			capture.start(win)
 		}
@@ -103,6 +149,15 @@ func main() {
 	if runErr != nil {
 		log.Fatal(runErr)
 	}
+}
+
+// resolveDataDir 决定数据目录：-data-dir / DW_DATA_DIR 优先，否则用每用户的数据目录。界面偏好（ui.json）
+// 与服务的数据都放在这里。
+func resolveDataDir(dir string) (string, error) {
+	if dir != "" {
+		return dir, nil
+	}
+	return supervisor.DefaultDataDir()
 }
 
 // newSupervisor 配置 agent 服务的 supervisor，并把它的状态上报给 a。

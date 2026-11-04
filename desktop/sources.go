@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,9 +50,6 @@ var remoteKinds = []remoteKind{
 	{ID: "feishu", Label: "Feishu Bitable"},
 	{ID: "http", Label: "HTTP API"},
 }
-
-// uploadLimitUnknown 在还没向服务端开过票时显示。
-const uploadLimitUnknown = "The service sets the limit when the import starts."
 
 // sourcesState 是数据面板的数据与编辑状态。只有 UI 线程会改它：构建视图时，以及在 post 上排队的函数里。
 type sourcesState struct {
@@ -137,6 +135,9 @@ type sourcesState struct {
 
 	notice    string
 	noticeErr bool
+
+	// queue 是等待导入的路径（从窗口拖进来的文件）。一次只导入一个，见 startImport。
+	queue []string
 
 	monoOnce bool
 	mono     string
@@ -383,11 +384,11 @@ func (a *app) uploadFile(path string) {
 		ticket, err := client.BeginUpload(ctx, conv, filename, size)
 		if err != nil {
 			a.post(func() {
-				if client != a.client {
-					return
-				}
 				a.src.uploading = false
-				a.src.uploadErr = sourceErrorText(err)
+				if client == a.client {
+					a.src.uploadErr = sourceErrorText(err)
+				}
+				a.startImport()
 			})
 			return
 		}
@@ -395,11 +396,11 @@ func (a *app) uploadFile(path string) {
 		// 服务端声明的上限比本地文件小：现在拒绝，票据自然过期，绝不先写盘。
 		if ticket.MaxBytes > 0 && size > ticket.MaxBytes {
 			a.post(func() {
-				if client != a.client {
-					return
-				}
 				a.src.uploading = false
-				a.src.uploadErr = oversizeText(filename, size, ticket.MaxBytes)
+				if client == a.client {
+					a.src.uploadErr = oversizeText(filename, size, ticket.MaxBytes)
+				}
+				a.startImport()
 			})
 			return
 		}
@@ -421,22 +422,24 @@ func (a *app) uploadFile(path string) {
 		if err != nil {
 			_ = os.Remove(ticket.Path)
 			a.post(func() {
-				if client != a.client {
-					return
-				}
 				a.src.uploading = false
-				a.src.uploadErr = "Could not copy " + filename + ": " + err.Error()
+				if client == a.client {
+					a.src.uploadErr = "Could not copy " + filename + ": " + err.Error()
+				}
+				a.startImport()
 			})
 			return
 		}
 		opened, err := client.OpenUpload(ctx, conv, ticket.UploadID, "")
 		a.post(func() {
+			a.src.uploading = false
 			if client != a.client {
+				a.startImport()
 				return
 			}
-			a.src.uploading = false
 			if err != nil {
 				a.src.uploadErr = sourceErrorText(err)
+				a.startImport()
 				return
 			}
 			name := filename
@@ -445,6 +448,7 @@ func (a *app) uploadFile(path string) {
 			}
 			a.src.notice, a.src.noticeErr = "Imported "+name+".", false
 			a.loadSources()
+			a.startImport()
 		})
 	}()
 }
@@ -1098,35 +1102,35 @@ func (a *app) sourcesPanel(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).MinWidth(0).Background(t.Background).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(10, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-			ui.Text(c, "Data").Bold().FontSize(16)
+			ui.Text(c, a.tr("data.title")).Bold().FontSize(16)
 			if a.src.conv != 0 {
-				ui.Textf(c, "Chat %d", a.src.conv).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.chat", "id", strconv.Itoa(a.src.conv))).FontSize(12).TextColor(t.TextMuted)
 			}
 			ui.Spacer(c)
-			if a.client != nil && ui.Button(c, "Refresh").Tooltip("Reload the sources, workspace and artifacts").Clicked() {
+			if a.client != nil && ui.Button(c, a.tr("data.refresh")).Tooltip(a.tr("data.refreshTip")).Clicked() {
 				a.loadSources()
 			}
-			if ui.Button(c, "Hide").Tooltip("Hide the data panel").Clicked() {
+			if ui.Button(c, a.tr("data.hide")).Tooltip(a.tr("data.hideTip")).Clicked() {
 				a.src.open = false
 			}
 		})
 		if a.client == nil {
-			ui.Text(c, "Data sources are available once the agent service is ready.").TextColor(t.TextMuted).Padding(16)
+			ui.Text(c, a.tr("data.unavailable")).TextColor(t.TextMuted).Padding(16)
 			return
 		}
 		if a.src.conv == 0 {
-			ui.Text(c, "Start a chat to add data sources.").TextColor(t.TextMuted).Padding(16)
+			ui.Text(c, a.tr("data.noChat")).TextColor(t.TextMuted).Padding(16)
 			return
 		}
 		a.showSourceNotice(c)
 		if a.src.loading && !a.src.loaded {
 			ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(16).Children(func() {
 				ui.Spinner(c)
-				ui.Text(c, "Loading the data sources…").TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.loading")).TextColor(t.TextMuted)
 			})
 			return
 		}
-		ui.Tabs(c, &a.src.tab, "Sources", "Workspace", "Artifacts").Label("Data tabs").Changed()
+		ui.Tabs(c, &a.src.tab, a.tr("data.tabSources"), a.tr("data.tabWorkspace"), a.tr("data.tabArtifacts")).Label(a.tr("data.tabsLabel")).Changed()
 		ui.Scroll(c).Grow(1).MinWidth(0).Children(func() {
 			ui.Column(c).Padding(14, 16).Gap(14).Children(func() {
 				if a.src.err != "" {
@@ -1161,29 +1165,29 @@ func (a *app) showSourceNotice(c *ui.Context) {
 
 // sourcesTab 是「数据源」页签：导入、连接、列表、预览。
 func (a *app) sourcesTab(c *ui.Context, t *ui.Theme) {
-	limit := uploadLimitUnknown
+	limit := a.tr("data.limitUnknown")
 	if a.src.maxBytes > 0 {
-		limit = "Files up to " + formatBytes(a.src.maxBytes) + ": .csv, .xlsx, .xls, .pdf."
+		limit = a.tr("data.limit", "size", formatBytes(a.src.maxBytes))
 	}
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-		button := ui.Button(c, "Import").Tooltip("Import a CSV, Excel or PDF file")
+		button := ui.Button(c, a.tr("data.import")).Tooltip(a.tr("data.importTip"))
 		if a.client == nil || a.src.uploading {
 			button.Disabled(true)
 		}
 		if button.Clicked() {
 			a.pickFile()
 		}
-		ui.MenuButton(c, "Connect", func(m *ui.Menu) {
+		ui.MenuButton(c, a.tr("data.connect"), func(m *ui.Menu) {
 			for i := range remoteKinds {
 				i := i
 				if m.Item(remoteKinds[i].Label).Chosen() {
 					a.startRemote(i)
 				}
 			}
-		}).Tooltip("Connect a remote data source")
+		}).Tooltip(a.tr("data.connectTip"))
 		ui.Spacer(c)
 		if len(a.src.sources) > 0 {
-			if ui.Button(c, "Remove all").Tooltip("Remove every data source of this chat").Clicked() {
+			if ui.Button(c, a.tr("data.removeAll")).Tooltip(a.tr("data.removeAllTip")).Clicked() {
 				a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmSourceAll, "", ""
 				a.src.confirmOpen = true
 			}
@@ -1192,7 +1196,7 @@ func (a *app) sourcesTab(c *ui.Context, t *ui.Theme) {
 	ui.Text(c, limit).FontSize(12).TextColor(t.TextMuted)
 	if a.src.uploading {
 		ui.Column(c).Gap(4).Children(func() {
-			ui.Textf(c, "Copying %s…", a.src.uploadName).FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.copying", "name", a.src.uploadName)).FontSize(12).TextColor(t.TextMuted)
 			ui.Progress(c, a.src.uploadProgress).Label("Import progress")
 		})
 	}
@@ -1200,7 +1204,7 @@ func (a *app) sourcesTab(c *ui.Context, t *ui.Theme) {
 		ui.Text(c, a.src.uploadErr).FontSize(12).TextColor(t.Danger)
 	}
 	if len(a.src.sources) == 0 {
-		ui.Text(c, "No data sources yet: import a file, or connect a database.").TextColor(t.TextMuted)
+		ui.Text(c, a.tr("data.empty")).TextColor(t.TextMuted)
 	}
 	for _, src := range a.src.sources {
 		a.sourceCard(c, t, src)
@@ -1220,26 +1224,26 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src api.Source) {
 			ui.Text(c, src.Name).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(src.Name)
 			ui.Badge(c, src.Kind)
 		})
-		state := "closed"
+		state := a.tr("data.stateClosed")
 		if src.Open {
-			state = "open"
+			state = a.tr("data.stateOpen")
 		}
-		ui.Textf(c, "%d tables · %s", len(src.Tables), state).FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("data.tables", "count", strconv.Itoa(len(src.Tables)), "state", state)).FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			active := src.Active
 			ui.Switch(c, &active).Label("Use " + src.Name + " in analysis").Changed()
 			if active != src.Active {
 				a.setSourceActive(src, active)
 			}
-			ui.Text(c, "In analysis").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.inAnalysis")).FontSize(12).TextColor(t.TextMuted)
 			ui.Spacer(c)
-			if ui.Button(c, "Preview").Tooltip("Preview the tables of " + src.Name).Clicked() {
+			if ui.Button(c, a.tr("data.preview")).Tooltip(a.tr("data.previewTip", "name", src.Name)).Clicked() {
 				a.showPreview(src.ID)
 			}
-			if ui.Button(c, "Edit").Tooltip("Edit " + src.Name).Clicked() {
+			if ui.Button(c, a.tr("data.edit")).Tooltip(a.tr("data.editTip", "name", src.Name)).Clicked() {
 				a.openSourceEditor(src)
 			}
-			if ui.Button(c, "Remove").Tooltip("Remove " + src.Name).Clicked() {
+			if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeTip", "name", src.Name)).Clicked() {
 				a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmSource, src.ID, src.Name
 				a.src.confirmOpen = true
 			}
@@ -1255,7 +1259,7 @@ func (a *app) previewPanel(c *ui.Context, t *ui.Theme) {
 			name = a.src.preview.SourceName
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Preview: "+name).Bold().Grow(1).MinWidth(0).SingleLine()
+			ui.Text(c, a.tr("data.previewTitle", "name", name)).Bold().Grow(1).MinWidth(0).SingleLine()
 			if a.src.previewLoading {
 				ui.Spinner(c)
 			}
@@ -1265,11 +1269,11 @@ func (a *app) previewPanel(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		if a.src.preview == nil {
-			ui.Text(c, "Loading the tables…").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.loadingTables")).FontSize(12).TextColor(t.TextMuted)
 			return
 		}
 		if len(a.src.preview.Tables) == 0 {
-			ui.Text(c, "This source has no tables.").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.noTables")).FontSize(12).TextColor(t.TextMuted)
 			return
 		}
 		var names []string
@@ -1288,17 +1292,17 @@ func (a *app) previewPanel(c *ui.Context, t *ui.Theme) {
 		})
 		if info := previewInfo(a.src.preview, a.src.previewTable); info != nil {
 			if info.TotalRows != nil {
-				ui.Textf(c, "%d rows · %d columns", *info.TotalRows, len(info.Columns)).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.rowsColumns", "rows", strconv.Itoa(*info.TotalRows), "columns", strconv.Itoa(len(info.Columns)))).FontSize(12).TextColor(t.TextMuted)
 			} else {
-				ui.Textf(c, "%d columns · row count not reported", len(info.Columns)).FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.columnsOnly", "columns", strconv.Itoa(len(info.Columns)))).FontSize(12).TextColor(t.TextMuted)
 			}
 		}
 		a.previewTable(c, t)
-		ui.Text(c, "Schema").FontSize(12).Bold()
+		ui.Text(c, a.tr("data.schema")).FontSize(12).Bold()
 		if a.src.schemaErr != "" {
 			ui.Text(c, a.src.schemaErr).FontSize(12).TextColor(t.Danger)
 		} else if a.src.schema == "" {
-			ui.Text(c, "The service reported no schema.").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.noSchema")).FontSize(12).TextColor(t.TextMuted)
 		} else {
 			text := ui.Text(c, a.src.schema).FontSize(12).Selectable().SingleLine()
 			if mono := a.monoFont(); mono != "" {
@@ -1329,7 +1333,7 @@ func (a *app) previewTable(c *ui.Context, t *ui.Theme) {
 	}
 	rows := a.src.table
 	if rows == nil || len(rows.Columns) == 0 {
-		ui.Text(c, "No rows to preview.").FontSize(12).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("data.noRows")).FontSize(12).TextColor(t.TextMuted)
 		return
 	}
 	columns := make([]ui.TableColumn, len(rows.Columns))
