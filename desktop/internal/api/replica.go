@@ -163,6 +163,20 @@ func field(node any, path ...string) any {
 }
 
 // contentText 把 pi-ai 消息内容的文本拼起来（内容是字符串，或是一组 block）。
+// systemNotePrefixes 与 `server/src/agent/policies.ts` 里的标记保持同步。
+var systemNotePrefixes = []string{"[QUALITY GATE]", "[SYSTEM NOTE]"}
+
+// isSystemNote 报告这条用户消息其实是宿主写下的旁注，而不是用户自己打的字。
+func isSystemNote(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	for _, prefix := range systemNotePrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func contentText(content any) string {
 	if s, ok := content.(string); ok {
 		return s
@@ -363,7 +377,14 @@ func (r *Replica) messages() []Message {
 		id := fmt.Sprint(field(entry, "id"))
 		switch field(entry, "kind") {
 		case "pi.user":
-			out = append(out, Message{Key: "e" + id, Role: "user", Text: contentText(field(m, "content")), Done: true})
+			text := contentText(field(m, "content"))
+			// 质量闸门与系统提醒是宿主写进会话的「给模型看的」消息（用户角色，模型才肯照做），
+			// 但对人来说它们是诊断信息，不能冒充用户发言：渲染成旁注。
+			role := "user"
+			if isSystemNote(text) {
+				role = "note"
+			}
+			out = append(out, Message{Key: "e" + id, Role: role, Text: text, Done: true})
 		case "pi.assistant":
 			blocks, _ := field(m, "content").([]any)
 			text := contentText(field(m, "content"))

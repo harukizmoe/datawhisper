@@ -20,6 +20,8 @@ import (
 type chatView struct {
 	// openTools 记住哪些工具行被展开；默认全部折叠，只显示一行摘要。
 	openTools map[string]bool
+	// openNotes 记住哪些宿主旁注（质量闸门、系统提醒）被展开；默认折叠。
+	openNotes map[string]bool
 	// asks 按工具调用 id 记住 ask_user 卡片的本地编辑状态。
 	asks map[string]*askUI
 
@@ -222,6 +224,9 @@ func (a *app) message(c *ui.Context, m api.Message) {
 			ui.Spacer(c)
 			ui.Text(c, m.Text).Selectable().Padding(8, 12).Radius(14).Background(t.Surface).MaxWidth(560)
 		})
+	case m.Role == "note":
+		// 宿主写给模型的旁注（质量闸门、系统提醒）：展示成可折叠的灰色提示，不当成用户发言。
+		a.noteRow(c, m)
 	case m.Role == "tool" && m.Tool != nil && m.Tool.Ask != nil:
 		a.askCard(c, m)
 	case m.Role == "tool" && m.Tool != nil:
@@ -241,6 +246,53 @@ func (a *app) message(c *ui.Context, m api.Message) {
 			}
 		})
 	}
+}
+
+// noteRow 渲染宿主写进会话的旁注。正文是给模型看的指令，默认折叠；展开后可选可复制，
+// 方便用户判断「它为什么又答了一遍」。
+func (a *app) noteRow(c *ui.Context, m api.Message) {
+	t := c.Theme()
+	label := m.Text
+	if at := strings.IndexByte(label, ']'); at > 0 {
+		label = label[:at+1]
+	} else if len(label) > 40 {
+		label = label[:40]
+	}
+	if a.cv.openNotes == nil {
+		a.cv.openNotes = map[string]bool{}
+	}
+	key := "note:" + m.Key
+	open, seen := a.cv.openNotes[key]
+	ui.Column(c).MaxWidth(760).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Badge(c, strings.TrimSpace(strings.Trim(label, "[]")))
+			ui.Text(c, a.tr("chat.noteHint")).FontSize(12).TextColor(t.TextMuted)
+			ui.Spacer(c)
+			toggle := a.tr("chat.details")
+			if open {
+				toggle = a.tr("chat.hide")
+			}
+			if ui.Button(c, toggle).Clicked() {
+				a.cv.openNotes[key] = !open
+			}
+		})
+		if open || seen {
+			ui.Column(c).Padding(8, 12).Radius(10).Background(t.Surface).Children(func() {
+				ui.Text(c, visibleNote(m.Text)).FontSize(12).TextColor(t.TextMuted).Selectable().MaxWidth(720)
+			})
+		}
+	})
+}
+
+// visibleNote 去掉旁注的标记前缀，只留正文。
+func visibleNote(text string) string {
+	trimmed := strings.TrimSpace(text)
+	for _, prefix := range []string{"[QUALITY GATE]", "[SYSTEM NOTE]"} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		}
+	}
+	return trimmed
 }
 
 // toolRow 是一次工具调用的一行摘要：名字、参数摘要、耗时与状态；结果默认折叠，点击展开后
@@ -268,11 +320,11 @@ func (a *app) toolRow(c *ui.Context, m api.Message) {
 				}
 				ui.Text(c, toolMeta(tool)).FontSize(11).TextColor(toolStatusColor(t, tool.Status))
 				if output != "" {
-					label := "Details"
+					label := a.tr("chat.details")
 					if open {
-						label = "Hide"
+						label = a.tr("chat.hide")
 					}
-					if ui.Button(c, label).FontSize(11).Tooltip("Show the full tool output").Clicked() {
+					if ui.Button(c, label).FontSize(11).Tooltip(a.tr("chat.toolOutputHint")).Clicked() {
 						if a.cv.openTools == nil {
 							a.cv.openTools = map[string]bool{}
 						}
