@@ -34,7 +34,7 @@
 | 用户 | 单用户应用，不需要登录；数据属于本机当前系统用户 |
 | agent 核心 | `@earendil-works/pi-durable`，锁定精确版本 `1.5.0`（同时锁 `pi-ai`、`chord` 1.5.0） |
 | agent 运行时 | Bun（P0.3 已验证 pi-durable 1.5.0 在 Bun 1.4.4 上可用，见 `docs/refactor/p0.3-findings.md`） |
-| 服务框架 | Hono，只监听 `127.0.0.1` 随机端口，每次启动生成访问令牌，只给本机的 Go 界面调用 |
+| 服务框架 | UI 与 agent 服务之间用**子进程的 stdin/stdout 上 JSONL 的 JSON-RPC 2.0**（无端口、无令牌、无网络面）；分帧与 compute 链路一致，理由见 `docs/refactor/ui-transport.md` |
 | Python 范围 | 只保留 `Function/`（分析、清洗、图表、导出、知识库）和 `data/sources`，约 4.5 万行 |
 | Python 通信 | stdio JSON-RPC 子进程，由 Bun 服务启动和管理 |
 | 存储 | 本地一个 SQLite 库（单用户） |
@@ -122,7 +122,7 @@ flowchart LR
 
 | 任务 | 内容 | 验收 |
 |---|---|---|
-| P2.1 Bun 服务工程 | TS 工程（ESM、strict）、Hono、配置加载、只监听本机 + 令牌校验、启动时打开 Harness 并 `resume()` | 无令牌的请求被拒绝；重启后会话和未完成的运行都能恢复 |
+| P2.1 Bun 服务工程 | TS 工程（ESM、strict）、配置加载、stdio JSONL RPC 传输、启动时打开 Harness 并 `resume()` | 分帧乱序/粘包/非法 JSON 有对应用例；重启后会话和未完成的运行都能恢复 |
 | P2.2 桌面应用骨架 | `desktop/` Go 模块：主窗口、侧边栏导航、子进程管理（启动 Bun 服务、读取端口和令牌、退出时清理、崩溃重启）、Go 端 API 客户端 | 启动应用即可连上服务；手动杀掉 Bun 进程后界面提示并自动恢复 |
 | P2.3 界面通信协议 | Go 界面与 Bun 服务之间的流式协议：订阅时先发 `snapshot`（`conversation.watch()` 的当前值：消息、进行中的回复、运行中的工具及输出、排队消息、用量），之后转发 `ops` 增量，带序号；断线后重新订阅即可。Web view 资源用 URL 参数里的令牌鉴权（P0.3 已验证） | 协议文档 + Go、TS 两端的类型定义；断线重连后界面状态与服务端一致 |
 
@@ -222,15 +222,15 @@ flowchart LR
 - [x] P1.2 数据源与 B 类方法：`agent/tools/business/{data,export}.py` 移到 `compute/tools/`（旧 agent 直接 import，无转发层），14 个 B 类工具的参数解析与结果整形合成 `compute/tools/dispatch.py:run_business_tool`，旧 agent 循环和 compute 共用；`compute/host.py` 的 `ToolHost` 按请求 `context` 组装 mixin 所需属性，job 路径改为请求线程内联执行（阈值不变，进度走 `progress` 通知，取消返回 CANCELLED）；数据源按调用整体加锁（按 id 排序），合并 schema / `MergedDataSource` 逻辑移到 `compute/sources.py`（`data/session.py` 调用同一份），按活动 id 元组缓存，开关数据源或建删表时失效。RPC：`tool.<14 个工具>`，另有 `tool.fetch_table_parse`、`tool.load_feishu_bitable`（网络/飞书鉴权留在 TS，compute 只做解析和注册）；删除草稿 `profile.run`。`python -m unittest compute.tests.test_tools` 12 项通过：基线中全部 B 类调用逐字一致（文本与 data_refs/knowledge_refs），另含 job 进度、ARIMA 取消、同源串行、`src1__`/`src2__` 多源路由与跨源 JOIN、建表后 schema 失效、参数校验、SQL 选表要求、两个 ingest 方法；`baseline --check` 23 个场景仍通过
 - [x] P1.3 界面侧计算：旧 API 中处理 DataFrame 的代码移入 compute（旧 API/agent 直接 import，无转发层）：`agent/validate.py`、`api/dashboard_html_export.py` 整体移到 `compute/`，与 `charts.color_schemes` 重复的 `api/color_schemes.py` 删除；仪表盘读写与组件渲染进 `compute/dashboard.py`，连接串密码编码、连接错误提示、PDF 表格解析、预览整形进 `compute/sources.py`，工作目录增量导入进 `compute/workspace.py`，知识库与嵌入设置进 `compute/knowledge.py`（`file_parser` 拆出不调模型的读取、提示词与结果合并）；compute 不再 import `agent`/`api`，`ToolHost` 执行期的 SQL 文件读取授权与参数校验共用 `sql_path_authorization`（指定了 Workspace 却不可用时拒绝）。RPC（`compute/ui.py`、`compute/knowledge.py`）：`upload.prepare`（只返回描述符，由调用方 `source.open`，重启后可按描述重开；大工作簿解析内联执行，有进度、可取消）、`source.preview`/`previewTable`/`setAnalysisTables`、`workspace.sync`（按 sha256 只导入新增或变更的文件，大文件内联 job，取消后已导入的保留）、`dashboard.refresh`/`exportHtml`、`chart.png`、`knowledge.*` 12 个（解析不调模型：返回提示词，TS 用用户配置的模型调用后交给 `knowledge.extract`）、`embed.*` 5 个；连接/测试统一走 `source.open`，失败为 `open_failed` 加可读提示；仪表盘 CRUD、文件下载、Workspace 元数据、模型下载归 TS，云端示例数据、浏览器恢复和 Web 页面路由丢弃（路由清单见 `compute/tests/test_ui_methods.py` 模块文档）。`python -m unittest compute.tests.test_ui_methods` 24 项通过：各方法正常路径与主要错误（文件不存在、数据源未打开、格式不支持等）、大工作簿解析与工作目录导入的进度和取消；与 `test_rpc`、`test_tools` 合计 48 项通过，`baseline --check` 23 个场景仍通过。kaleido 未安装，`chart.png` 只验证了 `kaleido_missing` 分支
 - [x] P1.4 Bun compute 客户端：`server/src/compute/client.ts`，`cd server && bun test` 12 项通过（连跑 5 次稳定）：并发乱序、取消与进度、事件路由、错误码、崩溃时在途请求以 `ComputeCrashed` 失败且不自动重试、下次调用自动重启并按描述重开数据源、报告丢失的内存表和重开失败的数据源、30 秒内崩溃超过 3 次停止重启、启动失败、`close()` 等在途请求结束
-- [x] P2.1 Bun 服务工程：`server/src/{main,app,config}.ts`，`bun test` 共 17 项通过（含服务进程 5 项）：无令牌或错误令牌 401、`/v1/health`、就绪行（Go 通过 `DW_TOKEN` 传令牌时不在 stdout 输出令牌）、SIGTERM 和 stdin 关闭都能正常退出、同一数据目录重启后重开存储、非法端口报错。中断的运行续跑需要先有模型（P3.1），端到端验证放到 P3.5
+- [x] P2.1 Bun 服务工程：`server/src/{main,config}.ts`、`server/src/ipc/*`（JSONL 分帧、并发分发、通知、背压）、`server/src/conversations/service.ts`（与传输无关的业务），`bun test` 586 项通过。传输在 P2 期间由「loopback HTTP + 令牌」改为 **stdio JSON-RPC 2.0**（决策与协议见 `docs/refactor/ui-transport.md`）：无端口、无令牌、无网络面；分帧只按 LF 切分、stdout 只走协议、日志走 stderr、关 stdin 即退出；`ipc.test.ts` 覆盖粘包/半包/U+2028 不切分/非法 JSON/并发乱序/未知方法/订阅快照+增量+退订/退出时发 end。中断的运行续跑需要模型（P3.1），端到端在 P3.5 的 CLI 用例验证
 - [x] P2.2 桌面应用骨架：`desktop/` Go 模块（`datawhisper/desktop`，MyGo v0.7.4）。`internal/supervisor` 按 P2.1 的进程约定启动服务（`DW_TOKEN` 为 32 字节随机令牌，`DW_DATA_DIR` 与 `config.ts` 同一默认目录，开发时 `bun run server/src/main.ts`，发布时用 `-service` 指定编译后的服务），限时读取就绪行，输出写入 `<数据目录>/logs/service.log`，停止时依次关闭 stdin、SIGTERM、强杀（Windows 只关 stdin），意外退出按 0.5 秒起、翻倍到 15 秒的退避重启，2 分钟内崩溃 5 次进入失败状态（界面可重试）；主窗口（`main.go`、`app.go`）有侧边栏（会话列表、New chat、Settings 占位页）、服务状态指示和横幅（启动中、重启中、失败加 Retry、重连会话中、恢复后 5 秒内显示 Reconnected）、沿用 spike 的聊天视图（流式 Markdown、工具行、输入框、Stop），新会话在第一条消息时创建，409 `no_model`/`model_unavailable` 引导到设置页。`go vet ./...` 通过，`go test -race ./...` 21 项通过：supervisor 8 项（TestMain 编译假服务：就绪解析、超时、退避重启、崩溃上限与重试、stdin/SIGTERM/强杀三级停止）、`ui.NewTester` 视图 3 项（横幅各状态、会话与缺少模型、录制流的流式渲染）、真实服务 2 项（见 P2.3）、`internal/api` 8 项。真实窗口冒烟：启动后就绪，外部 `kill -9` Bun 进程后显示重启横幅，约 1 秒内自动恢复，退出应用时服务因 stdin 关闭正常退出；截图 `desktop/screenshot-{skeleton,restarting,reconnected}.png`（`-capture`，`win.CapturePage()`）
 - [x] P2.3 界面通信协议：协议文档 `docs/refactor/ui-protocol.md`（接口、SSE 事件与序号规则、重连、7 种 op、视图结构、鉴权含 Web view 的 `?token=`、TS/Go 类型对照、一次回复的实录）；服务端 `server/src/routes/conversations.ts`（列表、新建、订阅、提交、中止；订阅转发 `conversation.watch()`：`snapshot`、`ops`、`end`，每 15 秒一行心跳）和 `server/src/protocol.ts`，`main.ts` 拆出 `startService(config, options)` 供进程内测试；Go 端 `desktop/internal/api`（类型化客户端、SSE 解析、`ApplyOps`、`Replica` 与聊天行推导、`Follow` 断线后从新快照重新订阅，45 秒收不到数据即判定断线）。`bun test` 42 项通过，其中 `conversations.test.ts` 11 项（本任务 8 项：401、404、请求体校验、先快照后带序号的增量且重新订阅的快照等于用 chord 还原的副本、requestId 去重、中止、心跳、列表与新建；另 3 项是 P3.1 的模型用例）；`desktop/live_test.go` 对真实服务（假模型）验证 Go 副本与新快照的 JSON 逐字节相等，SIGKILL 重启后仍相等且 requestId 去重有效，界面恢复同一会话并能继续对话。Web view 资源路由在 P7.2 按 `?token=` 实现；pi-durable 1.5.0 的会话记录没有标题，标题留到 P3.5
 - [ ] P3.1 模型
 - [x] P3.2 系统提示：Python 的系统提示与扩展资源全部移植为 TS 并由 Python 脚本生成 golden 用例做等价性验收。① `prompts.ts`：14 个提示块、25 个命令提示、`PromptContext`、意图匹配器、临时指令清洗与包装（`server/test/prompts.test.ts` 322 项通过）；② `skills.ts` / `skill-discovery.ts`：30 个内置技能与前缀/嵌套解析、验证规则、参数渲染、基于嵌入向量的 RRF 发现算法；③ `commands.ts`：17 个斜杠命令加载、别名与参数解析；④ `instructions.ts`：USER/WORKSPACE/LOCAL 分层指令加载与 `@include` 深度/循环限制；⑤ `memory.ts`：记忆读取端与提示词注入（`server/test/{skills,commands,instructions,memory}.test.ts` 98 项通过，tsc clean）。
-- [ ] P3.3 hooks
+- [x] P3.3 hooks：数字溯源核对（261 个 golden 用例与 `agent/number_audit.py` 逐字一致）、输出类工具守卫、文本形式工具调用提醒、用户自定义 hooks 引擎（条件表达式含 CPython shlex 词法、prompt/http/command 执行器、once 作用域、加载校验，708+ 个 golden 用例）全部移植为 TS，并接到 pi-durable 的 `ToolTask.beforeTool` 与 `GenerationTask.onYield` 上（`server/src/agent/policies.ts`）；`policies.test.ts` 5 项覆盖拦下/放行/补一轮修复/不误报/只提醒一次。两处有意偏离旧实现：修复轮用完后旧代码往回答追加脚注，新实现的 `onYield` 无权改写消息，改为不伪造修正；旧代码解析正文里的伪 XML 并执行，新实现只提醒改用原生工具调用（hook 不能注入调用）。`model_call_audit.py` 只服务于云托管配额，随云功能删除，不移植。用户 hooks 的生命周期事件派发（turn_start 等）随 P6 的 hooks 接口接入
+- [ ] P3.6 压缩与计量
 - [ ] P3.4 工具暴露
 - [ ] P3.5 chat 接口
-- [ ] P3.6 压缩与计量
 - [ ] P4.1 A 类工具
 - [ ] P4.2 B 类工具
 - [ ] P4.3 C 类工具
