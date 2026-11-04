@@ -6,6 +6,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { dataWhisperPrompts } from "./agent/extension.ts";
 import { dataWhisperPolicies } from "./agent/policies.ts";
 import { harnessSettings } from "./agent/settings.ts";
+import { assembleTools } from "./tools/assemble.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
 import { type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
@@ -52,13 +53,24 @@ export async function startService(config: Config, options: ServiceOptions = {})
   mkdirSync(config.dataDir, { recursive: true });
 
   const modelService = await ModelService.open(config.dataDir, { forceFileCredentials: options.forceFileCredentials });
+
+  // compute 与工具集要在注册表之前就绪：注册表要装工具，策略扩展要用同一个外溢 store。
+  const compute = new ComputeClient({
+    python: config.python,
+    cwd: config.computeCwd,
+    onStderr: (line) => console.error(`[compute] ${line}`),
+  });
+  // 生产工具集：A 类纯 TS + B 类 compute 外壳。测试可以用 `options.tools` 覆盖（桩工具）。
+  const assembled = options.tools === undefined ? assembleTools(config, compute, "local") : undefined;
+  const tools = options.tools ?? assembled!.tools;
+
   const registry = options.registry ?? createRegistry();
   // 系统提示扩展常驻；工具必须真的装进注册表，否则 `configure({ modelTools })` 只是在空集合里筛选。
   registry.install(dataWhisperPrompts());
-  // 输出侧策略（工具守卫、数字溯源、文本形式工具调用）与提示同在一个注册表上，按会话生效。
-  registry.install(dataWhisperPolicies());
-  if (options.tools !== undefined && options.tools.length > 0) {
-    registry.install(defineExtension({ name: "datawhisper-tools", tools: options.tools }));
+  // 输出侧策略（工具守卫、数字溯源、文本形式工具调用、外溢与证据声明）与提示同在一个注册表上。
+  registry.install(dataWhisperPolicies(assembled === undefined ? {} : { toolResults: assembled.toolResults }));
+  if (tools.length > 0) {
+    registry.install(defineExtension({ name: "datawhisper-tools", tools }));
   }
   const harness = await Harness.open(
     await openNodeSqliteStorage(join(config.dataDir, "datawhisper.sqlite")),
@@ -75,11 +87,6 @@ export async function startService(config: Config, options: ServiceOptions = {})
   );
   harness.resume();
 
-  const compute = new ComputeClient({
-    python: config.python,
-    cwd: config.computeCwd,
-    onStderr: (line) => console.error(`[compute] ${line}`),
-  });
 
   const conversations = createConversations({
     harness,

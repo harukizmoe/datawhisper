@@ -6,10 +6,16 @@ import {
   hook,
   type HookApi,
   ToolTask,
+  type ToolHooks,
 } from "@earendil-works/pi-durable";
 import type { Message } from "@earendil-works/pi-ai";
+import { confirmationBlock } from "../tools/guard/confirmation.ts";
+import { applyToolResultGuard } from "../tools/guard/index.ts";
+import type { EvidenceClaimStore } from "../tools/guard/evidence.ts";
+import type { ToolResultStore } from "../tools/guard/spill.ts";
+import { getToolSpec } from "../tools/registry.ts";
 import { auditReportNumbers, collectNumberEvidence, NUMBER_EVIDENCE_TOOLS } from "./number-audit.ts";
-import { blockMessage, blockedOutputTools, guardToken } from "./output-guard.ts";
+import { blockedOutputTools, guardToken } from "./output-guard.ts";
 import { parseTextFallbackToolCalls } from "./text-fallback.ts";
 import { EMPTY_TURN_CONTEXT, TurnDoc } from "./turn.ts";
 
@@ -33,17 +39,52 @@ const SYSTEM_NOTE_MARK = "[SYSTEM NOTE]";
 /** 一次分页读取的最大条目数；够覆盖一轮对话（旧实现也是整段 messages）。 */
 const REQUEST_MEMO = "dw.request";
 
-export function dataWhisperPolicies(): Extension {
+export type PolicyOptions = {
+  /** 结果外溢与证据声明的宿主端口；省略时不做外溢（宿主装配时注入）。 */
+  readonly toolResults?: ToolResultStore;
+  readonly evidenceClaims?: EvidenceClaimStore;
+  /** 本会话工作区 id，写入外溢制品与证据声明。 */
+  readonly workspaceId?: string;
+};
+
+export function dataWhisperPolicies(options: PolicyOptions = {}): Extension {
+  const toolHooks: Partial<ToolHooks> = {
+    async beforeTool(call, api, context) {
+      const turn = (await api.snapshot(TurnDoc, api.conversationId, context)) ?? EMPTY_TURN_CONTEXT;
+      const token = guardToken(turn.command ?? undefined, turn.activation);
+      // ① 旧 `_OUTPUT_TOOL_GUARDS`：普通对话里调用 propose/generate/export 一律拦下。
+      const outputBlock = blockedOutputTools([call.name], token)[0];
+      if (outputBlock !== undefined) return { block: outputBlock.reason };
+      // ② 注册表 `confirmation` 的运行时检查（旧实现只有元数据）。
+      const block = confirmationBlock({
+        name: call.name,
+        spec: getToolSpec(call.name),
+        args: call.arguments,
+        token,
+        message: turn.message,
+      });
+      return block === undefined ? undefined : { block };
+    },
+  };
+
+  if (options.toolResults !== undefined) {
+    const store = options.toolResults;
+    toolHooks.afterTool = async (call, result, api) =>
+      applyToolResultGuard({
+        name: call.name,
+        args: call.arguments,
+        result,
+        store,
+        evidence: options.evidenceClaims,
+        sessionId: String(api.conversationId),
+        workspaceId: options.workspaceId,
+      });
+  }
+
   return defineExtension({
     name: "datawhisper-policies",
     hooks: [
-      hook(ToolTask, {
-        async beforeTool(call, api, context) {
-          const turn = (await api.snapshot(TurnDoc, api.conversationId, context)) ?? EMPTY_TURN_CONTEXT;
-          const token = guardToken(turn.command ?? undefined, turn.activation);
-          return blockedOutputTools([call.name], token).length === 0 ? undefined : { block: blockMessage(call.name) };
-        },
-      }),
+      hook(ToolTask, toolHooks),
       hook(GenerationTask, {
         // 本轮的请求消息就是模型看到的完整上下文（含工具结果）；工具结果条目本身不带 model 消息，
         // 所以只能从这里取证据，而不是从 entry.model 拼。
