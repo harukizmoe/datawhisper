@@ -1,0 +1,228 @@
+{
+ "parse": [
+  {
+   "content": "",
+   "calls": []
+  },
+  {
+   "content": "no markup at all",
+   "calls": []
+  },
+  {
+   "content": "plain <b>bold</b> html",
+   "calls": []
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">&lt;mxfile&gt;x&lt;/mxfile&gt;</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "&lt;mxfile&gt;x&lt;/mxfile&gt;"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">a</parameter><parameter name=\"title\">T</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "a",
+      "title": "T"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram></display_diagram>",
+   "calls": []
+  },
+  {
+   "content": "<display_diagram>no parameters here</display_diagram>",
+   "calls": []
+  },
+  {
+   "content": "<DISPLAY_DIAGRAM><PARAMETER NAME=\"xml\">upper</PARAMETER></DISPLAY_DIAGRAM>",
+   "calls": []
+  },
+  {
+   "content": "<edit_diagram><parameter name=\"id\">3</parameter></edit_diagram>",
+   "calls": [
+    [
+     "edit_diagram",
+     {
+      "id": "3"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<append_diagram><parameter name=\"xml\">y</parameter></append_diagram>",
+   "calls": [
+    [
+     "append_diagram",
+     {
+      "xml": "y"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<some_other_tool><parameter name=\"x\">1</parameter></some_other_tool>",
+   "calls": []
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">m1</parameter></display_diagram><edit_diagram><parameter name=\"id\">9</parameter></edit_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "m1"
+     }
+    ],
+    [
+     "edit_diagram",
+     {
+      "id": "9"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram\n  id=\"1\"><parameter name=\"xml\">newline attr</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "newline attr"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">multi\nline\nvalue</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "multi\nline\nvalue"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram><parameter name='xml'>single quotes</parameter></display_diagram>",
+   "calls": []
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">unclosed</display_diagram>",
+   "calls": []
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">a</parameter><parameter name=\"xml\">b</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "b"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram><parameter name=\"中文\">值</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "中文": "值"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram>pre<parameter name=\"xml\">x</parameter>post</display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "x"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram><display_diagram><parameter name=\"xml\">nested</parameter></display_diagram></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "nested"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "text before <display_diagram><parameter name=\"xml\">v</parameter></display_diagram> text after",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "v"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram><parameter name=\"xml\">a &amp; b &lt;c&gt;</parameter></display_diagram>",
+   "calls": [
+    [
+     "display_diagram",
+     {
+      "xml": "a &amp; b &lt;c&gt;"
+     }
+    ]
+   ]
+  },
+  {
+   "content": "<display_diagram_name><parameter name=\"xml\">x</parameter></display_diagram_name>",
+   "calls": []
+  },
+  {
+   "content": "<display_diagram><parameter name = \"xml\" >spaced</parameter ></display_diagram>",
+   "calls": []
+  }
+ ],
+ "guards": {
+  "propose_ppt_outline": [
+   "ppt",
+   "ppt_revise"
+  ],
+  "generate_ppt": [
+   "ppt_confirm"
+  ],
+  "propose_report_outline": [
+   "report",
+   "report_revise"
+  ],
+  "export_report": [
+   "report_confirm"
+  ],
+  "propose_excel_export": [
+   "excel_revise",
+   "export"
+  ],
+  "export_excel": [
+   "excel_confirm"
+  ],
+  "propose_dashboard_outline": [
+   "dashboard",
+   "dashboard_revise"
+  ],
+  "generate_dashboard": [
+   "dashboard_confirm"
+  ]
+ }
+}
