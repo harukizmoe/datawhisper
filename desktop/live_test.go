@@ -2,8 +2,9 @@
 
 package main
 
-// Live 测试：在真正的 supervisor 下跑真正的 agent 服务（server/test/support/stub-service.ts：该服务只带一个
-// 进程内 stub 模型作为提供方）。它们需要 bun 以及服务的依赖（cd server && bun install），缺了就跳过。不在
+// Live 测试：在真正的 supervisor 下跑真正的 agent 服务。入口有两个：server/src/main.ts（验证进程契约与
+// JSON-RPC 往返），以及 server/test/support/stub-service.ts（同一个服务代码，另带一个进程内 stub 模型，
+// 用来验证对话、工具调用与重启）。它们需要 bun 以及服务的依赖（cd server && bun install），缺了就跳过。不在
 // Windows 上跑：它们用 SIGKILL 杀服务。
 
 import (
@@ -23,8 +24,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// stubService 返回用 stub 模型运行该服务的命令。
-func stubService(t *testing.T) []string {
+// serviceEntry 返回用 bun 运行仓库内某个服务入口的命令；bun 或服务的依赖缺失时跳过测试。
+func serviceEntry(t *testing.T, entry string) []string {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -37,17 +38,27 @@ func stubService(t *testing.T) []string {
 	if _, err := os.Stat(filepath.Join(root, "server", "node_modules")); err != nil {
 		t.Skip("the server's dependencies are not installed (cd server && bun install)")
 	}
-	return []string{bun, "run", filepath.Join(root, "server", "test", "support", "stub-service.ts")}
+	return []string{bun, "run", filepath.Join(root, filepath.FromSlash(entry))}
+}
+
+// stubService 返回用 stub 模型运行该服务的命令。
+func stubService(t *testing.T) []string {
+	return serviceEntry(t, "server/test/support/stub-service.ts")
 }
 
 // startSupervised 在 supervisor 下启动 stub 服务，状态变化上报给 onState，测试结束后把它停掉。
 func startSupervised(t *testing.T, onState func(supervisor.Status)) *supervisor.Supervisor {
 	t.Helper()
+	return startCommand(t, stubService(t), []string{"STUB_CHUNK_MS=20"}, onState)
+}
+
+// startCommand 在 supervisor 下启动 command，状态变化上报给 onState，测试结束后把它停掉。
+func startCommand(t *testing.T, command, env []string, onState func(supervisor.Status)) *supervisor.Supervisor {
+	t.Helper()
 	sup, err := supervisor.New(supervisor.Config{
-		Command: stubService(t),
+		Command: command,
 		DataDir: t.TempDir(),
-		// 约 25 个 20 ms 的 chunk：回复会流式输出 500 ms，超过 pi-durable 的 100 ms partial 提交间隔。
-		Env:     []string{"STUB_CHUNK_MS=20"},
+		Env:     env,
 		OnState: onState,
 	})
 	if err != nil {
@@ -105,15 +116,35 @@ type errorString string
 
 func (e errorString) Error() string { return string(e) }
 
+// TestLiveServiceEntry 在 supervisor 下跑真正的入口 server/src/main.ts。它没有测试用的模型提供方，所以只验证
+// 进程契约与管道往返：ready 行、health、conversation.list。
+func TestLiveServiceEntry(t *testing.T) {
+	states := make(chan supervisor.Status, 64)
+	startCommand(t, serviceEntry(t, "server/src/main.ts"), nil, func(st supervisor.Status) { states <- st })
+	ready := next(t, states, supervisor.StateReady)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	c := api.New(ready.Pipe)
+	h, err := c.Health(ctx)
+	if err != nil || !h.OK {
+		t.Fatalf("health: %+v %v", h, err)
+	}
+	list, err := c.Conversations(ctx)
+	if err != nil {
+		t.Fatalf("conversation.list: %v", err)
+	}
+	t.Logf("main.ts ready pid=%d: health ok, %d conversations", ready.PID, len(list))
+}
+
 // TestLiveReplicaMatchesTheService 在回复流式输出期间，用 snapshot 和 ops 复制一个会话，并检查新取的 snapshot
 // 与副本一致；在服务被杀掉、并用同一份数据重启之后也一样。
 func TestLiveReplicaMatchesTheService(t *testing.T) {
 	states := make(chan supervisor.Status, 64)
-	sup := startSupervised(t, func(st supervisor.Status) { states <- st })
+	startSupervised(t, func(st supervisor.Status) { states <- st })
 	ready := next(t, states, supervisor.StateReady)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	client := api.New(ready.Port, sup.Token())
+	client := api.New(ready.Pipe)
 	id, err := client.CreateConversation(ctx, api.CreateConversationRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -125,10 +156,14 @@ func TestLiveReplicaMatchesTheService(t *testing.T) {
 	defer stopSub()
 	go func() { _ = client.Subscribe(subCtx, conv, func(ev api.Event) error { events <- ev; return nil }) }()
 	var replica api.Replica
-	if err := replica.Apply(<-events); err != nil {
+	first := <-events
+	if first.Name != "snapshot" {
+		t.Fatalf("the subscription started with %q, want a snapshot", first.Name)
+	}
+	if err := replica.Apply(first); err != nil {
 		t.Fatal(err)
 	}
-	sent, err := client.Submit(ctx, conv, api.SubmitRequest{RequestID: "live-1", Text: "Summarize the data"})
+	sent, err := client.Submit(ctx, conv, api.SubmitRequest{RequestID: "live-1", Text: `Describe sales CALL:get_schema{"table":"sales"}`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,23 +175,37 @@ func TestLiveReplicaMatchesTheService(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatalf("reply not finished; replica state %+v", replica.State())
 		}
+		if ev.Name == "ops" {
+			opsEvents++
+		}
 		if err := replica.Apply(ev); err != nil {
 			t.Fatalf("seq %d: %v", ev.Seq, err)
 		}
-		opsEvents++
 		st := replica.State()
 		n := len(st.Messages)
 		if n > 0 && st.Messages[n-1].Role == "assistant" && !st.Messages[n-1].Done {
 			streamed = true
 		}
-		if !st.Busy && n == 2 && st.Messages[1].Done {
+		if !st.Busy && n > 0 && st.Messages[n-1].Role == "assistant" && st.Messages[n-1].Done {
 			break
 		}
 	}
 	stopSub()
 	st := replica.State()
-	if !streamed || st.Messages[0].Text != "Summarize the data" || st.Model == nil || st.Model.Provider != "custom-stub" {
+	if opsEvents == 0 {
+		t.Error("the subscription delivered a snapshot but no ops")
+	}
+	if !streamed || st.Messages[0].Text != `Describe sales CALL:get_schema{"table":"sales"}` || st.Model == nil || st.Model.Provider != "custom-stub" {
 		t.Errorf("streamed %t, state %+v", streamed, st)
+	}
+	tools := 0
+	for _, m := range st.Messages {
+		if m.Role == "tool" {
+			tools++
+		}
+	}
+	if tools == 0 {
+		t.Errorf("the tool round left no tool row: %+v", st.Messages)
 	}
 	want, _ := json.Marshal(replica.Tree)
 	if got := snapshotJSON(t, client, conv); got != string(want) {
@@ -168,7 +217,7 @@ func TestLiveReplicaMatchesTheService(t *testing.T) {
 	}
 	restarting := next(t, states, supervisor.StateRestarting)
 	again := next(t, states, supervisor.StateReady)
-	client = api.New(again.Port, sup.Token())
+	client = api.New(again.Pipe)
 	if got := snapshotJSON(t, client, conv); got != string(want) {
 		t.Fatalf("after the restart (%v) the service's view differs from the replica\nreplica:  %.600s\nsnapshot: %.600s", restarting.Err, want, got)
 	}
@@ -185,7 +234,7 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 	q := newQueue()
 	a := newTestApp(t, q)
 	sup := startSupervised(t, func(st supervisor.Status) { a.post(func() { a.onService(st) }) })
-	a.token, a.retry, a.logPath = sup.Token(), sup.Retry, sup.LogPath()
+	a.retry, a.logPath = sup.Retry, sup.LogPath()
 	tt := ui.NewTester(a.view, 1180, 760)
 	q.pump(t, tt, "the ready service", func() bool { return a.service.State == supervisor.StateReady && a.listLoaded })
 	expectTexts(t, tt, []string{"Ready", "No conversations yet"}, []string{"Starting the agent service"})

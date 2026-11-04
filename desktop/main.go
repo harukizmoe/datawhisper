@@ -112,7 +112,7 @@ func newSupervisor(service, bun, dataDir, python, computeCwd string, a *app) (*s
 	if err != nil {
 		return nil, err
 	}
-	a.token, a.retry, a.logPath = sup.Token(), sup.Retry, sup.LogPath()
+	a.retry, a.logPath = sup.Retry, sup.LogPath()
 	return sup, nil
 }
 
@@ -147,11 +147,11 @@ func serviceCommand(service, bun string) ([]string, error) {
 	return []string{path}, nil
 }
 
-// logState 记录一次状态变化；日志里永远不会出现 token。
+// logState 记录一次状态变化。
 func logState(st supervisor.Status) {
 	switch st.State {
 	case supervisor.StateReady:
-		log.Printf("service ready pid=%d port=%d crashes=%d", st.PID, st.Port, st.Crashes)
+		log.Printf("service ready pid=%d crashes=%d", st.PID, st.Crashes)
 	case supervisor.StateRestarting, supervisor.StateFailed:
 		log.Printf("service %s crashes=%d: %v", st.State, st.Crashes, st.Err)
 	default:

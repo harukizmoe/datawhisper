@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -86,68 +86,176 @@ func expectTexts(t *testing.T, tt *ui.Tester, present []string, absent []string)
 }
 
 // fakeService 提供视图测试需要的那部分服务：会话 1 和 2（2 里有一条用户消息和一条回复）、一个由
-// POST /v1/conversations 创建的会话 3（它的 submit 没有可用模型，返回 409），以及没有模型可用的列表。
-func fakeService(t *testing.T) (*httptest.Server, int) {
-	t.Helper()
-	view := func(id int) string {
-		entries := `[]`
-		if id == 2 {
-			entries = `[{"id":5,"conversationId":2,"kind":"pi.user","model":[{"role":"user","content":"hello there","timestamp":1}]},` +
-				`{"id":6,"conversationId":2,"kind":"pi.assistant","byTaskId":9,"model":[{"role":"assistant","content":[{"type":"text","text":"## General Kenobi\n\nA **bold** reply."}]}]}]`
-		}
-		return fmt.Sprintf(`{"seq":0,"view":{"conversation":{"id":%d},"entries":%s,"docs":{"pi.agent":{"model":{"provider":"stub","modelId":"stub-chat"}},"pi.live":{},"pi.inbox":{"items":[]}}}}`, id, entries)
+// conversation.create 创建的会话 3（它的 submit 没有可用模型），以及没有模型可用的列表。每次 ready 都新建
+// 一对内存管道，模拟服务的一次启动。
+type fakeService struct {
+	t       *testing.T
+	mu      sync.Mutex
+	closers []func()
+}
+
+func newFakeService(t *testing.T) *fakeService {
+	f := &fakeService{t: t}
+	t.Cleanup(f.stop)
+	return f
+}
+
+func (f *fakeService) stop() {
+	f.mu.Lock()
+	closers := f.closers
+	f.closers = nil
+	f.mu.Unlock()
+	for i := len(closers) - 1; i >= 0; i-- {
+		closers[i]()
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/conversations", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"conversations":[{"id":2,"root":false,"lastEntryId":6,"updatedAt":1},{"id":1,"root":true,"lastEntryId":null,"updatedAt":null}]}`))
-	})
-	mux.HandleFunc("POST /v1/conversations", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":3}`))
-	})
-	mux.HandleFunc("GET /v1/conversations/{id}/subscribe", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil || id < 1 || id > 3 {
-			http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+}
+
+// ready 启动一端的假服务，并返回 supervisor 会给出的 ready 状态。
+func (f *fakeService) ready(pid int) supervisor.Status {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan struct{})
+	f.mu.Lock()
+	f.closers = append(f.closers,
+		func() { _ = inW.Close() },
+		func() { _ = outW.Close() },
+		func() { close(done) },
+	)
+	f.mu.Unlock()
+	go fakeServe(f.t, inR, outW)
+	return supervisor.Status{State: supervisor.StateReady, Pipe: &fakePipe{r: outR, w: inW, done: done}, PID: pid}
+}
+
+// fakePipe 是测试里的 supervisor.Pipe。
+type fakePipe struct {
+	r    io.Reader
+	w    io.WriteCloser
+	done chan struct{}
+}
+
+func (c *fakePipe) Read(p []byte) (int, error)  { return c.r.Read(p) }
+func (c *fakePipe) Write(p []byte) (int, error) { return c.w.Write(p) }
+func (c *fakePipe) Close() error                { return c.w.Close() }
+func (c *fakePipe) Wait() error                 { <-c.done; return nil }
+func (c *fakePipe) Done() <-chan struct{}       { return c.done }
+
+// fakeView 是会话 id 的快照视图。
+func fakeView(id int) any {
+	var entries []any
+	if id == 2 {
+		entries = []any{
+			map[string]any{"id": 5, "conversationId": 2, "kind": "pi.user", "model": []any{
+				map[string]any{"role": "user", "content": "hello there", "timestamp": 1},
+			}},
+			map[string]any{"id": 6, "conversationId": 2, "kind": "pi.assistant", "byTaskId": 9, "model": []any{
+				map[string]any{"role": "assistant", "content": []any{
+					map[string]any{"type": "text", "text": "## General Kenobi\n\nA **bold** reply."},
+				}},
+			}},
+		}
+	}
+	if entries == nil {
+		entries = []any{}
+	}
+	return map[string]any{
+		"conversation": map[string]any{"id": id},
+		"entries":      entries,
+		"docs": map[string]any{
+			"pi.agent": map[string]any{"model": map[string]any{"provider": "stub", "modelId": "stub-chat"}},
+			"pi.live":  map[string]any{},
+			"pi.inbox": map[string]any{"items": []any{}},
+		},
+	}
+}
+
+// fakeServe 在内存管道上响应视图测试用到的 JSON-RPC 方法。
+func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
+	var mu sync.Mutex
+	write := func(record any) {
+		line, err := json.Marshal(record)
+		if err != nil {
+			t.Errorf("fake service: %v", err)
 			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", view(id))
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	})
-	mux.HandleFunc("POST /v1/conversations/3/submit", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"error":"no_model"}`))
-	})
-	mux.HandleFunc("GET /v1/models/available", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"models":[]}`))
-	})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer tok" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		mu.Lock()
+		_, _ = fmt.Fprintf(out, "%s\n", line)
+		mu.Unlock()
+	}
+	respond := func(id json.RawMessage, result any) {
+		write(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+	}
+	event := func(subscriptionID int, name string, fields map[string]any) {
+		params := map[string]any{"subscriptionId": subscriptionID, "event": name}
+		for k, v := range fields {
+			params[k] = v
+		}
+		write(map[string]any{"jsonrpc": "2.0", "method": "conversation.event", "params": params})
+	}
+	br := bufio.NewReader(in)
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
 			return
 		}
-		mux.ServeHTTP(w, r)
-	}))
-	t.Cleanup(func() {
-		srv.CloseClientConnections()
-		srv.Close()
-	})
-	u, _ := url.Parse(srv.URL)
-	port, _ := strconv.Atoi(u.Port())
-	return srv, port
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &req) != nil || req.Method == "" {
+			continue
+		}
+		var params map[string]any
+		_ = json.Unmarshal(req.Params, &params)
+		conv := fmt.Sprint(params["id"])
+		switch req.Method {
+		case "conversation.list":
+			respond(req.ID, map[string]any{"conversations": []any{
+				map[string]any{"id": 2, "root": false, "lastEntryId": 6, "updatedAt": 1},
+				map[string]any{"id": 1, "root": true, "lastEntryId": nil, "updatedAt": nil},
+			}})
+		case "conversation.create":
+			respond(req.ID, map[string]any{"id": 3})
+		case "conversation.subscribe":
+			n, err := strconv.Atoi(conv)
+			if err != nil || n < 1 || n > 3 {
+				write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
+					"code": -32000, "message": "conversation not found: " + conv, "data": map[string]any{"kind": "not_found"},
+				}})
+				continue
+			}
+			// 与真服务一致：先推 snapshot，再回订阅响应。
+			event(n, "snapshot", map[string]any{"seq": 0, "view": fakeView(n)})
+			respond(req.ID, map[string]any{"subscriptionId": n})
+		case "conversation.unsubscribe":
+			respond(req.ID, map[string]any{"ok": true})
+		case "conversation.submit":
+			if conv == "3" {
+				write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
+					"code": -32000, "message": "no model configured", "data": map[string]any{"kind": "no_model"},
+				}})
+				continue
+			}
+			respond(req.ID, map[string]any{"submissionId": 1, "status": "queued"})
+		case "models.available":
+			respond(req.ID, map[string]any{"models": []any{}})
+		default:
+			write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
+				"code": -32601, "message": "method not found: " + req.Method,
+			}})
+		}
+	}
 }
 
 // newTestApp 返回一个 app，它的更新在测试 pump 时才运行；它的订阅随测试结束而结束。
 func newTestApp(t *testing.T, q *uiQueue) *app {
-	a := &app{post: q.post, token: "tok", logPath: "/data/logs/service.log"}
+	a := &app{post: q.post, logPath: "/data/logs/service.log"}
 	t.Cleanup(a.cancelFollow)
 	return a
 }
 
 func TestBannerFollowsTheServiceState(t *testing.T) {
-	_, port := fakeService(t)
+	fs := newFakeService(t)
 	q := newQueue()
 	a := newTestApp(t, q)
 	retried := 0
@@ -159,7 +267,7 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 	tt.Frame()
 	expectTexts(t, tt, []string{"Starting the agent service…", "Starting"}, []string{"not running"})
 
-	a.onService(supervisor.Status{State: supervisor.StateReady, Port: port, PID: 41})
+	a.onService(fs.ready(41))
 	q.pump(t, tt, "the conversation list", func() bool { return a.listLoaded })
 	expectTexts(t, tt, []string{"Ready", "Chat 2", "Chat 1", "New chat", "Settings", "Ask a question about your data."},
 		[]string{"Starting the agent service", "Reconnected"})
@@ -171,7 +279,7 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 		t.Error("a client of the stopped service")
 	}
 
-	a.onService(supervisor.Status{State: supervisor.StateReady, Port: port, PID: 42, Crashes: 1})
+	a.onService(fs.ready(42))
 	tt.Frame()
 	expectTexts(t, tt, []string{"Reconnected: the agent service restarted", "Ready"}, []string{"Restarting it…"})
 	tt.Advance(reconnectedFor / 2)
@@ -188,11 +296,11 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 }
 
 func TestConversationsAndTheMissingModel(t *testing.T) {
-	_, port := fakeService(t)
+	fs := newFakeService(t)
 	q := newQueue()
 	a := newTestApp(t, q)
 	tt := ui.NewTester(a.view, 1180, 760)
-	a.onService(supervisor.Status{State: supervisor.StateReady, Port: port, PID: 41})
+	a.onService(fs.ready(41))
 	q.pump(t, tt, "the conversation list", func() bool { return a.listLoaded })
 
 	if err := tt.Click("Chat 2"); err != nil {
@@ -222,19 +330,33 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the models", func() bool { return a.modelsLoaded })
-	expectTexts(t, tt, []string{"Settings", "No model is available", "Ready: process 41 on 127.0.0.1:" + strconv.Itoa(port)}, []string{"Send"})
+	expectTexts(t, tt, []string{"Settings", "No model is available", "Ready: process 41"}, []string{"Send"})
 }
 
 // TestChatShowsTheRecordedStream 像订阅那样把录制好的订阅流经 replica 喂进来，并检查回复是经由
 // markdown.Stream 流式出现、最后以 markdown.View 落在同一个列表行里的。
 func TestChatShowsTheRecordedStream(t *testing.T) {
-	f, err := os.Open("internal/api/testdata/stream.sse")
+	f, err := os.Open("internal/api/testdata/stream.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
 	var events []api.Event
-	if err := api.ReadSSE(f, func(ev api.Event) error { events = append(events, ev); return nil }); err != nil {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64<<10), 64<<20)
+	for scanner.Scan() {
+		var rec struct {
+			Method string    `json:"method"`
+			Params api.Event `json:"params"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Method == "conversation.event" {
+			events = append(events, rec.Params)
+		}
+	}
+	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
 	a := &app{post: func(fn func()) { fn() }, conv: 1}

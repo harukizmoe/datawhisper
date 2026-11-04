@@ -3,8 +3,8 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"datawhisper/desktop/internal/api"
 )
 
 var fakeBin string
@@ -136,20 +138,25 @@ func start(t *testing.T, env []string, tune func(*Config)) *fixture {
 	return f
 }
 
-func (f *fixture) health(t *testing.T, port int, token string) (int, map[string]any) {
+// client 连上 ready 状态的管道；读循环随进程退出自行结束，不需要清理。
+func (f *fixture) client(st Status) *api.Client {
+	return api.New(st.Pipe)
+}
+
+// health 通过管道调用 health 方法，返回解码后的原始结果。
+func health(t *testing.T, c *api.Client) map[string]any {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/v1/health", port), nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	res, err := http.DefaultClient.Do(req)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	raw, err := c.Call(ctx, "health", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
 	var body map[string]any
-	_ = json.NewDecoder(res.Body).Decode(&body)
-	return res.StatusCode, body
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 func stop(t *testing.T, sup *Supervisor) {
@@ -164,18 +171,19 @@ func stop(t *testing.T, sup *Supervisor) {
 func TestReadyHealthLogsAndGracefulStop(t *testing.T) {
 	f := start(t, []string{"FAKE_MODE=ok"}, nil)
 	ready, _ := f.rec.wait(t, 0, StateReady)
-	if ready.Port == 0 || ready.PID == 0 {
-		t.Fatalf("ready without port/pid: %+v", ready)
+	if ready.Pipe == nil || ready.PID == 0 {
+		t.Fatalf("ready without a pipe/pid: %+v", ready)
 	}
-	if len(f.sup.Token()) != 43 {
-		t.Errorf("token %q is not 32 bytes base64url", f.sup.Token())
+	c := f.client(ready)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	h, err := c.Health(ctx)
+	if err != nil || !h.OK {
+		t.Errorf("health: %+v %v", h, err)
 	}
-	if code, _ := f.health(t, ready.Port, ""); code != http.StatusUnauthorized {
-		t.Errorf("health without token: %d", code)
-	}
-	code, body := f.health(t, ready.Port, f.sup.Token())
-	if code != http.StatusOK || body["dataDir"] != f.dataDir || body["port"] != "0" {
-		t.Errorf("health: %d %v", code, body)
+	body := health(t, c)
+	if body["dataDir"] != f.dataDir || body["pid"] != float64(ready.PID) {
+		t.Errorf("health result: %v", body)
 	}
 	stop(t, f.sup)
 	if got := f.rec.kinds(); strings.Join(got, ",") != "starting,ready,stopped" {
@@ -188,13 +196,13 @@ func TestReadyHealthLogsAndGracefulStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[stderr] fake: starting ok", "[stdout] a log line before the ready line", "[stdout] a log line after the ready line", "stopped (stdin closed)"} {
+	for _, want := range []string{"[stderr] fake: starting ok", "[stderr] fake: a log line after the ready line", "stopped (stdin closed)"} {
 		if !strings.Contains(string(log), want) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
 	}
-	if strings.Contains(string(log), `"type":"ready"`) || strings.Contains(string(log), f.sup.Token()) {
-		t.Errorf("log holds the ready line or the token:\n%s", log)
+	if strings.Contains(string(log), `"type":"ready"`) {
+		t.Errorf("log holds the ready line:\n%s", log)
 	}
 }
 
@@ -215,6 +223,7 @@ func TestReadyTimeoutEndsFailed(t *testing.T) {
 func TestRestartWithBackoffUntilReady(t *testing.T) {
 	f := start(t, []string{"FAKE_MODE=ok", "FAKE_FAIL_STARTS=3"}, nil)
 	ready, _ := f.rec.wait(t, 0, StateReady)
+	f.client(ready) // 清理时 Stop 需要有人读 stdout，否则回收进程要等两次 StopTimeout
 	if ready.Crashes != 3 {
 		t.Errorf("ready after %d crashes, want 3", ready.Crashes)
 	}
@@ -246,21 +255,21 @@ func TestBackoffIsCapped(t *testing.T) {
 func TestCrashWhileReadyRestarts(t *testing.T) {
 	f := start(t, []string{"FAKE_MODE=ok"}, nil)
 	first, i := f.rec.wait(t, 0, StateReady)
-	res, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/v1/crash", first.Port), "text/plain", nil)
-	if err == nil {
-		res.Body.Close()
+	c := f.client(first)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := c.Call(ctx, "crash", nil); !errors.Is(err, api.ErrClosed) {
+		t.Errorf("crash request: %v", err)
 	}
 	restarting, j := f.rec.wait(t, i, StateRestarting)
 	if restarting.Err == nil || !strings.Contains(restarting.Err.Error(), "exit status 2") {
 		t.Errorf("restart reason %v", restarting.Err)
 	}
 	second, _ := f.rec.wait(t, j, StateReady)
-	if second.PID == first.PID {
-		t.Errorf("same pid after restart: %d", second.PID)
+	if second.PID == first.PID || second.Pipe == nil {
+		t.Errorf("same pipe/pid after restart: %+v", second)
 	}
-	if code, _ := f.health(t, second.Port, f.sup.Token()); code != http.StatusOK {
-		t.Errorf("health after restart: %d (the token survives restarts)", code)
-	}
+	health(t, f.client(second))
 }
 
 func TestCrashLimitFailsThenRetry(t *testing.T) {
@@ -277,7 +286,8 @@ func TestCrashLimitFailsThenRetry(t *testing.T) {
 	if starting.Crashes != 0 {
 		t.Errorf("retry kept %d crashes", starting.Crashes)
 	}
-	f.rec.wait(t, j, StateReady) // 第四次启动成功
+	ready, _ := f.rec.wait(t, j, StateReady) // 第四次启动成功
+	f.client(ready)                          // 清理时 Stop 需要有人读 stdout
 }
 
 func TestStopFallsBackToSigtermThenKill(t *testing.T) {
@@ -286,7 +296,8 @@ func TestStopFallsBackToSigtermThenKill(t *testing.T) {
 	}
 	t.Run("sigterm", func(t *testing.T) {
 		f := start(t, []string{"FAKE_MODE=ignore-stdin"}, func(c *Config) { c.StopTimeout = 200 * time.Millisecond })
-		f.rec.wait(t, 0, StateReady)
+		ready, _ := f.rec.wait(t, 0, StateReady)
+		f.client(ready) // 必须有人读 stdout，否则 cmd.Wait 回收不了进程
 		stop(t, f.sup)
 		if how, _ := os.ReadFile(f.stopped); string(how) != "sigterm" {
 			t.Errorf("stopped by %q, want sigterm", how)
@@ -294,7 +305,8 @@ func TestStopFallsBackToSigtermThenKill(t *testing.T) {
 	})
 	t.Run("kill", func(t *testing.T) {
 		f := start(t, []string{"FAKE_MODE=ignore-all"}, func(c *Config) { c.StopTimeout = 200 * time.Millisecond })
-		f.rec.wait(t, 0, StateReady)
+		ready, _ := f.rec.wait(t, 0, StateReady)
+		f.client(ready)
 		stop(t, f.sup)
 		if how, err := os.ReadFile(f.stopped); err == nil {
 			t.Errorf("stopped by %q, want a kill", how)

@@ -1,20 +1,18 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
+	"sync"
 	"time"
 )
 
-// Event 是 GET /v1/conversations/:id/subscribe 中的一个事件。
+// Event 是一条 conversation.event 通知。
 type Event struct {
+	// SubscriptionID 是这条事件所属的订阅（由 conversation.subscribe 分配）。
+	SubscriptionID int `json:"subscriptionId"`
 	// Name 是 "snapshot"、"ops" 或 "end"。
 	Name string `json:"-"`
 	// Seq 对 snapshot 为 0，之后每个 ops 依次为 1、2、……
@@ -27,104 +25,196 @@ type Event struct {
 	Kind string `json:"kind"`
 }
 
-// ErrEnded 在服务用 end 事件结束流时由 Subscribe 返回。
+// UnmarshalJSON 把通知参数里的 "event" 读到 Name；其余字段与线上形状一致，便于直接解码 params。
+func (e *Event) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		SubscriptionID int               `json:"subscriptionId"`
+		Event          string            `json:"event"`
+		Seq            int               `json:"seq"`
+		View           json.RawMessage   `json:"view"`
+		Ops            []json.RawMessage `json:"ops"`
+		Kind           string            `json:"kind"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	e.SubscriptionID, e.Name, e.Seq, e.Ops, e.Kind = raw.SubscriptionID, raw.Event, raw.Seq, raw.Ops, raw.Kind
+	e.View = nil
+	if len(raw.View) > 0 && string(raw.View) != "null" {
+		if err := json.Unmarshal(raw.View, &e.View); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ErrEnded 在服务用 end 通知结束订阅时由 Subscribe 返回。
 var ErrEnded = errors.New("subscription ended by the service")
 
-// ErrIdle 在 IdleTimeout 内什么都没收到时由 Subscribe 返回：可以认为连接已经死了。
-var ErrIdle = errors.New("subscription idle: no data or heartbeat")
+// notifyConversationEvent 是订阅通知的方法名。
+const notifyConversationEvent = "conversation.event"
 
-// Subscribe 把会话 conv（"root" 或数字 id）的事件流式送给 onEvent，直到 ctx 结束、流断开，或 onEvent 返回错误。
-// 它永远不会返回 nil：可能是 ctx.Err()、ErrEnded、ErrIdle、*Error（会话未知时为 404）、传输层错误，或
-// onEvent 返回的错误。
+// unsubscribeTimeout 限制退订请求的等待：调用方的 ctx 可能已经结束，退订仍要发出去。
+const unsubscribeTimeout = 5 * time.Second
+
+// subscription 是一个订阅的本地队列。读循环只追加（永不阻塞，否则整条管道都会停住）；Subscribe 在
+// 调用者的 goroutine 上逐条取出。
+type subscription struct {
+	mu    sync.Mutex
+	queue []Event
+	wake  chan struct{}
+}
+
+func (s *subscription) push(ev Event) {
+	s.mu.Lock()
+	s.queue = append(s.queue, ev)
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *subscription) pop() (Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.queue) == 0 {
+		return Event{}, false
+	}
+	ev := s.queue[0]
+	s.queue[0] = Event{} // 不要留住 View/Ops 的引用
+	s.queue = s.queue[1:]
+	return ev, true
+}
+
+// attach 登记订阅号并接管它早到的通知（服务先发 snapshot 再回订阅响应）。
+func (c *Client) attach(subscriptionID int) *subscription {
+	sub := &subscription{wake: make(chan struct{}, 1)}
+	c.mu.Lock()
+	if early := c.early[subscriptionID]; len(early) > 0 {
+		sub.queue = early
+		delete(c.early, subscriptionID)
+	}
+	c.subscriptions[subscriptionID] = sub
+	c.mu.Unlock()
+	select {
+	case sub.wake <- struct{}{}:
+	default:
+	}
+	return sub
+}
+
+func (c *Client) detach(subscriptionID int, sub *subscription) {
+	c.mu.Lock()
+	if c.subscriptions[subscriptionID] == sub {
+		delete(c.subscriptions, subscriptionID)
+	}
+	c.mu.Unlock()
+}
+
+func (c *Client) forgetEarly(subscriptionID int) {
+	c.mu.Lock()
+	delete(c.early, subscriptionID)
+	c.mu.Unlock()
+}
+
+// unsubscribe 尽力退订。ctx 已经结束时（或连接已断）忽略错误：服务端的 watch 结束时会自己清掉。
+func (c *Client) unsubscribe(subscriptionID int) {
+	ctx, cancel := context.WithTimeout(context.Background(), unsubscribeTimeout)
+	defer cancel()
+	_, _ = c.Call(ctx, "conversation.unsubscribe", struct {
+		SubscriptionID int `json:"subscriptionId"`
+	}{subscriptionID})
+}
+
+// Subscribe 把会话 conv（"root" 或数字 id）的事件送给 onEvent，直到 ctx 结束、订阅被服务结束（ErrEnded）、
+// 管道关闭（ErrClosed）或 onEvent 返回错误。每次订阅都先收到一份 snapshot，之后是连续的 ops。
+// 它不会返回 nil：ctx 结束时是 ctx.Err()，会话未知时是包装了 ErrNotFound 的 *Error。
 func (c *Client) Subscribe(ctx context.Context, conv string, onEvent func(Event) error) error {
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	req, err := c.request(ctx, http.MethodGet, "/v1/conversations/"+url.PathEscape(conv)+"/subscribe", nil)
+	_, ch, err := c.start("conversation.subscribe", struct {
+		ID string `json:"id"`
+	}{conv})
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "text/event-stream")
-	idle := c.IdleTimeout
-	if idle <= 0 {
-		idle = 45 * time.Second
+	var result struct {
+		SubscriptionID int `json:"subscriptionId"`
 	}
-	watchdog := time.AfterFunc(idle, func() { cancel(ErrIdle) })
-	defer watchdog.Stop()
-	res, err := c.httpClient().Do(req)
-	if err != nil {
-		return orCause(ctx, err)
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return res.err
+		}
+		if err := json.Unmarshal(res.result, &result); err != nil {
+			return fmt.Errorf("conversation.subscribe: %w", err)
+		}
+	case <-ctx.Done():
+		// 服务可能仍然建好了订阅：等响应到达后把它退掉，免得留下一个没人接收的 watch。
+		go c.abandonSubscribe(ch)
+		return ctx.Err()
+	case <-c.done:
+		select {
+		case res := <-ch:
+			if res.err != nil {
+				return res.err
+			}
+			if err := json.Unmarshal(res.result, &result); err != nil {
+				return fmt.Errorf("conversation.subscribe: %w", err)
+			}
+		default:
+			return ErrClosed
+		}
 	}
-	defer res.Body.Close()
-	if err := responseError(res); err != nil {
-		return err
+	if result.SubscriptionID <= 0 {
+		return fmt.Errorf("conversation.subscribe: invalid subscriptionId %d", result.SubscriptionID)
 	}
-	body := &idleReader{r: res.Body, timer: watchdog, idle: idle}
-	err = ReadSSE(body, func(ev Event) error {
+	sub := c.attach(result.SubscriptionID)
+	defer c.detach(result.SubscriptionID, sub)
+
+	for {
+		ev, ok := sub.pop()
+		if !ok {
+			select {
+			case <-sub.wake:
+				continue
+			case <-ctx.Done():
+				c.unsubscribe(result.SubscriptionID)
+				return ctx.Err()
+			case <-c.done:
+				// 退出前把已经排队的通知送完，避免丢掉最后一份 snapshot 或 end。
+				if _, ok := sub.pop(); ok {
+					continue
+				}
+				return ErrClosed
+			}
+		}
 		if ev.Name == "end" {
 			return fmt.Errorf("%w (%s)", ErrEnded, ev.Kind)
 		}
-		return onEvent(ev)
-	})
-	if err == nil {
-		err = io.ErrUnexpectedEOF
-	}
-	return orCause(ctx, err)
-}
-
-// orCause 优先返回取消原因（ErrIdle、调用方的 ctx.Err()），而不是它引发的传输层错误。
-func orCause(ctx context.Context, err error) error {
-	if cause := context.Cause(ctx); cause != nil {
-		return cause
-	}
-	return err
-}
-
-// idleReader 每收到一些字节就重置空闲看门狗，心跳注释也算。
-type idleReader struct {
-	r     io.Reader
-	timer *time.Timer
-	idle  time.Duration
-}
-
-func (r *idleReader) Read(p []byte) (int, error) {
-	n, err := r.r.Read(p)
-	if n > 0 {
-		r.timer.Reset(r.idle)
-	}
-	return n, err
-}
-
-// ReadSSE 解析由 `event:` 和 `data:` 行组成的 text/event-stream；注释行（`:` 心跳）和 `id:` 会被跳过。到
-// EOF 时返回 nil；否则返回 onEvent 或解码的第一个错误。
-func ReadSSE(r io.Reader, onEvent func(Event) error) error {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64<<10), 64<<20)
-	var name string
-	var data strings.Builder
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
-		switch {
-		case line == "":
-			if data.Len() > 0 {
-				ev := Event{Name: name}
-				if err := json.Unmarshal([]byte(data.String()), &ev); err != nil {
-					return fmt.Errorf("event %s: %w", name, err)
-				}
-				if err := onEvent(ev); err != nil {
-					return err
-				}
-			}
-			name = ""
-			data.Reset()
-		case strings.HasPrefix(line, ":"):
-		case strings.HasPrefix(line, "event:"):
-			name = strings.TrimSpace(line[len("event:"):])
-		case strings.HasPrefix(line, "data:"):
-			if data.Len() > 0 {
-				data.WriteByte('\n')
-			}
-			data.WriteString(strings.TrimPrefix(line[len("data:"):], " "))
+		if err := onEvent(ev); err != nil {
+			c.unsubscribe(result.SubscriptionID)
+			return err
 		}
 	}
-	return scanner.Err()
+}
+
+// abandonSubscribe 等一个已经被调用方放弃的订阅响应；拿到订阅号就退订。
+func (c *Client) abandonSubscribe(ch <-chan response) {
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return
+		}
+		var result struct {
+			SubscriptionID int `json:"subscriptionId"`
+		}
+		if json.Unmarshal(res.result, &result) != nil || result.SubscriptionID <= 0 {
+			return
+		}
+		c.forgetEarly(result.SubscriptionID)
+		c.unsubscribe(result.SubscriptionID)
+		// 退订返回后 watch 已经停了；再清一次窗口期内到达的通知。
+		c.forgetEarly(result.SubscriptionID)
+	case <-c.done:
+	}
 }

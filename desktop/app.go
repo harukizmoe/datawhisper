@@ -26,8 +26,7 @@ const navSettings = "settings"
 type app struct {
 	// post 在 UI 线程上运行 fn 并触发重绘：应用中它是 Window.Update，测试中是一个队列。
 	post func(fn func())
-	// token 为每个发往服务的请求做鉴权；retry 重启启动失败的服务（为 nil 时不显示 Retry 按钮）。
-	token   string
+	// retry 重启启动失败的服务（为 nil 时不显示 Retry 按钮）。
 	retry   func()
 	logPath string
 
@@ -82,12 +81,12 @@ func newRequestID() string {
 	return "ui-" + hex.EncodeToString(b)
 }
 
-// onService 应用 supervisor 的一次状态变化：ready 的服务会换上新 client（端口在每次启动时都不同）、重新拉
+// onService 应用 supervisor 的一次状态变化：ready 的服务会换上新 client（每次启动都是新的管道）、重新拉
 // 会话列表，并订阅当前显示的会话；其他状态则把这些都丢掉。
 func (a *app) onService(st supervisor.Status) {
 	wasReady := a.service.State == supervisor.StateReady
 	a.service = st
-	if st.State != supervisor.StateReady {
+	if st.State != supervisor.StateReady || st.Pipe == nil {
 		a.client, a.recovered = nil, false
 		a.cancelFollow()
 		a.connected, a.streamErr = false, ""
@@ -98,7 +97,7 @@ func (a *app) onService(st supervisor.Status) {
 	}
 	a.recovered, a.recoveredAt = a.everReady, time.Time{}
 	a.everReady = true
-	a.client = api.New(st.Port, a.token)
+	a.client = api.New(st.Pipe)
 	a.refreshConversations()
 	a.follow()
 	if a.nav == navSettings {
@@ -503,7 +502,7 @@ func (a *app) settings(c *ui.Context) {
 		ui.Text(c, "Agent service").Bold().Margin(12, 0, 0, 0)
 		label, _ := a.statusLabel(t)
 		if a.service.State == supervisor.StateReady {
-			ui.Textf(c, "%s: process %d on 127.0.0.1:%d", label, a.service.PID, a.service.Port)
+			ui.Textf(c, "%s: process %d", label, a.service.PID)
 		} else {
 			ui.Text(c, label)
 		}

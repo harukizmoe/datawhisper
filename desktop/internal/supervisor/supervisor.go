@@ -1,9 +1,11 @@
 // Package supervisor 把 agent 服务（server/，Bun）作为桌面应用的子进程运行。
 //
 // 进程约定（server/src/main.ts）：
-//   - 环境变量：DW_TOKEN（bearer token，在这里生成）、DW_PORT=0、DW_DATA_DIR，以及配置了时的 DW_PYTHON /
-//     DW_COMPUTE_CWD；
-//   - ready：stdout 上的一行 {"type":"ready","port":N,"pid":N}；其余 stdout 和 stderr 的每一行都是日志；
+//   - 环境变量：DW_DATA_DIR，以及配置了时的 DW_PYTHON / DW_COMPUTE_CWD；
+//   - ready：stdout 上的第一行是 {"type":"ready","pid":N}；此后 stdout 只承载 JSON-RPC 记录，日志一律走
+//     stderr（这里按行追加到 <DataDir>/logs/service.log）；
+//   - 通信：服务的 stdin/stdout 就是 UI 协议的管道（见 Status.Pipe），上层必须持续读到 EOF，否则服务会在写
+//     stdout 时阻塞；
 //   - stop：关闭子进程的 stdin（服务在 EOF 时退出），然后 SIGTERM，最后 kill。Windows 没有 SIGTERM，所以在那里
 //     关闭 stdin 就是停止路径；
 //   - 运行期间退出即崩溃（退出码 1：存储故障）；服务重启后会继续被中断的工作，所以 supervisor 用指数退避重启
@@ -13,8 +15,6 @@ package supervisor
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,7 +35,7 @@ const (
 	StateStopped State = iota
 	// StateStarting：第一次启动，正在等 ready 行。
 	StateStarting
-	// StateReady：服务在 Status.Port 上监听。
+	// StateReady：服务已就绪，Status.Pipe 是它的管道。
 	StateReady
 	// StateRestarting：服务退出了或启动失败；正在等退避结束或等 ready 行。
 	StateRestarting
@@ -58,12 +59,54 @@ func (s State) String() string {
 	return fmt.Sprintf("State(%d)", int(s))
 }
 
+// Pipe 是服务子进程的管道：Read 读 stdout 上的 JSON-RPC 记录，Write 写 stdin，Close 关闭 stdin（请求服务
+// 有序退出）；进程退出后 Read 返回 EOF，Wait 返回。
+type Pipe interface {
+	io.Reader
+	io.WriteCloser
+	// Wait 等进程退出并返回它的退出错误（正常退出为 nil）。管道已经关闭时立即返回。
+	Wait() error
+	// Done 在进程退出时关闭。
+	Done() <-chan struct{}
+}
+
+// Conn 是一次运行中的服务的管道（Status.Pipe 的具体类型）。
+type Conn struct {
+	read    *connReader
+	write   io.WriteCloser
+	exited  <-chan struct{}
+	exitErr func() error
+	pid     int
+}
+
+// Read 读服务 stdout 上的下一条协议记录字节。
+func (c *Conn) Read(p []byte) (int, error) { return c.read.Read(p) }
+
+// Write 把一条记录写到服务的 stdin（stdin 上的背压会传回来）。
+func (c *Conn) Write(p []byte) (int, error) { return c.write.Write(p) }
+
+// Close 关闭服务的 stdin：服务读到 EOF 后有序退出。
+func (c *Conn) Close() error { return c.write.Close() }
+
+// Wait 等进程退出并返回它的退出错误（正常退出为 nil）。
+func (c *Conn) Wait() error {
+	<-c.exited
+	return c.exitErr()
+}
+
+// Done 在进程退出时关闭。
+func (c *Conn) Done() <-chan struct{} { return c.exited }
+
+// PID 是服务进程号。
+func (c *Conn) PID() int { return c.pid }
+
 // Status 是一次状态变化。
 type Status struct {
 	State State
-	// ready 状态服务的 Port 与 PID（仅 StateReady）。
-	Port int
-	PID  int
+	// Pipe 是 ready 状态服务的管道（仅 StateReady）；其他状态为 nil。
+	Pipe Pipe
+	// PID 是 ready 状态的服务进程号（仅 StateReady）。
+	PID int
 	// Err 说明服务为何在重启或为何失败：它的退出、启动失败、ready 超时。
 	Err error
 	// Crashes 是 CrashWindow 内的崩溃次数。
@@ -102,7 +145,6 @@ type Config struct {
 // Supervisor 负责启动、监视、重启并停止一个服务进程。
 type Supervisor struct {
 	cfg     Config
-	token   string
 	logPath string
 
 	mu      sync.Mutex
@@ -118,7 +160,7 @@ type Supervisor struct {
 	sleep func(time.Duration) // 测试用：设置后替换退避等待
 }
 
-// New 校验 cfg、填入默认值并生成 token。它不启动任何东西。
+// New 校验 cfg 并填入默认值。它不启动任何东西。
 func New(cfg Config) (*Supervisor, error) {
 	if len(cfg.Command) == 0 {
 		return nil, errors.New("supervisor: no command")
@@ -134,13 +176,8 @@ func New(cfg Config) (*Supervisor, error) {
 	if cfg.CrashLimit <= 0 {
 		cfg.CrashLimit = 5
 	}
-	token, err := newToken()
-	if err != nil {
-		return nil, err
-	}
 	return &Supervisor{
 		cfg:     cfg,
-		token:   token,
 		logPath: filepath.Join(cfg.DataDir, "logs", "service.log"),
 		now:     time.Now,
 	}, nil
@@ -151,18 +188,6 @@ func setDefault(d *time.Duration, v time.Duration) {
 		*d = v
 	}
 }
-
-// newToken 返回 32 个随机字节，base64url 无填充（43 个字符）。
-func newToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("supervisor: token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// Token 是每个 /v1 请求用的 bearer token，也用作 web-view 资源的 ?token=。
-func (s *Supervisor) Token() string { return s.token }
 
 // LogPath 是服务输出写入的文件。
 func (s *Supervisor) LogPath() string { return s.logPath }
@@ -259,7 +284,7 @@ func (s *Supervisor) loop(stop, done chan struct{}, retry chan struct{}) {
 		}
 		run, err := s.launch(log, stop)
 		if err == nil {
-			s.setState(Status{State: StateReady, Port: run.port, PID: run.pid, Crashes: len(s.crashes)})
+			s.setState(Status{State: StateReady, Pipe: run.conn, PID: run.pid, Crashes: len(s.crashes)})
 			select {
 			case <-run.exited:
 				err = run.exitErr()
@@ -336,11 +361,29 @@ func (s *Supervisor) wait(d time.Duration, stop chan struct{}) bool {
 	}
 }
 
+// connReader 是交给上层读的 stdout：读到 EOF 或错误时记下“排空”，让 cmd.Wait 可以安全地回收进程。
+type connReader struct {
+	br      *bufio.Reader
+	drained chan struct{}
+	once    sync.Once
+}
+
+func (r *connReader) Read(p []byte) (int, error) {
+	n, err := r.br.Read(p)
+	if err != nil {
+		r.finish()
+	}
+	return n, err
+}
+
+func (r *connReader) finish() { r.once.Do(func() { close(r.drained) }) }
+
 // run 是一个已启动的子进程。
 type run struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
-	port   int
+	reader *connReader
+	conn   *Conn
 	pid    int
 	exited chan struct{} // Wait 返回且输出已排空后关闭
 	err    error         // Wait 的错误，在 exited 关闭前设置
@@ -353,17 +396,25 @@ func (r *run) exitErr() error {
 	return fmt.Errorf("service exited: %w", r.err)
 }
 
+// markDrained 声明不再等 stdout：只在上层不读（或进程即将被杀）时使用，好让 cmd.Wait 能返回。
+func (r *run) markDrained() { r.reader.finish() }
+
 type readyLine struct {
 	Type string `json:"type"`
-	Port int    `json:"port"`
 	PID  int    `json:"pid"`
 }
 
-// launch 启动子进程并等它的 ready 行。在此之前出现的输出行也会写进日志。
+type readyResult struct {
+	line readyLine
+	err  error
+}
+
+// launch 启动子进程并读它的 ready 行。ready 之前的 stdout 行会写进日志；ready 之后 stdout 只剩协议记录，
+// 由 Status.Pipe 交给上层（同一个缓冲读取器，不会丢掉 ready 行之后已读到的字节）。
 func (s *Supervisor) launch(log io.Writer, stop chan struct{}) (*run, error) {
 	cmd := exec.Command(s.cfg.Command[0], s.cfg.Command[1:]...)
 	cmd.Dir = s.cfg.Dir
-	cmd.Env = append(os.Environ(), "DW_TOKEN="+s.token, "DW_PORT=0", "DW_DATA_DIR="+s.cfg.DataDir)
+	cmd.Env = append(os.Environ(), "DW_DATA_DIR="+s.cfg.DataDir)
 	if s.cfg.Python != "" {
 		cmd.Env = append(cmd.Env, "DW_PYTHON="+s.cfg.Python)
 	}
@@ -387,30 +438,35 @@ func (s *Supervisor) launch(log io.Writer, stop chan struct{}) (*run, error) {
 		return nil, fmt.Errorf("start %s: %w", s.cfg.Command[0], err)
 	}
 	fmt.Fprintf(log, "%s [supervisor] started pid %d: %v\n", stamp(), cmd.Process.Pid, s.cfg.Command)
-	r := &run{cmd: cmd, stdin: stdin, exited: make(chan struct{})}
-	ready := make(chan readyLine, 1)
-	var output sync.WaitGroup
-	output.Add(2)
+	r := &run{
+		cmd:    cmd,
+		stdin:  stdin,
+		reader: &connReader{br: bufio.NewReaderSize(stdout, 64<<10), drained: make(chan struct{})},
+		exited: make(chan struct{}),
+	}
+	r.conn = &Conn{read: r.reader, write: stdin, exited: r.exited, exitErr: r.exitErr, pid: cmd.Process.Pid}
+	ready := make(chan readyResult, 1)
 	go func() {
-		defer output.Done()
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 64<<10), 1<<20)
-		seen := false
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if !seen {
-				var rl readyLine
-				if json.Unmarshal(line, &rl) == nil && rl.Type == "ready" && rl.Port > 0 {
-					seen = true
-					ready <- rl
-					continue
-				}
+		// ready 行之后不再读：缓冲区连同 stdout 一起交给上层。
+		for {
+			line, err := r.reader.br.ReadString('\n')
+			if err != nil {
+				r.markDrained()
+				ready <- readyResult{err: err}
+				return
 			}
-			fmt.Fprintf(log, "%s [stdout] %s\n", stamp(), line)
+			text := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+			var rl readyLine
+			if json.Unmarshal([]byte(text), &rl) == nil && rl.Type == "ready" {
+				ready <- readyResult{line: rl}
+				return
+			}
+			fmt.Fprintf(log, "%s [stdout] %s\n", stamp(), text)
 		}
 	}()
+	stderrDone := make(chan struct{})
 	go func() {
-		defer output.Done()
+		defer close(stderrDone)
 		scanner := bufio.NewScanner(stderr)
 		scanner.Buffer(make([]byte, 64<<10), 1<<20)
 		for scanner.Scan() {
@@ -418,7 +474,8 @@ func (s *Supervisor) launch(log io.Writer, stop chan struct{}) (*run, error) {
 		}
 	}()
 	go func() {
-		output.Wait() // Wait 会关掉管道：先把它们排空
+		<-stderrDone
+		<-r.reader.drained // 先让上层把 stdout 读完，Wait 才不会截断末尾的记录
 		r.err = cmd.Wait()
 		close(r.exited)
 	}()
@@ -426,11 +483,16 @@ func (s *Supervisor) launch(log io.Writer, stop chan struct{}) (*run, error) {
 	deadline := time.NewTimer(s.cfg.ReadyTimeout)
 	defer deadline.Stop()
 	select {
-	case rl := <-ready:
-		r.port, r.pid = rl.Port, rl.PID
+	case res := <-ready:
+		if res.err != nil {
+			<-r.exited
+			return nil, fmt.Errorf("service exited before it was ready: %w", errOrExit(r.err))
+		}
+		r.pid = res.line.PID
 		if r.pid == 0 {
 			r.pid = cmd.Process.Pid
 		}
+		r.conn.pid = r.pid
 		return r, nil
 	case <-r.exited:
 		return nil, fmt.Errorf("service exited before it was ready: %w", errOrExit(r.err))
@@ -463,6 +525,8 @@ func (s *Supervisor) shutdown(r *run, log io.Writer) {
 		return
 	}
 	_ = r.cmd.Process.Kill()
+	// 进程已经被杀：不再等上层读 stdout，否则没有读者时 cmd.Wait 会一直卡着。
+	r.markDrained()
 	<-r.exited
 	fmt.Fprintf(log, "%s [supervisor] killed after %v: %v\n", stamp(), s.cfg.StopTimeout, r.err)
 }

@@ -14,10 +14,10 @@ type FollowHandler struct {
 	OnDisconnect func(error)
 }
 
-// Follow 一直让会话 conv 保持复制状态，直到 ctx 结束：它发起订阅，把每个事件应用到 replica 上，并且在流断
-// 开、收到 end 事件、连接空闲或遇到乱序的 op 之后重新订阅；每次订阅都从新的 snapshot 开始，所以之后 replica
-// 又和服务端的视图一致了。两次尝试之间的退避从 250 ms 开始翻倍，最多 5 s，收到 snapshot 后回到起点。Follow
-// 返回 ctx.Err()，会话未知时返回包装了 ErrNotFound 的错误。
+// Follow 一直让会话 conv 保持复制状态，直到 ctx 结束：它发起订阅，把每个事件应用到 replica 上，并且在订阅
+// 被服务结束、管道关闭（服务重启）或遇到乱序的 op 之后重新订阅；每次订阅都从新的 snapshot 开始，所以之后
+// replica 又和服务端的视图一致了。两次尝试之间的退避从 250 ms 开始翻倍，最多 5 s，收到 snapshot 后回到起点。
+// Follow 返回 ctx.Err()，会话未知时返回包装了 ErrNotFound 的错误。
 func Follow(ctx context.Context, c *Client, conv string, h FollowHandler) error {
 	const first, last = 250 * time.Millisecond, 5 * time.Second
 	backoff := first
