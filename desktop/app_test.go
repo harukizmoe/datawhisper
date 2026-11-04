@@ -92,6 +92,26 @@ type fakeService struct {
 	t       *testing.T
 	mu      sync.Mutex
 	closers []func()
+	calls   []fakeCall
+}
+
+// fakeCall 是一次假服务收到的请求，测试据此断言界面发出的参数。
+type fakeCall struct {
+	Method string
+	Params map[string]any
+}
+
+// callsTo 返回某个方法的调用参数，按到达顺序。
+func (f *fakeService) callsTo(method string) []map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []map[string]any
+	for _, call := range f.calls {
+		if call.Method == method {
+			out = append(out, call.Params)
+		}
+	}
+	return out
 }
 
 func newFakeService(t *testing.T) *fakeService {
@@ -122,7 +142,7 @@ func (f *fakeService) ready(pid int) supervisor.Status {
 		func() { close(done) },
 	)
 	f.mu.Unlock()
-	go fakeServe(f.t, inR, outW)
+	go f.serve(inR, outW)
 	return supervisor.Status{State: supervisor.StateReady, Pipe: &fakePipe{r: outR, w: inW, done: done}, PID: pid}
 }
 
@@ -154,6 +174,37 @@ func fakeView(id int) any {
 			}},
 		}
 	}
+	if id == 4 {
+		entries = []any{
+			map[string]any{"id": 20, "conversationId": 4, "kind": "pi.user", "model": []any{
+				map[string]any{"role": "user", "content": "Look at my workspace", "timestamp": 1},
+			}},
+			map[string]any{"id": 21, "conversationId": 4, "kind": "pi.assistant", "byTaskId": 30, "model": []any{
+				map[string]any{"role": "assistant", "content": []any{
+					map[string]any{"type": "text", "text": "I'll check what is available."},
+					map[string]any{"type": "toolCall", "id": "call_ws", "name": "workspace_status", "arguments": map[string]any{}},
+				}},
+			}},
+			map[string]any{"id": 22, "conversationId": 4, "kind": "pi.tool-result", "byTaskId": 30, "model": []any{
+				map[string]any{"role": "toolResult", "toolCallId": "call_ws", "toolName": "workspace_status", "isError": false, "durationMs": 41,
+					"content": []any{map[string]any{"type": "text", "text": `{"system_workspace":{"roots":["/workspace"],"files":[]}}`}}},
+			}},
+			map[string]any{"id": 23, "conversationId": 4, "kind": "pi.assistant", "byTaskId": 31, "model": []any{
+				map[string]any{"role": "assistant", "content": []any{
+					map[string]any{"type": "toolCall", "id": "call_ask", "name": "ask_user", "arguments": map[string]any{
+						"question": "Which analysis should I run?",
+						"options":  []any{"Profit analysis", "Structure analysis"},
+					}},
+				}},
+			}},
+			map[string]any{"id": 24, "conversationId": 4, "kind": "pi.tool-result", "byTaskId": 31, "model": []any{
+				map[string]any{"role": "toolResult", "toolCallId": "call_ask", "toolName": "ask_user", "isError": false, "durationMs": 3,
+					"content": []any{map[string]any{"type": "text", "text": internalAskInstruction}},
+					"details": map[string]any{"tool": "ask_user", "question": "Which analysis should I run?",
+						"options": []any{"Profit analysis", "Structure analysis"}, "multi_select": false}},
+			}},
+		}
+	}
 	if entries == nil {
 		entries = []any{}
 	}
@@ -168,8 +219,9 @@ func fakeView(id int) any {
 	}
 }
 
-// fakeServe 在内存管道上响应视图测试用到的 JSON-RPC 方法。
-func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
+// serve 在内存管道上响应视图测试用到的 JSON-RPC 方法，并记下请求参数。
+func (f *fakeService) serve(in io.Reader, out io.Writer) {
+	t := f.t
 	var mu sync.Mutex
 	write := func(record any) {
 		line, err := json.Marshal(record)
@@ -207,6 +259,9 @@ func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
 		}
 		var params map[string]any
 		_ = json.Unmarshal(req.Params, &params)
+		f.mu.Lock()
+		f.calls = append(f.calls, fakeCall{Method: req.Method, Params: params})
+		f.mu.Unlock()
 		conv := fmt.Sprint(params["id"])
 		switch req.Method {
 		case "conversation.list":
@@ -214,11 +269,26 @@ func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
 				map[string]any{"id": 2, "root": false, "lastEntryId": 6, "updatedAt": 1},
 				map[string]any{"id": 1, "root": true, "lastEntryId": nil, "updatedAt": nil},
 			}})
+		case "session.list":
+			respond(req.ID, map[string]any{"conversations": []any{
+				map[string]any{"id": 4, "root": false, "title": "Workspace check", "lastEntryId": 24, "updatedAt": 5},
+				map[string]any{"id": 2, "root": false, "title": "Greeting", "lastEntryId": 6, "updatedAt": 1},
+				map[string]any{"id": 1, "root": true, "title": "Getting started", "lastEntryId": nil, "updatedAt": nil},
+			}})
+		case "session.rename":
+			respond(req.ID, map[string]any{"id": params["id"], "title": params["title"], "pinned": false, "archived": false})
+		case "command.list":
+			respond(req.ID, map[string]any{"commands": []any{
+				map[string]any{"name": "compact", "description": "Summarize the conversation", "type": "prompt", "aliases": []any{"cp"}, "arguments": "none", "available": true},
+				map[string]any{"name": "status", "description": "Show the session status", "type": "local", "aliases": []any{}, "arguments": "none", "available": true},
+			}, "diagnostics": []any{}})
+		case "conversation.setModel":
+			respond(req.ID, map[string]any{"model": params["model"], "thinkingLevel": params["thinkingLevel"]})
 		case "conversation.create":
 			respond(req.ID, map[string]any{"id": 3})
 		case "conversation.subscribe":
 			n, err := strconv.Atoi(conv)
-			if err != nil || n < 1 || n > 3 {
+			if err != nil || n < 1 || n > 4 {
 				write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
 					"code": -32000, "message": "conversation not found: " + conv, "data": map[string]any{"kind": "not_found"},
 				}})
@@ -229,6 +299,8 @@ func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
 			respond(req.ID, map[string]any{"subscriptionId": n})
 		case "conversation.unsubscribe":
 			respond(req.ID, map[string]any{"ok": true})
+		case "conversation.abort":
+			respond(req.ID, map[string]any{"ok": true})
 		case "conversation.submit":
 			if conv == "3" {
 				write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
@@ -238,7 +310,10 @@ func fakeServe(t *testing.T, in io.Reader, out io.Writer) {
 			}
 			respond(req.ID, map[string]any{"submissionId": 1, "status": "queued"})
 		case "models.available":
-			respond(req.ID, map[string]any{"models": []any{}})
+			respond(req.ID, map[string]any{"models": []any{
+				map[string]any{"provider": "magpie", "id": "auto/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash", "thinkingLevels": []any{"off", "low", "high"}},
+				map[string]any{"provider": "magpie", "id": "auto/other", "name": "Other", "thinkingLevels": []any{"off", "high"}},
+			}})
 		case "models.view":
 			respond(req.ID, map[string]any{
 				"providers": []any{},
@@ -281,7 +356,7 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 
 	a.onService(fs.ready(41))
 	q.pump(t, tt, "the conversation list", func() bool { return a.listLoaded })
-	expectTexts(t, tt, []string{"Ready", "Chat 2", "Chat 1", "New chat", "Settings", "Ask a question about your data."},
+	expectTexts(t, tt, []string{"Ready", "Greeting", "Getting started", "New chat", "Settings", "Ask a question about your data."},
 		[]string{"Starting the agent service", "Reconnected"})
 
 	a.onService(supervisor.Status{State: supervisor.StateRestarting, Err: errors.New("service exited: signal: killed"), Crashes: 1})
@@ -315,7 +390,7 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 	a.onService(fs.ready(41))
 	q.pump(t, tt, "the conversation list", func() bool { return a.listLoaded })
 
-	if err := tt.Click("Chat 2"); err != nil {
+	if err := tt.Click("Greeting"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "conversation 2", func() bool { return a.connected && a.chat.Conversation == 2 })
@@ -334,7 +409,7 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the refused message", func() bool { return a.sendErr != "" })
-	expectTexts(t, tt, []string{"No model is configured", "Open settings", "Chat 3"}, nil)
+	expectTexts(t, tt, []string{"No model is configured", "Open settings", "New chat"}, []string{"Chat 3"})
 	if a.conv != 3 || a.nav != navOf(3) || a.input != "Plot sales by month" || !a.needModel {
 		t.Errorf("conversation %d, nav %q, input %q, needModel %t", a.conv, a.nav, a.input, a.needModel)
 	}
@@ -385,7 +460,7 @@ func TestChatShowsTheRecordedStream(t *testing.T) {
 		tt.Frame()
 		tt.Advance(300 * time.Millisecond)
 		for _, m := range a.chat.Messages {
-			if m.Role == "tool" && strings.HasPrefix(m.Text, "⋯ describe_table running") && tt.HasText("⋯ describe_table running") {
+			if m.Role == "tool" && m.Tool != nil && m.Tool.Name == "describe_table" && m.Tool.Status == "running" && tt.HasText("describe_table") {
 				running = true
 			}
 			if m.Role != "assistant" || m.Done {
@@ -417,5 +492,6 @@ func TestChatShowsTheRecordedStream(t *testing.T) {
 		}
 	}
 	tt.Advance(2 * time.Second)
-	expectTexts(t, tt, []string{"Describe sales", "sales: 42 rows, 7 columns", "Result", "Hello", "streamed", "metric", `print("ok")`, "Copy", "stub/stub-chat"}, nil)
+	// 工具结果默认折叠：行里只有名字、耗时与状态。
+	expectTexts(t, tt, []string{"Describe sales", "describe_table", "504ms · ok", "Result", "Hello", "streamed", "metric", `print("ok")`, "Copy", "stub/stub-chat"}, nil)
 }

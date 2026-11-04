@@ -237,7 +237,7 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 	a.retry, a.logPath = sup.Retry, sup.LogPath()
 	tt := ui.NewTester(a.view, 1180, 760)
 	q.pump(t, tt, "the ready service", func() bool { return a.service.State == supervisor.StateReady && a.listLoaded })
-	expectTexts(t, tt, []string{"Ready", "No conversations yet"}, []string{"Starting the agent service"})
+	expectTexts(t, tt, []string{"Ready"}, []string{"Starting the agent service"})
 
 	sendAndWait := func(text string, rows int) {
 		t.Helper()
@@ -258,7 +258,11 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 		tt.Advance(2 * time.Second) // 回复的浮现动画跑在 tester 的时钟上
 	}
 	sendAndWait("Summarize the data", 2)
-	expectTexts(t, tt, []string{"Summarize the data", "Hello", "streamed", "metric", "custom-stub/stub-chat", "Chat " + strconv.Itoa(a.conv)}, nil)
+	q.pump(t, tt, "the title derived from the first message", func() bool {
+		title := a.sessionTitle(a.conv)
+		return title != "New chat" && tt.HasText(title)
+	})
+	expectTexts(t, tt, []string{"Summarize the data", "Hello", "streamed", "metric", "custom-stub/stub-chat"}, []string{"Chat " + strconv.Itoa(a.conv)})
 	before := append([]api.Message(nil), a.chat.Messages...)
 	conv, pid := a.conv, a.service.PID
 

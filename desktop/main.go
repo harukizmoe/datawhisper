@@ -4,6 +4,8 @@
 //	go run .                                   # 开发模式：bun run server/src/main.ts，从当前工作目录向上查找
 //	go run . -service /opt/dw/datawhisper-server   # 已编译的服务（bun build --compile）
 //	go run . -data-dir /tmp/dw -capture /tmp/dw/frames   # 另外在每种服务状态各存一张窗口 PNG
+//	go run . -data-dir /tmp/dw -open 15 -capture /tmp/dw/frames -capture-delay 8s -capture-quit
+//	                                                      # 打开会话 15、等服务就绪 8 秒后截一张图就退出（截图脚本）
 //
 // 打包后的应用不用 -service：它先看可执行文件旁边的 bin/（macOS 是 Contents/Resources/bin/），在那里找到
 // 随包的 datawhisper-server 和 datawhisper-compute 就使用它们，并把资源目录设为服务的工作目录。
@@ -35,14 +37,19 @@ func main() {
 	python := flag.String("python", "", "the compute worker's Python interpreter or executable, for the service (DW_PYTHON)")
 	computeCwd := flag.String("compute-cwd", "", "the compute worker's working directory, for the service (DW_COMPUTE_CWD)")
 	captureDir := flag.String("capture", "", "write a PNG of the window into this directory at each service state change")
+	captureDelay := flag.Duration("capture-delay", 800*time.Millisecond, "how long after the service is ready to capture its window")
+	captureQuit := flag.Bool("capture-quit", false, "quit after capturing the ready state")
+	openConv := flag.Int("open", 0, "show this conversation on startup (0: a new chat)")
+	width := flag.Int("width", 1180, "window width in DIPs")
+	height := flag.Int("height", 760, "window height in DIPs")
 	flag.Parse()
 
-	a := &app{}
+	a := &app{openOnReady: *openConv}
 	sup, err := newSupervisor(*service, *bun, *dataDir, *python, *computeCwd, a)
 	mygo.App.WhenReady(func() {
 		view := a.view
 		if *captureDir != "" {
-			capture = &capturer{dir: *captureDir, reqs: make(chan supervisor.State, 32)}
+			capture = &capturer{dir: *captureDir, readyDelay: *captureDelay, quit: mygo.App.Quit, quitAfter: *captureQuit, reqs: make(chan supervisor.State, 32)}
 			view = func(c *ui.Context) {
 				a.view(c)
 				capture.built()
@@ -50,8 +57,8 @@ func main() {
 		}
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title:   "DataWhisper",
-			Width:   1180,
-			Height:  760,
+			Width:   *width,
+			Height:  *height,
 			Content: ui.View(view),
 		})
 		a.post = win.Update
@@ -190,6 +197,11 @@ type capturer struct {
 	reqs    chan supervisor.State
 	closed  atomic.Bool
 	waiting chan struct{} // 由视图的下一次构建关闭；在 UI 线程上
+	// readyDelay 是服务就绪后等界面稳定（会话列表、模型目录）再拍的时间。
+	readyDelay time.Duration
+	// quit 与 quitAfter：拍完 ready 状态就退出，供截图脚本使用。
+	quit      func()
+	quitAfter bool
 }
 
 func (cp *capturer) start(win *mygo.Window) {
@@ -224,7 +236,11 @@ func (cp *capturer) close() { cp.closed.Store(true) }
 func (cp *capturer) run() {
 	for state := range cp.reqs {
 		if state == supervisor.StateReady {
-			time.Sleep(800 * time.Millisecond)
+			delay := cp.readyDelay
+			if delay < 800*time.Millisecond {
+				delay = 800 * time.Millisecond
+			}
+			time.Sleep(delay)
 		}
 		// Update 会在它所跟随的状态变化之后运行，并请求重绘一帧；该帧的构建过程会关闭 built。
 		built := make(chan struct{})
@@ -249,5 +265,11 @@ func (cp *capturer) run() {
 			continue
 		}
 		log.Printf("capture: wrote %s", path)
+		if state == supervisor.StateReady && cp.quitAfter {
+			if cp.quit != nil {
+				cp.quit()
+			}
+			return
+		}
 	}
 }

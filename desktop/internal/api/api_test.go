@@ -154,7 +154,7 @@ func TestReplicaFromRecording(t *testing.T) {
 			if !m.Done && m.Role == "assistant" {
 				streaming[m.Key] = true
 			}
-			if !m.Done && strings.HasPrefix(m.Text, "⋯ describe_table running") {
+			if !m.Done && m.Tool != nil && m.Tool.Name == "describe_table" && m.Tool.Status == "running" {
 				running = true
 			}
 		}
@@ -168,8 +168,7 @@ func TestReplicaFromRecording(t *testing.T) {
 	}
 	want := []string{
 		`user:true:Describe sales CALL:describe_table{"table":"sales"}`,
-		`tool:true:→ describe_table {"table":"sales"}`,
-		`tool:true:← sales: 42 rows, 7 columns`,
+		`tool:true:describe_table`,
 		`assistant:true:## Result`,
 		`user:true:Summarize the data`,
 		`assistant:true:## Hello`,
@@ -179,6 +178,11 @@ func TestReplicaFromRecording(t *testing.T) {
 	}
 	if len(streaming) != 2 || !running {
 		t.Errorf("streaming replies %v, running tool shown %t", streaming, running)
+	}
+	// 调用与结果合并成同一行：参数、结果全文与耗时都在 Tool 里，界面默认只显示一行摘要。
+	if st.Messages[1].Tool == nil || st.Messages[1].Tool.Output != "sales: 42 rows, 7 columns" ||
+		st.Messages[1].Tool.DurationMS != 504 || st.Messages[1].Tool.Status != "ok" || st.Messages[1].Tool.Args != `table=sales` {
+		t.Errorf("tool row %+v", st.Messages[1].Tool)
 	}
 	for key := range streaming {
 		if !committed[key] {

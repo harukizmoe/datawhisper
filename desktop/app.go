@@ -41,11 +41,11 @@ type app struct {
 	recovered   bool
 	recoveredAt time.Time
 
-	nav           string // 侧边栏的选择：""（新对话）、navOf(id) 或 navSettings
-	conversations []api.ConversationSummary
-	listLoaded    bool
-	listErr       string
-	listGen       int // 给会话列表的加载排序，避免旧结果覆盖新结果
+	nav        string // 侧边栏的选择：""（新对话）、navOf(id) 或 navSettings
+	sessions   []api.Session
+	listLoaded bool
+	listErr    string
+	listGen    int // 给会话列表的加载排序，避免旧结果覆盖新结果
 
 	conv           int       // 当前显示的会话；0 表示新对话，由它的第一条消息创建
 	chat           api.State // 该会话复制出的状态
@@ -65,6 +65,10 @@ type app struct {
 	st settingsState
 	// src 是右侧数据面板（数据源、工作区、产物）的数据与编辑状态（sources.go）。
 	src sourcesState
+	// cv 是聊天页自己的界面状态（输入、工具折叠、ask_user 选择、模型选择），见 chat.go。
+	cv chatView
+	// openOnReady 在服务就绪后打开这个会话（-open 启动参数）；0 表示停在新对话上。
+	openOnReady int
 
 	list ui.ListState
 	md   markdown.Options
@@ -75,9 +79,6 @@ type app struct {
 type pendingSend struct{ requestID, text string }
 
 func navOf(conv int) string { return "c" + strconv.Itoa(conv) }
-
-// conversationTitle 给会话起个名字，直到有真正的标题（P3.5）。
-func conversationTitle(id int) string { return "Chat " + strconv.Itoa(id) }
 
 func newRequestID() string {
 	b := make([]byte, 12)
@@ -102,8 +103,15 @@ func (a *app) onService(st supervisor.Status) {
 	a.recovered, a.recoveredAt = a.everReady, time.Time{}
 	a.everReady = true
 	a.client = api.New(st.Pipe)
+	if a.openOnReady != 0 {
+		// -open：启动后直接显示这个会话，只订阅一次。
+		a.conv, a.nav = a.openOnReady, navOf(a.openOnReady)
+		a.openOnReady = 0
+	}
 	a.refreshConversations()
 	a.follow()
+	a.refreshModels()
+	a.refreshCommands()
 	if a.nav == navSettings {
 		a.loadSettings()
 	}
@@ -151,9 +159,11 @@ func (a *app) follow() {
 
 func (a *app) onChat(st api.State) {
 	finished := a.chat.Busy && !st.Busy && a.chat.Conversation == st.Conversation
+	switched := st.Conversation != a.chat.Conversation
 	a.chat, a.connected, a.streamErr = st, true, ""
+	a.syncFromState(switched)
 	if finished {
-		a.refreshConversations() // 它的最新条目变了
+		a.refreshConversations() // 它的最新条目变了（服务端据此更新兜底标题）
 	}
 }
 
@@ -183,6 +193,7 @@ func (a *app) navigate() {
 func (a *app) show(conv int) {
 	a.conv, a.chat = conv, api.State{}
 	a.sendErr, a.needModel = "", false
+	a.cv.resetConversation()
 	a.sourcesConversationChanged()
 	a.follow()
 }
@@ -213,6 +224,7 @@ func (a *app) send() {
 	p := *a.pending
 	a.input, a.sending, a.sendErr, a.needModel = "", true, "", false
 	client, conv := a.client, a.conv
+	command, whenBusy := slashCommandName(text, a.cv.commands), a.whenBusy()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -231,7 +243,12 @@ func (a *app) send() {
 				a.refreshConversations()
 			})
 		}
-		_, err := client.Submit(ctx, strconv.Itoa(conv), api.SubmitRequest{RequestID: p.requestID, Text: p.text})
+		_, err := client.Submit(ctx, strconv.Itoa(conv), api.SubmitRequest{
+			RequestID: p.requestID,
+			Text:      p.text,
+			Command:   command,
+			WhenBusy:  whenBusy,
+		})
 		a.post(func() {
 			if err != nil {
 				a.sendFailed(p, "Could not send: ", err)
@@ -286,7 +303,7 @@ func (a *app) refreshConversations() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		list, err := client.Conversations(ctx)
+		list, err := client.Sessions(ctx)
 		a.post(func() {
 			if client != a.client || gen != a.listGen {
 				return // 服务重启了，或者有更新的加载正在进行
@@ -295,7 +312,7 @@ func (a *app) refreshConversations() {
 				a.listErr = err.Error()
 				return
 			}
-			a.conversations, a.listLoaded, a.listErr = list, true, ""
+			a.sessions, a.listLoaded, a.listErr = list, true, ""
 		})
 	}()
 }
@@ -319,6 +336,8 @@ func (a *app) view(c *ui.Context) {
 			}
 		})
 	})
+	// 弹窗画在窗口根上，不被数据面板的分割线裁掉。
+	a.chatModals(c)
 }
 
 func (a *app) sidebar(c *ui.Context) {
@@ -332,13 +351,14 @@ func (a *app) sidebar(c *ui.Context) {
 		})
 		if ui.Sidebar(c, &a.nav, func() {
 			ui.SidebarSection(c, "Chats", nil, func() {
-				for _, conv := range a.conversations {
-					ui.SidebarItem(c, navOf(conv.ID), nil, conversationTitle(conv.ID))
+				for _, session := range a.sessions {
+					title := a.sessionTitle(session.ID)
+					ui.SidebarItem(c, navOf(session.ID), nil, title)
 				}
 				switch {
 				case a.listErr != "":
 					ui.Text(c, "Could not load the conversations").FontSize(12).TextColor(t.Danger).Padding(4, 8)
-				case a.listLoaded && len(a.conversations) == 0:
+				case a.listLoaded && len(a.sessions) == 0:
 					ui.Text(c, "No conversations yet").FontSize(12).TextColor(t.TextMuted).Padding(4, 8)
 				}
 			})
@@ -417,88 +437,4 @@ func (a *app) banner(c *ui.Context) {
 			a.retry()
 		}
 	})
-}
-
-func (a *app) chatPage(c *ui.Context) {
-	t := c.Theme()
-	ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(10, 24).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		if a.conv == 0 {
-			ui.Text(c, "New chat").Bold()
-		} else {
-			ui.Text(c, conversationTitle(a.conv)).Bold()
-		}
-		if a.chat.Model != nil {
-			ui.Badge(c, a.chat.Model.Provider+"/"+a.chat.Model.ModelID)
-		}
-		ui.Spacer(c)
-		label := "Data"
-		if a.src.open {
-			label = "Hide data"
-		}
-		if ui.Button(c, label).Tooltip("Data sources, workspace and artifacts of this chat").Clicked() {
-			a.toggleSources()
-		}
-		label2, color := a.statusLabel(t)
-		ui.Text(c, "●").TextColor(color)
-		ui.Text(c, label2).TextColor(t.TextMuted)
-	})
-	a.banner(c)
-	messages := a.chat.Messages
-	a.list.Key = func(i int) any { return messages[i].Key }
-	a.list.FollowEnd = true
-	ui.List(c, &a.list, len(messages), func(i int) {
-		a.message(c, messages[i])
-	}).Grow(1).Padding(16, 24).Gap(12).Justify(ui.End).Children(func() {
-		if len(messages) == 0 {
-			hint := "Ask a question about your data."
-			if a.conv != 0 && !a.connected {
-				hint = "Loading the conversation…"
-			}
-			ui.Text(c, hint).TextColor(t.TextMuted).Margin(ui.Auto)
-		}
-	})
-	if a.chat.Failure != "" && !a.chat.Busy {
-		ui.Text(c, "The last reply did not finish: "+a.chat.Failure).FontSize(12).TextColor(t.Warning).Padding(4, 24)
-	}
-	if a.sendErr != "" {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 24).Children(func() {
-			ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
-			if a.needModel && ui.Button(c, "Open settings").Clicked() {
-				a.openSettings()
-			}
-		})
-	}
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(12, 24).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
-		in := ui.TextInput(c, &a.input).Label("Message").Placeholder("Ask about your data").Grow(1).AutoFocus()
-		if a.chat.Busy && a.connected && ui.Button(c, "Stop").Clicked() {
-			a.abort()
-		}
-		send := ui.PrimaryButton(c, "Send").Disabled(!a.canSend())
-		if send.Clicked() || in.Submitted() {
-			a.send()
-		}
-	})
-}
-
-// message 构建一行聊天内容：用户的消息放在右侧气泡里，tool 步骤用小号字，回复则用 Markdown：流式时用
-// markdown.Stream，落定后用 markdown.View，且都放在同一个列表行里（同一个 key）。
-func (a *app) message(c *ui.Context, m api.Message) {
-	t := c.Theme()
-	switch m.Role {
-	case "user":
-		ui.Row(c).Children(func() {
-			ui.Spacer(c)
-			ui.Text(c, m.Text).Selectable().Padding(8, 12).Radius(14).Background(t.Surface).MaxWidth(560)
-		})
-	case "tool":
-		ui.Text(c, m.Text).FontSize(12).TextColor(t.TextMuted)
-	default:
-		ui.Column(c).MaxWidth(760).Children(func() {
-			if m.Done {
-				markdown.View(c, m.Text, &a.md)
-			} else {
-				markdown.Stream(c, m.Text, &a.md)
-			}
-		})
-	}
 }
