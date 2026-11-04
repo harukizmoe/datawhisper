@@ -10,7 +10,14 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { defineTool, type ConversationDocToken, type JsonObject, type ToolControl, type ToolRegistration } from "@earendil-works/pi-durable";
+import {
+  defineTool,
+  type ConversationDocToken,
+  type JsonObject,
+  type ToolControl,
+  type ToolExecutionApi,
+  type ToolRegistration,
+} from "@earendil-works/pi-durable";
 import type { WorkspaceFs } from "./workspace/fs.ts";
 import type { PlanStoreDoc, TaskBoardDoc, TeamStoreDoc } from "./docs.ts";
 import type { MemoryDirs } from "../../agent/memory.ts";
@@ -18,6 +25,7 @@ import type { SkillDirs } from "../../agent/skills.ts";
 import type { CanvasStore } from "./diagram/canvas.ts";
 import type { ToolResultArtifactSource } from "./artifacts.ts";
 import type { McpCatalogReader } from "./mcp.ts";
+import type { FeishuService } from "../../feishu/service.ts";
 
 /** 工具失败时抛出的错误；`message` 一律沿用旧 Python 实现的原话。 */
 export class AppToolError extends Error {}
@@ -64,6 +72,11 @@ export type AppToolDeps = {
   readonly colorScheme?: { value: string };
   /** 时钟；测试可固定，避免真实计时器。 */
   readonly now?: () => Date;
+  /**
+   * 飞书机器人的配置、凭据与幂等账本。省略时用 `defaultFeishuService()`（按 `DW_DATA_DIR`
+   * 的默认数据目录取单例），测试可注入临时目录的实例。
+   */
+  readonly feishu?: FeishuService;
 };
 
 /** 一份文档的读写端口：`update` 在一次 pi-durable commit 内完成。 */
@@ -120,13 +133,16 @@ export function renderValue(value: JsonValue): string {
 /**
  * 把一个同步/异步执行函数包成 pi-durable 工具：
  * 校验参数已由 Harness 完成，这里只把异常换成旧实现的错误文案。
+ *
+ * `execute` 的第二个参数是 pi-durable 的调用 API（`taskId`/`callId`/`memo`/`commit`），
+ * 只有需要跨重启幂等的工具（飞书写入）会用到。
  */
 export function makeAppTool<Args extends object>(spec: {
   readonly name: string;
   readonly description: string;
   readonly parameters: object;
   readonly replay: "safe" | "unsafe";
-  readonly execute: (args: Args) => Promise<{
+  readonly execute: (args: Args, api: ToolExecutionApi<AppToolDetails>) => Promise<{
     output: { type: "text"; text: string }[];
     details: AppToolDetails;
     /** 本轮之后的控制信号；目前只有 `search_mcp_tools` 用来加载 `deferred` 的 MCP 工具。 */
@@ -143,8 +159,8 @@ export function makeAppTool<Args extends object>(spec: {
     description: spec.description,
     parameters: spec.parameters,
     replay: spec.replay,
-    async execute(args) {
-      return await spec.execute(args as Args);
+    async execute(args, api) {
+      return await spec.execute(args as Args, api);
     },
   });
 }

@@ -54,6 +54,10 @@ async function shutdown(): Promise<void> {
 }
 
 process.stdout.write(`${JSON.stringify({ type: "ready", pid: process.pid })}\n`);
-attachIpc(service, { input: process.stdin, output: process.stdout }, { onInputEnd: () => void shutdown() });
+attachIpc(
+  service,
+  { input: process.stdin, output: process.stdout },
+  { onInputEnd: () => void shutdown(), dataDir: config.dataDir, autoStartFeishu: false },
+);
 process.on("SIGTERM", () => void shutdown());
 process.on("SIGINT", () => void shutdown());

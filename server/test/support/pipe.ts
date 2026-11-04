@@ -11,10 +11,11 @@ export type ServicePipe = {
   close(): void;
 };
 
-export function connectToService(service: Service): ServicePipe {
+export function connectToService(service: Service, options: { dataDir?: string; autoStartFeishu?: boolean } = {}): ServicePipe {
   const toService = new PassThrough();
   const toClient = new PassThrough();
-  attachIpc(service, { input: toService, output: toClient });
+  // 测试默认不启动飞书长连接：数据目录里若残留已启用配置，不该在跑测试时连真实网络。
+  attachIpc(service, { input: toService, output: toClient }, { autoStartFeishu: false, ...options });
   const client = new IpcClient({
     input: toClient,
     write: streamLineSink(toService),

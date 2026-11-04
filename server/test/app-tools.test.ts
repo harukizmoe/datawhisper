@@ -243,10 +243,10 @@ async function statusRoot(tools: readonly AppTool[]): Promise<string> {
 }
 
 describe("app tool registry", () => {
-  test("exposes the 36 typed tools in stable order", () => {
+  test("exposes the 40 typed tools in stable order", () => {
     const { tools } = makeHarness();
     expect(tools.map((tool) => tool.name)).toEqual([...APP_TOOL_NAMES]);
-    expect(tools).toHaveLength(36);
+    expect(tools).toHaveLength(40);
   });
 
   test("replay policy: reads safe, mutations unsafe", () => {
@@ -258,6 +258,7 @@ describe("app tool registry", () => {
       "propose_ppt_outline", "propose_dashboard_outline",
       "ask_user", "browse_webpage", "read_tool_result", "search_mcp_tools",
       "plan_complete", "get_diagram", "memory_read", "load_analysis_skill",
+      "list_feishu_bitable_tables",
     ]);
     for (const tool of tools) {
       expect({ name: tool.name, replay: tool.replay }).toEqual({

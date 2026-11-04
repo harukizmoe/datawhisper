@@ -1,8 +1,8 @@
 /**
  * A 类（纯 TS）工具装配点。
  *
- * `createAppTools(deps)` 返回 36 个 pi-durable 工具；它们只依赖注入的端口：
- * 工作区文件系统、pi-durable 文档、记忆/技能目录、画布、外溢结果、MCP 目录与 fetch。
+ * `createAppTools(deps)` 返回 40 个 pi-durable 工具；它们只依赖注入的端口：
+ * 工作区文件系统、pi-durable 文档、记忆/技能目录、画布、外溢结果、MCP 目录、fetch 与飞书机器人。
  */
 
 import type { AppTool, AppToolDeps } from "./types.ts";
@@ -16,8 +16,10 @@ import { createArtifactTool } from "./artifacts.ts";
 import { createMemoryTools } from "./memory.ts";
 import { createWebTools } from "./web.ts";
 import { createDiagramTools } from "./diagram/tools.ts";
+import { createFeishuTools } from "../../feishu/tools.ts";
+import { defaultFeishuService } from "../../feishu/service.ts";
 
-/** 40 个 A 类工具中，本批实际实现的 36 个（其余 4 个见报告）。 */
+/** 40 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
 export const APP_TOOL_NAMES = [
   "workspace_status",
   "workspace_glob",
@@ -55,15 +57,20 @@ export const APP_TOOL_NAMES = [
   "edit_diagram",
   "get_diagram",
   "memory_read",
+  "list_feishu_bitable_tables",
+  "create_feishu_bitable",
+  "append_feishu_bitable_records",
+  "update_feishu_bitable_record",
 ] as const satisfies readonly string[];
 
 export type AppToolName = (typeof APP_TOOL_NAMES)[number];
 
-/** 新建 36 个工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。 */
+/** 新建 40 个工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。 */
 export function createAppTools(deps: AppToolDeps): AppTool[] {
   const effective: AppToolDeps = deps.colorScheme === undefined
     ? { ...deps, colorScheme: { value: "mckinsey" } }
     : deps;
+  const feishu = effective.feishu ?? defaultFeishuService();
   const tools = [
     ...createWorkspaceTools(effective),
     ...createTaskTools(effective),
@@ -75,6 +82,7 @@ export function createAppTools(deps: AppToolDeps): AppTool[] {
     ...createMemoryTools(effective),
     ...createWebTools(effective),
     ...createDiagramTools(effective),
+    ...createFeishuTools({ connections: () => feishu.connections() }),
   ];
   const order = new Map<string, number>(APP_TOOL_NAMES.map((name, index) => [name, index]));
   return tools.sort((left, right) => (order.get(left.name) ?? 999) - (order.get(right.name) ?? 999));

@@ -3,13 +3,15 @@
  * 业务在 `conversations/service.ts` 与 `models/service.ts` 里。
  */
 import type { Context } from "@earendil-works/chord/context";
-import type { Harness } from "@earendil-works/pi-durable";
+import type { ConversationId, Harness } from "@earendil-works/pi-durable";
 import type { ComputeClient } from "../compute/client.ts";
 import type { ConversationEvent, Conversations } from "../conversations/service.ts";
+import { FeishuBotError } from "../feishu/config.ts";
+import type { FeishuService } from "../feishu/service.ts";
 import { CUSTOM_PRESETS, type ModelService, type ProviderSettings, SettingsError, parseThinkingLevel } from "../models/service.ts";
 import type { Jobs } from "../jobs/service.ts";
 import type { Workflows } from "../workflows/service.ts";
-import { INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
+import { appError, INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
 import { orchestrationMethods } from "./orchestration.ts";
 import type { MapError, MethodParams, RpcMethod } from "./rpc.ts";
 
@@ -27,6 +29,8 @@ export type MethodDeps = {
    */
   jobs?: Jobs;
   workflows?: Workflows;
+  /** 飞书机器人；省略时 `feishu.*` 方法不注册（进程内测试的轻量装配）。 */
+  feishu?: FeishuService;
 };
 
 function idParam(params: MethodParams, key = "id"): string | number {
@@ -110,11 +114,41 @@ export function modelMethods(service: ModelService): Record<string, RpcMethod> {
   };
 }
 
+/**
+ * 飞书机器人方法。
+ *
+ * 旧 HTTP 接口把「启用/选群」与「会话绑定」拆成两个路由（`api/feishu_bot.py`）；这里保持同样的语义，
+ * 但把绑定读侧合并进 `feishu.status`（带 `conversationId` 时附上 `link`），少一个方法。
+ * 参数错误按 -32602 返回（旧实现回 400），`FeishuBotError` 的文案原样保留。
+ */
+export function feishuMethods(feishu: FeishuService, harness: Harness, context: Context): Record<string, RpcMethod> {
+  const linkedConversation = async (params: MethodParams) => {
+    const id = numberParam(params, "conversationId");
+    const conversation = await harness.conversation(id as ConversationId, context);
+    if (conversation === undefined) throw appError("not_found", `conversation not found: ${id}`);
+    return id;
+  };
+  return {
+    "feishu.status": async (params) => {
+      if (params.conversationId === undefined) return feishu.status();
+      return feishu.status(await linkedConversation(params));
+    },
+    /** 参数校验与旧 `PUT /api/feishu-bot` 一致；保存后长连接按新配置重连。 */
+    "feishu.setConfig": (params) => feishu.setConfig(params),
+    "feishu.chats": () => feishu.chats(),
+    "feishu.test": () => feishu.test(),
+    "feishu.linkConversation": async (params) => feishu.linkConversation(await linkedConversation(params), params),
+    "feishu.unlinkConversation": async (params) =>
+      feishu.linkConversation(await linkedConversation(params), { enabled: false }),
+  };
+}
+
 export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
-  const { harness, compute, modelService, conversations, context, publish, jobs, workflows } = deps;
+  const { harness, compute, modelService, conversations, context, publish, jobs, workflows, feishu } = deps;
   return {
     ...modelMethods(modelService),
     ...orchestrationMethods({ jobs, workflows }),
+    ...(feishu === undefined ? {} : feishuMethods(feishu, harness, context)),
 
     async health() {
       const inspection = await harness.inspect(context);
@@ -157,9 +191,15 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
   };
 }
 
-/** `SettingsError` 是「参数不合法」（-32602），细分放在 `data.kind`；其余交给内部错误分支。 */
+/**
+ * `SettingsError` 是「参数不合法」（-32602），细分放在 `data.kind`；`FeishuBotError` 是用户能改的配置问题
+ * （旧 HTTP 实现回 400），同样按参数不合法返回；其余交给内部错误分支。
+ */
 export const mapSettingsError: MapError = (error) => {
   if (error instanceof SettingsError) return { code: INVALID_PARAMS, message: error.message, data: { kind: error.kind } };
+  if (error instanceof FeishuBotError) {
+    return { code: INVALID_PARAMS, message: error.message, data: { kind: "invalid_input" } };
+  }
   if (error instanceof RpcError) return { code: error.code, message: error.message, data: error.data };
   return undefined;
 };
