@@ -2,19 +2,20 @@
 """Dashboard HTML export: build a self-contained HTML file from a dashboard dict.
 
 Usage:
-    from api.dashboard_html_export import build_export_html
+    from compute.dashboard_html_export import build_export_html, export_filename
     html = build_export_html(dashboard, chart_store)
 """
 from __future__ import annotations
 
 import datetime
+import re
 import html as _html_lib
 import logging
 
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Color scheme brand colors (matches existing COLOR_SCHEMES in api/)
+# Color scheme brand colors (matches COLOR_SCHEMES in charts/color_schemes.py)
 # ---------------------------------------------------------------------------
 _SCHEME_COLORS: dict[str, dict] = {
     "mckinsey": {"primary": "#002060", "accent": "#0070C0", "bg": "#F0F4FA"},
@@ -217,6 +218,11 @@ def _chart_widget_html(widget: dict, chart_store: dict, min_height_px: int = 320
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+def export_filename(dashboard: dict) -> str:
+    """Download file name of the exported dashboard."""
+    return re.sub(r"[^\w\-]", "_", dashboard.get("name", "dashboard")) + ".html"
+
+
 def build_export_html(dashboard: dict, chart_store: dict) -> str:
     """Return a self-contained HTML string for the given dashboard.
 

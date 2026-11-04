@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from flask import Blueprint, jsonify, request
 from infrastructure.paths import is_frozen, resource_root
+from compute.knowledge import BGE_FILES, BGE_REPO, bge_files_complete, bge_model_dir
 
 log = logging.getLogger(__name__)
 
@@ -617,34 +618,8 @@ def proxy_image():
 
 # -- BGE embedding model download ---------------------------------------------
 
-_BGE_REPO = "BAAI/bge-small-zh-v1.5"
-_BGE_FILES = [
-    "config.json",
-    "pytorch_model.bin",
-    "special_tokens_map.json",
-    "tokenizer.json",
-    "vocab.txt",
-]
 _bge_download_lock = threading.Lock()
 _bge_download_state: dict[str, Any] = {"active": False}
-
-
-def _bge_model_dir() -> Path:
-    """Return the snapshot directory where BGE model files are expected."""
-    cache = Path(
-        os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-    ) / "baa_models" / "models--BAAI--bge-small-zh-v1.5" / "snapshots"
-    if cache.exists():
-        dirs = [d for d in cache.iterdir() if d.is_dir()]
-        if dirs:
-            return dirs[0]
-    return cache / "7999e1d3359715c523056ef9478215996d"
-
-
-def _bge_files_complete() -> bool:
-    """Check whether all required BGE model files exist on disk."""
-    d = _bge_model_dir()
-    return all((d / f).exists() for f in _BGE_FILES)
 
 
 @bp.get("/api/system/bge-model/status")
@@ -661,10 +636,10 @@ def bge_model_status():
         init_error = str(exc)
     return jsonify({
         "ok": True,
-        "installed": _bge_files_complete(),
+        "installed": bge_files_complete(),
         "neural_active": neural,
         "init_error": init_error,
-        "model_dir": str(_bge_model_dir()),
+        "model_dir": str(bge_model_dir()),
     })
 
 
@@ -680,12 +655,12 @@ def bge_model_download():
 
     _bge_download_state["active"] = True
     try:
-        target = _bge_model_dir()
+        target = bge_model_dir()
         target.mkdir(parents=True, exist_ok=True)
 
-        base = f"https://huggingface.co/{_BGE_REPO}/resolve/main"
+        base = f"https://huggingface.co/{BGE_REPO}/resolve/main"
         errors = []
-        for fname in _BGE_FILES:
+        for fname in BGE_FILES:
             dst = target / fname
             if dst.exists() and dst.stat().st_size > 0:
                 continue
@@ -705,7 +680,7 @@ def bge_model_download():
             return jsonify({
                 "ok": False,
                 "error": "Some files failed: " + "; ".join(errors),
-                "downloaded": [f for f in _BGE_FILES if (target / f).exists()],
+                "downloaded": [f for f in BGE_FILES if (target / f).exists()],
             })
 
         # Re-init neural embedder so it picks up newly downloaded files.
@@ -745,7 +720,7 @@ def embed_mode_get():
             "cloud_configured": info.get("cloud_configured", False),
             "cloud_status": info.get("cloud_status", "unavailable"),
             "local_available": info.get("local_available", False),
-            "installed": _bge_files_complete(),
+            "installed": bge_files_complete(),
             "neural_active": is_neural(),
             "init_error": get_init_error(),
         })

@@ -488,7 +488,7 @@ class WorkflowRuntime:
 
     def _execute_sql_node(self, node: Mapping[str, Any]) -> dict[str, Any]:
         """Execute a declared read-only query after the shared AST validation."""
-        from agent.validate import validate_tool_args
+        from compute.validate import validate_tool_args
         from api.chat import _build_agent
 
         sql = str(node.get("sql") or "").strip()

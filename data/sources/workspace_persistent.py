@@ -11,7 +11,7 @@
   - 增量更新：配合 ``WorkspaceRuntime.load_registry()`` / ``save_registry()``
     检测文件 sha256 变化，未变则跳过解析（大 Excel 秒开）
   - 安全：不设 ``enable_external_access=false``（A4 已移除），依赖
-    ``agent/validate.py`` 的 SQL AST 路径白名单做安全控制
+    ``compute/validate.py`` 的 SQL AST 路径白名单做安全控制
 """
 from __future__ import annotations
 

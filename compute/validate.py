@@ -217,8 +217,9 @@ def _validate_file_read_paths(stmt, allowed_roots: List[Path]) -> Optional[str]:
         return None  # sqlglot 不可用，跳过路径白名单（heuristic fallback 会兜底）
 
     if not allowed_roots:
-        # 无白名单根（未挂载 workspace 且无默认根）—— 一律拒绝文件读取
-        # 实际上 agent.py 总会传 uploads/Information 作为默认根，这里防御性处理
+        # 无白名单根（固定但不可用的 Workspace）—— 一律拒绝文件读取；
+        # 调用方未传白名单时，validate_sql_structured 已补上默认根
+        # uploads/Information（见 _default_allowed_roots）
         allowed_roots = []
 
     # 标准化白名单根（resolve）

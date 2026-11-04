@@ -100,14 +100,14 @@ def _new_conn() -> duckdb.DuckDBPyConnection:
         设置会连带禁用 read_csv / read_parquet 等 file-read 函数，与"工作目录
         直读"目标冲突。DuckDB 的 enable_external_access 是全有或全无的，无法
         只禁网络而留本地。
-      - 改由 `agent/validate.py` 的 SQL AST 路径白名单做精细控制：
+      - 改由 `compute/validate.py` 的 SQL AST 路径白名单做精细控制：
           * 文件读取函数路径必须是字面量，resolve 后在工作目录/uploads/Information 白名单内
           * 网络 URL（http/https/s3/gs/azure/hdfs 等）一律拒绝（SSRF 防护）
           * 非字面量参数（@var / 列引用）一律拒绝
           * install/load/attach/copy_to/pragma/http_get/http_post 仍然禁止
 
     Layered defense (A4):
-      Layer 1 (primary): agent/validate.py 的 sqlglot AST 校验
+      Layer 1 (primary): compute/validate.py 的 sqlglot AST 校验
         - SELECT/WITH only，禁写操作
         - 文件读取函数路径白名单 + URL 黑名单
         - 非字面量路径参数一律拒绝

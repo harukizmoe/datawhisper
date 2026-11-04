@@ -17,8 +17,9 @@ import threading
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Iterator, Sequence
+from urllib.parse import quote
 
-from data.feishu_bitable_service import read_bitable_records
+from data.feishu_bitable_service import FeishuBitableError, read_bitable_records
 from data.sources import (
     CSVDataSource,
     DataSource,
@@ -95,6 +96,150 @@ def build_merged_source(sources: Sequence[DataSource]):
         return None
 
 
+def encode_conn_secret(conn_str: str) -> str:
+    """对连接字符串中的密码部分做 URL 编码，处理 @ # 等特殊字符。"""
+    # 匹配 scheme://user:<secret>@host 格式，密码可能含多个 @
+    # 贪婪匹配密码部分（.+），确保最后一个 @ 才是 host 分隔符
+    m = re.match(r'^([a-zA-Z][a-zA-Z0-9+\-.]*://[^:@/]+):(.+)@([^@].*)', conn_str)
+    if not m:
+        return conn_str
+    prefix, secret, rest = m.group(1), m.group(2), m.group(3)
+    # 若密码已含 % 编码则跳过，避免二次编码
+    if re.search(r'%[0-9A-Fa-f]{2}', secret):
+        return conn_str
+    encoded = quote(secret, safe='-._~!*')
+    return f"{prefix}:{encoded}@{rest}"
+
+
+def friendly_conn_error(exc: Exception, service: str) -> str:
+    """Translate a low-level connection exception into a user-readable message.
+
+    `service` is a short label like 'Google Sheets' / '外部 API' / '数据库'.
+    Falls back to the raw message when the error is not a known network case.
+    """
+    # Walk the exception cause chain so a wrapped error is still recognised.
+    chain = []
+    cur: BaseException | None = exc
+    seen = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        chain.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    text = "  ".join(f"{type(c).__name__}: {c}" for c in chain).lower()
+
+    # — SQL Server client prerequisites —
+    if "no module named 'pyodbc'" in text or "no module named \"pyodbc\"" in text:
+        return (
+            "SQL Server 驱动未安装：请升级或重新运行本程序以安装 pyodbc，"
+            "并在此电脑安装 Microsoft ODBC Driver 17 或 18 for SQL Server 后重试。"
+        )
+    if any(k in text for k in (
+        "data source name not found", "no default driver specified",
+        "can't open lib 'odbc driver", "cannot open lib 'odbc driver",
+    )):
+        return (
+            "未找到 SQL Server ODBC 驱动：请安装 Microsoft ODBC Driver 17 或 18 for SQL Server，"
+            "并在连接串中指定已安装的驱动名称。"
+        )
+
+    # — SQL Server reachability / instance discovery —
+    if any(k in text for k in (
+        "server is not found or not accessible", "named pipes provider",
+        "tcp provider", "sql server does not exist", "error: 258", "10060",
+        "08001", "08s01",
+    )):
+        return (
+            "无法连接 SQL Server：请确认服务器地址/实例名和端口正确，SQL Server 已启用 TCP/IP，"
+            "防火墙已放行端口（通常为 1433），且客户端网络可访问该服务器。"
+        )
+
+    # — Network unreachable / connection reset (proxy, GFW, offline) —
+    if any(k in text for k in (
+        "10054", "connection aborted", "connection reset", "connectionreseterror",
+        "connection refused", "10061", "max retries", "failed to establish",
+        "name or service not known", "getaddrinfo failed", "11001",
+        "transporterror", "ssl", "handshake", "timed out", "timeout",
+        "remotedisconnected", "connectionerror",
+    )):
+        return (
+            f"无法连接「{service}」：网络请求被中断或超时。"
+            f"请检查网络是否可正常访问目标服务"
+            + ("（Google 服务在部分网络下需要代理）" if "google" in service.lower() else "")
+            + "，确认代理 / VPN 已开启且 Python 进程已走代理后重试。"
+        )
+    # — Authentication / authorization —
+    if any(k in text for k in (
+        "401", "403", "unauthorized", "forbidden", "permission",
+        "invalid_grant", "invalid_client", "authentication",
+        "access_denied", "credential",
+    )):
+        return (
+            f"{service} 认证失败：凭证无效或没有访问权限。"
+            "请检查服务账号 / 密钥是否正确，以及该账号是否已被授权访问目标资源。"
+        )
+    # — Not found —
+    if any(k in text for k in ("404", "not found", "does not exist")):
+        return f"{service} 目标资源不存在：请检查 URL / ID / 表名是否正确。"
+
+    # — Unknown — keep the raw message but keep it short —
+    raw = str(exc).strip() or type(exc).__name__
+    if len(raw) > 200:
+        raw = raw[:200] + "…"
+    return f"{service} 连接失败：{raw}"
+
+
+# Remote sources whose open failures get a readable reason.
+_CONNECTION_LABELS = {"sql": "数据库", "gsheets": "Google Sheets", "http": "外部 API", "feishu": "飞书多维表格"}
+
+
+def open_failed(descriptor: dict, exc: Exception) -> RpcError:
+    """The error for a source that failed to open (``data.kind == "open_failed"``):
+    remote connections get a readable reason, files keep the raw message."""
+    label = _CONNECTION_LABELS.get(str(descriptor.get("kind") or ""))
+    if label and not isinstance(exc, FeishuBitableError):
+        message = friendly_conn_error(exc, label)
+    else:
+        message = str(exc) or type(exc).__name__
+    return RpcError(message, data={"kind": "open_failed", "error": f"{type(exc).__name__}: {exc}"})
+
+
+def pdf_source(file_path: str, name: str) -> DataSource:
+    """The tables of a text-based PDF as an in-memory source."""
+    from data.sources.extracted import ExtractedTableDataSource
+    from data.table_extract import MAX_PDF_BYTES, normalize_grids, parse_pdf_tables
+
+    pdf_bytes = Path(file_path).read_bytes()
+    if len(pdf_bytes) > MAX_PDF_BYTES:
+        raise ValueError(f"PDF 文件超过 {MAX_PDF_BYTES // (1024 * 1024)}MB 上限，请拆分后再上传")
+    grids = parse_pdf_tables(pdf_bytes)
+    if not grids:
+        raise ValueError("未在 PDF 中检测到表格（扫描件/图片型 PDF 不支持），请先转换为文本型 PDF")
+    tables, _meta = normalize_grids(grids)
+    if not tables:
+        raise ValueError("PDF 表格均少于 2 行/2 列，无可导入内容")
+    return ExtractedTableDataSource(name, tables)
+
+
+def preview_tables(source_id: str, source: DataSource) -> list[dict]:
+    """Table metadata of one source for the data preview (no row data), each
+    tagged with the source and, for SQL sources, the analysis-table selection."""
+    selectable = isinstance(source, SQLDataSource)
+    selected = set(source.get_analysis_tables()) if selectable else set()
+    tables = []
+    for table in source.get_preview():
+        table.update({
+            "source_id": source_id,
+            "source_name": getattr(source, "name", ""),
+            # Selecting an analysis scope only makes sense for remote SQL
+            # catalogs, which may expose thousands of very large tables.
+            # Uploaded/local files are already a deliberate bounded selection.
+            "selectable_for_analysis": selectable,
+            "selected_for_analysis": selectable and table.get("name") in selected,
+        })
+        tables.append(table)
+    return tables
+
+
 def restore_source(info: dict) -> DataSource:
     """Build a source from its persisted descriptor."""
     kind = str(info.get("kind") or "")
@@ -113,7 +258,7 @@ def restore_source(info: dict) -> DataSource:
             return ExcelDataSource.from_database(file_path, name or Path(file_path).name, db_path)
         return ExcelDataSource(file_path, name or Path(file_path).name)
     if kind == "sql":
-        conn = str(info.get("connection_string") or "")
+        conn = encode_conn_secret(str(info.get("connection_string") or "").strip())
         if not conn:
             raise ValueError("SQL 连接字符串为空")
         source = SQLDataSource(conn, name)
@@ -131,12 +276,10 @@ def restore_source(info: dict) -> DataSource:
         url = str(info.get("url") or "")
         if not url:
             raise ValueError("API URL 为空")
-        return HTTPAPIDataSource(
-            url,
-            str(info.get("auth_type") or "none"),
-            str(info.get("auth_value") or ""),
-            name,
-        )
+        auth_type = str(info.get("auth_type") or "none")
+        if auth_type not in ("none", "bearer", "api_key"):
+            raise ValueError("认证方式无效，支持: none / bearer / api_key")
+        return HTTPAPIDataSource(url, auth_type, str(info.get("auth_value") or ""), name)
     if kind == "feishu":
         app_token = str(info.get("app_token") or "")
         table_id = str(info.get("table_id") or "")
@@ -152,6 +295,11 @@ def restore_source(info: dict) -> DataSource:
         if not Path(db_path).is_file():
             raise FileNotFoundError(db_path or "工作目录 DuckDB 不存在")
         return WorkspacePersistentSource(db_path, name or "工作目录")
+    if kind == "pdf":
+        file_path = str(info.get("file_path") or "")
+        if not Path(file_path).is_file():
+            raise FileNotFoundError(file_path or "PDF 文件不存在")
+        return pdf_source(file_path, name or f"PDF {Path(file_path).name}")
     raise ValueError(f"不支持的数据源类型：{kind or 'unknown'}")
 
 
@@ -225,13 +373,16 @@ class SourceRegistry:
         self._lock = threading.Lock()
 
     def open(self, source_id: str, descriptor: dict) -> DataSource:
-        source = restore_source(descriptor)
+        try:
+            source = restore_source(descriptor)
+        except Exception as exc:
+            raise open_failed(descriptor, exc) from exc
         self._install(source_id, source)
         return source
 
     def add(self, source_id: str, source: DataSource) -> None:
-        """Register an already-built source (e.g. extracted web tables) under a
-        new id. Built in memory, it cannot be reopened from a descriptor."""
+        """Register a source the caller built (e.g. extracted web tables, not
+        from a descriptor) under a new id."""
         with self._lock:
             if source_id in self._entries:
                 raise RpcError(f"data source already open: {source_id}", INVALID_PARAMS)

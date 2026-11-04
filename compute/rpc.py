@@ -55,6 +55,26 @@ class RpcError(Exception):
         self.data = data
 
 
+def str_param(params: dict, key: str, required: bool = True) -> str:
+    """``params[key]`` as a string; an absent optional key reads as ""."""
+    value = params.get(key)
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str) or (required and not value):
+        raise RpcError(f"'{key}' must be a {'non-empty ' if required else ''}string", INVALID_PARAMS)
+    return value
+
+
+def int_param(params: dict, key: str, default: int | None = None) -> int:
+    """``params[key]`` as an integer; ``default``, when given, stands in for an absent key."""
+    value = params.get(key)
+    if value is None and default is not None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise RpcError(f"'{key}' must be an integer", INVALID_PARAMS)
+    return value
+
+
 class MethodContext:
     """Per-request handle passed to every method."""
 

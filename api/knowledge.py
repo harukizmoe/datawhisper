@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """Blueprint: business knowledge base — parse, preview, confirm, CRUD, toggle."""
 import logging
-import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
 from flask import Blueprint, request, jsonify, send_from_directory
 
 from .state import session_manager, config_manager, require_session_ownership
+from compute.knowledge import KNOWLEDGE_FILE_SUFFIXES, list_knowledge_files, stored_filename
 from infrastructure.paths import content_data_path
 
 log = logging.getLogger(__name__)
@@ -16,7 +16,6 @@ bp = Blueprint("knowledge", __name__)
 # Source mode: <project>/uploads/knowledge; packaged mode: <data-root>/uploads/knowledge.
 # This file lives at <root>/api/knowledge.py → parent = api/ → parent = root
 _KB_DIR = content_data_path("uploads", "knowledge")
-_ALLOWED_EXTS = {".xlsx", ".xls", ".docx"}
 
 
 def _ensure_dir() -> None:
@@ -176,13 +175,11 @@ def parse_file():
     original_name = f.filename or "upload"
     ext = Path(original_name).suffix.lower()
 
-    if ext not in _ALLOWED_EXTS:
+    if ext not in KNOWLEDGE_FILE_SUFFIXES:
         return jsonify({"error": f"不支持的文件格式 {ext}，请上传 .xlsx / .xls / .docx"}), 400
 
     # Keep original filename; prepend uuid prefix to avoid collisions
-    safe_stem = "".join(c if c.isalnum() or c in "-_." else "_"
-                        for c in Path(original_name).stem)[:60]
-    filename = f"{uuid.uuid4().hex[:8]}_{safe_stem}{ext}"
+    filename = stored_filename(original_name)
     save_path = scope_dir / filename
     f.save(str(save_path))
 
@@ -221,17 +218,7 @@ def parse_file():
 @bp.get("/api/knowledge/files")
 def list_files():
     """Return metadata of all uploaded source files in uploads/knowledge/."""
-    scope_dir = _kb_dir()
-    scope_dir.mkdir(parents=True, exist_ok=True)
-    files = []
-    for p in sorted(scope_dir.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True):
-        if p.suffix.lower() in _ALLOWED_EXTS:
-            files.append({
-                "filename": p.name,
-                "size":     p.stat().st_size,
-                "mtime":    p.stat().st_mtime,
-            })
-    return jsonify(files)
+    return jsonify(list_knowledge_files(_kb_dir()))
 
 
 @bp.delete("/api/knowledge/files/<filename>")
@@ -267,7 +254,7 @@ def confirm_records():
             rag = {"chunks": 0}
             if filename:
                 source_path = _kb_dir() / filename
-                if source_path.exists() and source_path.suffix.lower() in _ALLOWED_EXTS:
+                if source_path.exists() and source_path.suffix.lower() in KNOWLEDGE_FILE_SUFFIXES:
                     from Function.Knowledge.file_parser import extract_text
                     text = extract_text(str(source_path))
                     if text.strip():
@@ -291,7 +278,7 @@ def restore_structured_snapshot():
         scope_dir = _kb_dir()
         scope_dir.mkdir(parents=True, exist_ok=True)
         for path in scope_dir.iterdir():
-            if path.is_file() and path.suffix.lower() in _ALLOWED_EXTS:
+            if path.is_file() and path.suffix.lower() in KNOWLEDGE_FILE_SUFFIXES:
                 path.unlink()
         with _kb() as kb:
             restored = kb.replace_structured_snapshot(body.get("snapshot") or {})
@@ -309,11 +296,9 @@ def restore_source_file():
     f = request.files["file"]
     original_name = f.filename or "knowledge-source"
     ext = Path(original_name).suffix.lower()
-    if ext not in _ALLOWED_EXTS:
+    if ext not in KNOWLEDGE_FILE_SUFFIXES:
         return jsonify({"error": f"不支持的文件格式 {ext}"}), 400
-    safe_stem = "".join(c if c.isalnum() or c in "-_." else "_"
-                        for c in Path(original_name).stem)[:60]
-    filename = f"{uuid.uuid4().hex[:8]}_{safe_stem}{ext}"
+    filename = stored_filename(original_name)
     target = _kb_dir() / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     try:

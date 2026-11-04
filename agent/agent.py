@@ -86,7 +86,7 @@ from .retry        import (
     is_context_length_error as _is_context_length_error,
     is_retryable as _is_retryable,
 )
-from .validate     import (
+from compute.validate import (
     normalize_ask_user_args as _normalize_ask_user_args,
     normalize_report_outline_args as _normalize_report_outline_args,
     validate_ask_user_args as _validate_ask_user_args,

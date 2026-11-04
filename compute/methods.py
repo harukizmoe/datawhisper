@@ -2,21 +2,14 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable
 
-from . import host
-from .rpc import MethodContext, RpcError, INVALID_PARAMS
+from . import host, knowledge, ui
+from .rpc import INVALID_PARAMS, MethodContext, RpcError, str_param
 from .sources import SourceRegistry
 from .tools.dispatch import BUSINESS_TOOLS
 
 _sources = SourceRegistry()
-
-
-def _str(params: dict, key: str, required: bool = True) -> str:
-    value = params.get(key, "")
-    if not isinstance(value, str) or (required and not value):
-        raise RpcError(f"'{key}' must be a non-empty string", INVALID_PARAMS)
-    return value
 
 
 def ping(ctx: MethodContext, params: dict) -> dict:
@@ -24,7 +17,7 @@ def ping(ctx: MethodContext, params: dict) -> dict:
 
 
 def source_open(ctx: MethodContext, params: dict) -> dict:
-    source_id = _str(params, "source_id")
+    source_id = str_param(params, "source_id")
     descriptor = params.get("descriptor")
     if not isinstance(descriptor, dict):
         raise RpcError("'descriptor' must be an object", INVALID_PARAMS)
@@ -33,7 +26,7 @@ def source_open(ctx: MethodContext, params: dict) -> dict:
 
 
 def source_close(ctx: MethodContext, params: dict) -> dict:
-    return {"closed": _sources.close(_str(params, "source_id"))}
+    return {"closed": _sources.close(str_param(params, "source_id"))}
 
 
 def source_list(ctx: MethodContext, params: dict) -> dict:
@@ -41,18 +34,18 @@ def source_list(ctx: MethodContext, params: dict) -> dict:
 
 
 def source_tables(ctx: MethodContext, params: dict) -> dict:
-    with _sources.use(_str(params, "source_id")) as source:
+    with _sources.use(str_param(params, "source_id")) as source:
         return {"tables": source.list_tables()}
 
 
 def source_schema(ctx: MethodContext, params: dict) -> dict:
-    with _sources.use(_str(params, "source_id")) as source:
+    with _sources.use(str_param(params, "source_id")) as source:
         return {"schema": source.get_schema()}
 
 
 def source_table_detail(ctx: MethodContext, params: dict) -> dict:
-    table = _str(params, "table")
-    with _sources.use(_str(params, "source_id")) as source:
+    table = str_param(params, "table")
+    with _sources.use(str_param(params, "source_id")) as source:
         if table not in source.list_tables():
             return {"found": False}
         detail = getattr(source, "get_table_detail", None)
@@ -62,8 +55,8 @@ def source_table_detail(ctx: MethodContext, params: dict) -> dict:
 
 
 def source_query(ctx: MethodContext, params: dict) -> dict:
-    sql = _str(params, "sql")
-    with _sources.use(_str(params, "source_id")) as source:
+    sql = str_param(params, "sql")
+    with _sources.use(str_param(params, "source_id")) as source:
         df, error = source.execute_query(sql)
         if error:
             return {"ok": False, "error": error}
@@ -84,12 +77,13 @@ def _tool_method(name: str):
     return method
 
 
-def tool_fetch_table_parse(ctx: MethodContext, params: dict) -> dict:
-    return host.run_fetch_table_parse(ctx, _sources, params)
+def _with_sources(fn: Callable[[MethodContext, SourceRegistry, dict], Any]):
+    """A method of *fn*, which works on open sources, bound to the worker's registry."""
+    def method(ctx: MethodContext, params: dict) -> Any:
+        return fn(ctx, _sources, params)
 
-
-def tool_load_feishu_bitable(ctx: MethodContext, params: dict) -> dict:
-    return host.run_load_feishu_bitable(ctx, _sources, params)
+    method.__name__ = fn.__name__
+    return method
 
 
 METHODS: dict[str, Any] = {
@@ -101,7 +95,32 @@ METHODS: dict[str, Any] = {
     "source.schema": source_schema,
     "source.tableDetail": source_table_detail,
     "source.query": source_query,
+    "source.preview": _with_sources(ui.source_preview),
+    "source.previewTable": _with_sources(ui.source_preview_table),
+    "source.setAnalysisTables": _with_sources(ui.source_set_analysis_tables),
+    "upload.prepare": ui.upload_prepare,
+    "workspace.sync": _with_sources(ui.workspace_sync),
+    "dashboard.refresh": _with_sources(ui.dashboard_refresh),
+    "dashboard.exportHtml": ui.dashboard_export_html,
+    "chart.png": ui.chart_png,
+    "knowledge.list": knowledge.knowledge_list,
+    "knowledge.add": knowledge.knowledge_add,
+    "knowledge.update": knowledge.knowledge_update,
+    "knowledge.toggle": knowledge.knowledge_toggle,
+    "knowledge.delete": knowledge.knowledge_delete,
+    "knowledge.search": knowledge.knowledge_search,
+    "knowledge.parse": knowledge.knowledge_parse,
+    "knowledge.extract": knowledge.knowledge_extract,
+    "knowledge.confirm": knowledge.knowledge_confirm,
+    "knowledge.files": knowledge.knowledge_files,
+    "knowledge.deleteFile": knowledge.knowledge_delete_file,
+    "knowledge.rebuildEmbeddings": knowledge.knowledge_rebuild_embeddings,
+    "embed.status": knowledge.embed_status,
+    "embed.setMode": knowledge.embed_set_mode,
+    "embed.cloudConfig": knowledge.embed_cloud_config,
+    "embed.setCloudConfig": knowledge.embed_set_cloud_config,
+    "embed.reload": knowledge.embed_reload,
     **{f"tool.{name}": _tool_method(name) for name in sorted(BUSINESS_TOOLS)},
-    "tool.fetch_table_parse": tool_fetch_table_parse,
-    "tool.load_feishu_bitable": tool_load_feishu_bitable,
+    "tool.fetch_table_parse": _with_sources(host.run_fetch_table_parse),
+    "tool.load_feishu_bitable": _with_sources(host.run_load_feishu_bitable),
 }

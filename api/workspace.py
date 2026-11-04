@@ -15,11 +15,11 @@ A4 修复（2026-06-18）：
 """
 import logging
 import os
-import traceback
 from pathlib import Path
 from flask import Blueprint, request, jsonify
 
 from .state import session_manager, workspace_manager, require_session_ownership
+from compute.workspace import import_workdir_files
 from data.workspace import validate_workdir
 from data.workspace_storage import (
     build_workspace_storage_plan,
@@ -31,9 +31,6 @@ from data.workspace_storage import (
 log = logging.getLogger(__name__)
 
 bp = Blueprint("workspace", __name__)
-
-# 可注册为 DataSource 的文件后缀
-_REGISTERABLE_SUFFIXES = {".csv", ".xlsx", ".xls"}
 
 
 def _active_workspace_jobs(sess, workspace_id: str) -> list[dict]:
@@ -102,10 +99,7 @@ def _register_workdir_files(sid: str, runtime) -> dict:
     from data.sources.workspace_persistent import WorkspacePersistentSource
 
     sess = session_manager.get_or_create(sid)
-    added = []
     pending_jobs = []
-    errors = []
-    reused = 0
 
     # ── 1. 创建/打开持久化 DataSource ──────────────────────────────────────
     source_name = f"📁 {runtime.workdir.name}" if hasattr(runtime, 'workdir') else "工作目录"
@@ -117,114 +111,17 @@ def _register_workdir_files(sid: str, runtime) -> dict:
         log.error("[workspace] failed to open persistent source: %s", exc)
         return {"added": [], "errors": [f"持久化数据库打开失败：{exc}"], "skipped": 0, "reused": 0}
 
-    # ── 2. 读取注册快照，检测文件变化 ──────────────────────────────────────
-    registry = runtime.load_registry()
-    files = runtime.list_data_files(max_files=50)
+    # ── 2. 导入新增/变更的文件；大文件排入后台任务 ─────────────────────────
+    def queue_job(job_type, label, worker):
+        job_id = sess.job_runner.create(worker, job_type=job_type, label=label)
+        pending_jobs.append({
+            "id": job_id,
+            "type": job_type,
+            "source_name": label,
+            "status": "queued",
+        })
 
-    for f in files:
-        name = f["name"]
-        suffix = f["suffix"]
-
-        if suffix not in _REGISTERABLE_SUFFIXES:
-            continue
-
-        file_path = str(runtime.workdir / name)
-        file_key = name  # registry 用文件名作 key（工作目录内唯一）
-
-        # 算 sha256 检测变化
-        current_hash = runtime.compute_file_hash(Path(file_path))
-        if not current_hash:
-            errors.append(f"{name}: 无法读取文件")
-            continue
-
-        old_entry = registry.get(file_key)
-        if old_entry and old_entry.get("sha256") == current_hash:
-            # 文件未变化，表已在 .duckdb 里，跳过解析
-            reused += 1
-            log.debug("[workspace] reuse cached: %s (sha256 match)", name)
-            continue
-
-        # 新文件或内容变化，注册到持久化连接
-        base_table = _safe_table_name(name)
-        try:
-            if suffix in {".xlsx", ".xls"} and f.get("size", 0) > 5_000_000:
-                from data.sources.workspace_persistent import parse_workspace_excel_job
-                job_id = sess.job_runner.create(
-                    lambda ctx, fp=file_path, table=base_table, key=file_key,
-                           digest=current_hash, previous=(old_entry or {}).get("tables", []):
-                        parse_workspace_excel_job(
-                            ctx, ctx.runtime or runtime, fp, table, key, digest, previous
-                        ),
-                    job_type="excel_parse",
-                    label=name,
-                )
-                pending_jobs.append({
-                    "id": job_id,
-                    "type": "excel_parse",
-                    "source_name": name,
-                    "status": "queued",
-                })
-                continue
-            if suffix == ".csv":
-                from data.sources.workspace_persistent import (
-                    csv_requires_job,
-                    parse_workspace_csv_job,
-                )
-                if csv_requires_job(file_path):
-                    job_id = sess.job_runner.create(
-                        lambda ctx, fp=file_path, table=base_table, key=file_key,
-                               digest=current_hash, previous=(old_entry or {}).get("tables", []):
-                            parse_workspace_csv_job(
-                                ctx, ctx.runtime or runtime, fp, table, key, digest, previous
-                            ),
-                        job_type="csv_import",
-                        label=name,
-                    )
-                    pending_jobs.append({
-                        "id": job_id,
-                        "type": "csv_import",
-                        "source_name": name,
-                        "status": "queued",
-                    })
-                    continue
-            if suffix == ".csv":
-                with runtime.db_lock:
-                    ok = source._register_csv(file_path, base_table)
-                if ok:
-                    tables = [base_table]
-                else:
-                    errors.append(f"{name}: CSV 注册失败")
-                    continue
-            else:
-                with runtime.db_lock:
-                    tables = source._register_excel(file_path, base_table)
-                if not tables:
-                    errors.append(f"{name}: Excel 无可注册的 sheet")
-                    continue
-
-            # 更新 registry
-            entry = {
-                "sha256": current_hash,
-                "tables": tables,
-                "source_type": suffix.lstrip("."),
-                "file_path": file_path,
-            }
-            # Merge and persist under the same writer lock.  A large Excel job
-            # may complete while this request is still walking later files;
-            # writing the original snapshot at function exit would lose it.
-            with runtime.db_lock:
-                registry = runtime.load_registry()
-                registry[file_key] = entry
-                runtime.save_registry(registry)
-            added.append({
-                "source_name": name,
-                "tables": tables,
-            })
-            log.info("[workspace] registered %s → tables=%s", name, tables)
-        except Exception as exc:
-            log.error("[workspace] FAILED to register %s: %s\n%s",
-                      name, exc, traceback.format_exc())
-            errors.append(f"{name}: {exc}")
+    imported = import_workdir_files(runtime, source, queue_job)
 
     # ── 3. 把持久化 source 注册到 session ───────────────────────────────────
     # 检查是否已注册过这个持久化 source（按 db_path 去重）
@@ -244,27 +141,11 @@ def _register_workdir_files(sid: str, runtime) -> dict:
         schema_preview = ""
 
     return {
-        "added": added,
-        "errors": errors,
-        "skipped": len(files) - len(added) - len(errors) - reused,
-        "reused": reused,
+        **imported,
         "schema_preview": schema_preview,
         "source_name": source_name,
         "pending_jobs": pending_jobs,
     }
-
-
-def _safe_table_name(filename: str) -> str:
-    """从文件名生成合法的 DuckDB 表名。"""
-    import re
-    # 去扩展名
-    stem = re.sub(r'\.(csv|xlsx|xls)$', '', filename, flags=re.IGNORECASE)
-    # 清理为合法标识符
-    cleaned = re.sub(r'[^\w]', '_', stem)
-    cleaned = re.sub(r'_+', '_', cleaned).strip('_')
-    if cleaned and cleaned[0].isdigit():
-        cleaned = '_' + cleaned
-    return cleaned or 'data'
 
 
 @bp.post("/api/session/<sid>/workspace/mount")

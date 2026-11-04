@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from pathlib import Path
-from agent.validate import normalize_report_outline_args, validate_tool_args
+from ..validate import normalize_report_outline_args, validate_tool_args
 from infrastructure.artifact_lifecycle import register_artifact
 from infrastructure.paths import content_data_path, resource_root
 
@@ -374,7 +374,7 @@ class ExportToolsMixin:
     # ── PPT ───────────────────────────────────────────────────────────────────
 
     def _tool_set_ppt_color_scheme(self, scheme: str) -> str:
-        from api.color_schemes import COLOR_SCHEMES
+        from charts.color_schemes import COLOR_SCHEMES
         scheme = scheme.lower().strip()
         if scheme not in COLOR_SCHEMES:
             available = ", ".join(COLOR_SCHEMES.keys())
@@ -478,7 +478,7 @@ class ExportToolsMixin:
         }
 
         from pptx.dml.color import RGBColor as _RGBColor
-        from api.color_schemes import get_colors_list, get_color_scheme
+        from charts.color_schemes import get_colors_list, get_color_scheme
 
         def _hex_to_rgb(h: str) -> "_RGBColor":
             h = h.strip().lstrip("#")
@@ -789,7 +789,7 @@ class ExportToolsMixin:
     ) -> str:
         color_scheme = color_scheme or getattr(self, "ppt_color_scheme", "mckinsey")
         try:
-            from api.dashboard import build_dashboard
+            from ..dashboard import build_dashboard
             data = build_dashboard(
                 self.data_source,
                 self._chart_store,
@@ -835,7 +835,7 @@ class ExportToolsMixin:
     ):
         color_scheme = color_scheme or getattr(self, "ppt_color_scheme", "mckinsey")
         try:
-            from api.dashboard import (
+            from ..dashboard import (
                 build_dashboard_from_prefetched_widgets,
                 prefetch_dashboard_widget_data,
             )

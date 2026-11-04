@@ -8,7 +8,6 @@ import re
 import threading
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
@@ -23,7 +22,9 @@ from data.feishu_bitable_service import (
 )
 from infrastructure.artifact_lifecycle import register_artifact
 from infrastructure.paths import content_data_path
-from compute.sources import restore_source
+from compute.sources import (
+    encode_conn_secret, friendly_conn_error, pdf_source, preview_tables, restore_source,
+)
 
 log = logging.getLogger(__name__)
 
@@ -75,98 +76,6 @@ _finalize_lock = threading.RLock()
 
 def _allowed(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTS
-
-
-def _friendly_conn_error(exc: Exception, service: str) -> str:
-    """Translate a low-level connection exception into a user-readable message.
-
-    `service` is a short label like 'Google Sheets' / '外部 API' / '数据库'.
-    Falls back to the raw message when the error is not a known network case.
-    """
-    # Walk the exception cause chain so a wrapped error is still recognised.
-    chain = []
-    cur: BaseException | None = exc
-    seen = set()
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        chain.append(cur)
-        cur = cur.__cause__ or cur.__context__
-    text = "  ".join(f"{type(c).__name__}: {c}" for c in chain).lower()
-
-    # — SQL Server client prerequisites —
-    if "no module named 'pyodbc'" in text or "no module named \"pyodbc\"" in text:
-        return (
-            "SQL Server 驱动未安装：请升级或重新运行本程序以安装 pyodbc，"
-            "并在此电脑安装 Microsoft ODBC Driver 17 或 18 for SQL Server 后重试。"
-        )
-    if any(k in text for k in (
-        "data source name not found", "no default driver specified",
-        "can't open lib 'odbc driver", "cannot open lib 'odbc driver",
-    )):
-        return (
-            "未找到 SQL Server ODBC 驱动：请安装 Microsoft ODBC Driver 17 或 18 for SQL Server，"
-            "并在连接串中指定已安装的驱动名称。"
-        )
-
-    # — SQL Server reachability / instance discovery —
-    if any(k in text for k in (
-        "server is not found or not accessible", "named pipes provider",
-        "tcp provider", "sql server does not exist", "error: 258", "10060",
-        "08001", "08s01",
-    )):
-        return (
-            "无法连接 SQL Server：请确认服务器地址/实例名和端口正确，SQL Server 已启用 TCP/IP，"
-            "防火墙已放行端口（通常为 1433），且客户端网络可访问该服务器。"
-        )
-
-    # — Network unreachable / connection reset (proxy, GFW, offline) —
-    if any(k in text for k in (
-        "10054", "connection aborted", "connection reset", "connectionreseterror",
-        "connection refused", "10061", "max retries", "failed to establish",
-        "name or service not known", "getaddrinfo failed", "11001",
-        "transporterror", "ssl", "handshake", "timed out", "timeout",
-        "remotedisconnected", "connectionerror",
-    )):
-        return (
-            f"无法连接「{service}」：网络请求被中断或超时。"
-            f"请检查网络是否可正常访问目标服务"
-            + ("（Google 服务在部分网络下需要代理）" if "google" in service.lower() else "")
-            + "，确认代理 / VPN 已开启且 Python 进程已走代理后重试。"
-        )
-    # — Authentication / authorization —
-    if any(k in text for k in (
-        "401", "403", "unauthorized", "forbidden", "permission",
-        "invalid_grant", "invalid_client", "authentication",
-        "access_denied", "credential",
-    )):
-        return (
-            f"{service} 认证失败：凭证无效或没有访问权限。"
-            "请检查服务账号 / 密钥是否正确，以及该账号是否已被授权访问目标资源。"
-        )
-    # — Not found —
-    if any(k in text for k in ("404", "not found", "does not exist")):
-        return f"{service} 目标资源不存在：请检查 URL / ID / 表名是否正确。"
-
-    # — Unknown — keep the raw message but keep it short —
-    raw = str(exc).strip() or type(exc).__name__
-    if len(raw) > 200:
-        raw = raw[:200] + "…"
-    return f"{service} 连接失败：{raw}"
-
-
-def _encode_db_password(conn_str: str) -> str:
-    """对连接字符串中的密码部分做 URL 编码，处理 @ # 等特殊字符。"""
-    # 匹配 scheme://user:password@host 格式，密码可能含多个 @
-    # 贪婪匹配密码部分（.+），确保最后一个 @ 才是 host 分隔符
-    m = re.match(r'^([a-zA-Z][a-zA-Z0-9+\-.]*://[^:@/]+):(.+)@([^@].*)', conn_str)
-    if not m:
-        return conn_str
-    prefix, password, rest = m.group(1), m.group(2), m.group(3)
-    # 若密码已含 % 编码则跳过，避免二次编码
-    if re.search(r'%[0-9A-Fa-f]{2}', password):
-        return conn_str
-    encoded = quote(password, safe='-._~!*')
-    return f"{prefix}:{encoded}@{rest}"
 
 
 def _safe_stem(name: str) -> str:
@@ -354,23 +263,7 @@ def upload_file(sid: str):
 
         try:
             if ext == ".pdf":
-                from data.sources.extracted import ExtractedTableDataSource
-                from data.table_extract import (
-                    MAX_PDF_BYTES, normalize_grids, parse_pdf_tables,
-                )
-
-                pdf_bytes = save_path.read_bytes()
-                if len(pdf_bytes) > MAX_PDF_BYTES:
-                    raise ValueError(
-                        f"PDF 文件超过 {MAX_PDF_BYTES // (1024 * 1024)}MB 上限，请拆分后再上传")
-                grids = parse_pdf_tables(pdf_bytes)
-                if not grids:
-                    raise ValueError(
-                        "未在 PDF 中检测到表格（扫描件/图片型 PDF 不支持），请先转换为文本型 PDF")
-                tables, _meta = normalize_grids(grids)
-                if not tables:
-                    raise ValueError("PDF 表格均少于 2 行/2 列，无可导入内容")
-                source = ExtractedTableDataSource(f"PDF {display_name}", tables)
+                source = pdf_source(str(save_path), f"PDF {display_name}")
                 schema = source.get_schema()
                 source_id = sess.add_source(source)
                 added.append({"source_id": source_id, "source_name": source.name,
@@ -569,7 +462,7 @@ def connect_db(sid: str):
         conn_str = (saved or {}).get("connection_string", "")
     if not conn_str:
         return jsonify({"error": "连接字符串不能为空"}), 400
-    conn_str = _encode_db_password(conn_str)
+    conn_str = encode_conn_secret(conn_str)
     try:
         source = SQLDataSource(conn_str, display_name)
         sess = session_manager.get_or_create(sid)
@@ -587,7 +480,7 @@ def connect_db(sid: str):
                         "sources": sess.list_sources()})
     except Exception as exc:
         log.error("[connect-db] FAILED  sid=%s: %s\n%s", sid, exc, traceback.format_exc())
-        return jsonify({"error": _friendly_conn_error(exc, "数据库")}), 400
+        return jsonify({"error": friendly_conn_error(exc, "数据库")}), 400
 
 
 @bp.get("/api/session/<sid>/sources")
@@ -746,20 +639,8 @@ def preview_data(sid: str):
     requires_table_selection = False
     for entry in active:
         src = entry["source"]
-        selectable = isinstance(src, SQLDataSource)
-        selected_names = set(src.get_analysis_tables()) if selectable else set()
-        requires_table_selection = requires_table_selection or selectable
-        for tbl in src.get_preview():
-            tbl["source_id"]   = entry["id"]
-            tbl["source_name"] = getattr(src, "name", "")
-            # Selecting an analysis scope only makes sense for remote SQL
-            # catalogs, which may expose thousands of very large tables.
-            # Uploaded/local files are already a deliberate bounded selection.
-            tbl["selectable_for_analysis"] = selectable
-            tbl["selected_for_analysis"] = (
-                selectable and tbl.get("name") in selected_names
-            )
-            all_tables.append(tbl)
+        requires_table_selection = requires_table_selection or isinstance(src, SQLDataSource)
+        all_tables.extend(preview_tables(entry["id"], src))
     primary = active[0]["source"]
     return jsonify({
         "source_name": getattr(primary, "name", ""),
@@ -847,7 +728,7 @@ def connect_gsheets(sid: str):
                         "sources": sess.list_sources()})
     except Exception as exc:
         log.error("[connect-gsheets] FAILED: %s\n%s", exc, traceback.format_exc())
-        return jsonify({"error": _friendly_conn_error(exc, "Google Sheets")}), 400
+        return jsonify({"error": friendly_conn_error(exc, "Google Sheets")}), 400
 
 
 @bp.post("/api/session/<sid>/connect-feishu")
@@ -892,7 +773,7 @@ def connect_feishu(sid: str):
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         log.error("[connect-feishu] FAILED: %s\n%s", exc, traceback.format_exc())
-        return jsonify({"error": _friendly_conn_error(exc, "飞书多维表格")}), 400
+        return jsonify({"error": friendly_conn_error(exc, "飞书多维表格")}), 400
 
 
 @bp.post("/api/session/<sid>/connect-api")
@@ -931,7 +812,7 @@ def connect_api(sid: str):
                         "sources": sess.list_sources()})
     except Exception as exc:
         log.error("[connect-api] FAILED: %s\n%s", exc, traceback.format_exc())
-        return jsonify({"error": _friendly_conn_error(exc, "外部 API")}), 400
+        return jsonify({"error": friendly_conn_error(exc, "外部 API")}), 400
 
 
 @bp.get("/api/datasource-configs")

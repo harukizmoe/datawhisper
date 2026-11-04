@@ -29,15 +29,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from agent.validate import normalize_report_outline_args, validate_tool_args
 from data.sources._utils import is_write_sql
-from data.workspace import workspace_manager
+from data.workspace import WorkspacePathAuthorization, workspace_manager
 
-from .rpc import INVALID_PARAMS, Cancelled, MethodContext, RpcError
+from .dashboard import dashboard_path
+from .rpc import INVALID_PARAMS, Cancelled, MethodContext, RpcError, str_param
 from .sources import Lease, SourceRegistry, _close, combined_schema
 from .tools.data import DataToolsMixin
 from .tools.dispatch import normalize_chart_call_args, run_business_tool
 from .tools.export import ExportToolsMixin
+from .validate import normalize_report_outline_args, validate_tool_args
 
 log = logging.getLogger(__name__)
 
@@ -52,8 +53,11 @@ class _InlineJobs:
 _INLINE_JOBS = _InlineJobs()
 
 
-class _InlineJobContext:
-    """The ``JobContext`` surface the mixin workers use, bound to the request."""
+class InlineJobContext:
+    """The ``JobContext`` surface job workers use, bound to the request. An
+    inline job holds no Workspace runtime of its own (``runtime``)."""
+
+    runtime = None
 
     def __init__(self, rpc: MethodContext):
         self._rpc = rpc
@@ -68,7 +72,7 @@ class _InlineJobContext:
         self._rpc.check()
 
 
-class _CallChartStore:
+class CallChartStore:
     """Chart store seen by one call: session charts are read from
     ``chart_dir/<id>.html``; charts written by the call are captured and
     returned to the caller, which persists them."""
@@ -108,7 +112,7 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         self.data_source = lease.source(primary) if primary else None
         self._schema_cache_value: str | None = None
         self.tables_touched = False
-        self._chart_store = _CallChartStore(_opt_str(context, "chart_dir"))
+        self._chart_store = CallChartStore(_opt_str(context, "chart_dir"))
         self._session_chart_ids = _opt_str_list(context, "chart_ids")
         self.ppt_color_scheme = _opt_str(context, "color_scheme") or "mckinsey"
         self._session_id = _opt_str(context, "session_id")
@@ -150,13 +154,13 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         return workspace_manager.get_by_workspace(self._workspace_id)
 
     def _workspace_path_authorization(self):
-        return workspace_manager.path_authorization(self._workspace_id)
+        return sql_path_authorization(self._workspace_id)
 
     def _run_as_job(self, fn, job_type: str, label: str = ""):
         """Run a mixin job worker inline; same status dict as the old bridge."""
         yield from ()
         try:
-            result = fn(_InlineJobContext(self._rpc))
+            result = fn(InlineJobContext(self._rpc))
         except Cancelled:
             raise
         except Exception as exc:
@@ -172,11 +176,9 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         return super()._register_export_artifact(path, artifact_type=artifact_type)
 
     def _format_dashboard_result(self, name: str, widgets: list, data: dict) -> str:
-        from api.dashboard import _dashboard_path
-
         self.dashboard_id = str(data.get("dashboard_id") or "")
         if self.dashboard_id:
-            self.files.append(_dashboard_path(self.dashboard_id))
+            self.files.append(dashboard_path(self.dashboard_id))
         return super()._format_dashboard_result(name, widgets, data)
 
 
@@ -202,6 +204,17 @@ def active_sources(context: dict) -> tuple[list[str], str | None]:
     return sources, primary
 
 
+def sql_path_authorization(workspace_id: str) -> WorkspacePathAuthorization | None:
+    """The SQL file-read capability of a call in *workspace_id*: the mounted
+    Workspace's roots; None (the default roots) without a Workspace. A fixed but
+    unavailable Workspace must fail closed instead of silently falling back to
+    global uploads/Information, so it gets no roots at all."""
+    authorization = workspace_manager.path_authorization(workspace_id)
+    if workspace_id and authorization is None:
+        return WorkspacePathAuthorization(workspace_id=workspace_id, allowed_roots=(), metadata_revision=0)
+    return authorization
+
+
 def prepare_args(name: str, args: dict, workspace_id: str) -> dict:
     """Normalize and validate model args exactly as the old agent loop did
     before dispatch; a rejection carries the old ``[ARG ERROR]`` tool text."""
@@ -209,13 +222,7 @@ def prepare_args(name: str, args: dict, workspace_id: str) -> dict:
         args = normalize_chart_call_args(args)
     elif name == "export_report":
         args = normalize_report_outline_args(args)
-    authorization = workspace_manager.path_authorization(workspace_id)
-    # A fixed but unavailable Workspace must fail closed instead of silently
-    # falling back to global uploads/Information.
-    allowed_roots = [] if workspace_id and authorization is None else None
-    error = validate_tool_args(
-        name, args, allowed_roots=allowed_roots, workspace_authorization=authorization,
-    )
+    error = validate_tool_args(name, args, workspace_authorization=sql_path_authorization(workspace_id))
     if error:
         raise RpcError(error, data={"kind": "arg_validation", "text": f"[ARG ERROR] {error}"})
     return args
@@ -316,12 +323,12 @@ def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: 
 
     context, args = parse_context(params)
     sources, _primary = active_sources(context)
-    source_id = _required_str(params, "source_id")
+    source_id = str_param(params, "source_id")
     content_type = params.get("content_type") or ""
     if not isinstance(content_type, str):
         raise RpcError("'content_type' must be a string", INVALID_PARAMS)
     try:
-        raw = base64.b64decode(_required_str(params, "body_base64"), validate=True)
+        raw = base64.b64decode(str_param(params, "body_base64"), validate=True)
     except binascii.Error as exc:
         raise RpcError(f"'body_base64' is not valid base64: {exc}", INVALID_PARAMS) from exc
     url = str(args.get("url") or "").strip()
@@ -348,7 +355,7 @@ def run_load_feishu_bitable(rpc: MethodContext, registry: SourceRegistry, params
 
     context, args = parse_context(params)
     sources, _primary = active_sources(context)
-    source_id = _required_str(params, "source_id")
+    source_id = str_param(params, "source_id")
     read_result = params.get("records")
     if (
         not isinstance(read_result, dict)
@@ -383,13 +390,6 @@ def _ingest_result(text: str, source_id: str | None = None) -> dict:
     if source_id is not None:
         result["source_id"] = source_id
     return result
-
-
-def _required_str(params: dict, key: str) -> str:
-    value = params.get(key)
-    if not isinstance(value, str) or not value:
-        raise RpcError(f"'{key}' must be a non-empty string", INVALID_PARAMS)
-    return value
 
 
 def _opt_str(context: dict, key: str) -> str:

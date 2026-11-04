@@ -6,8 +6,10 @@ Two paths:
   Structured   (xlsx with recognised column headers) → direct field mapping
   Unstructured (docx, or xlsx without template headers) → LLM extraction
 
-The parser is stateless: pass in an OpenAI-compatible client + model name,
-exactly the same objects BusinessAgent receives from get_llm_client().
+The parser is stateless: ``parse_file`` takes an OpenAI-compatible client +
+model name, exactly the same objects BusinessAgent receives from
+get_llm_client(). A caller that runs the model itself (the compute worker)
+uses ``read_knowledge_file`` + ``extraction_prompts`` / ``merge_extracted``.
 """
 from __future__ import annotations
 
@@ -233,11 +235,10 @@ def _parse_raw_to_records(raw: str) -> list[dict]:
 
 
 def _llm_call_once(
-    chunk: str, client, model: str, audit_factory=None, include_usage: bool = False,
-) -> list[dict]:
-    """Call LLM for a single text chunk using streaming to avoid read timeouts."""
-    prompt = _EXTRACT_PROMPT.replace("{text}", chunk)
-    log.info("[file_parser] LLM call model=%s chunk_len=%d", model, len(chunk))
+    prompt: str, client, model: str, audit_factory=None, include_usage: bool = False,
+) -> str:
+    """Send one extraction prompt (streaming, to avoid read timeouts); returns the raw reply."""
+    log.info("[file_parser] LLM call model=%s prompt_len=%d", model, len(prompt))
     audit = audit_factory() if audit_factory is not None else None
     try:
         if audit is not None:
@@ -270,13 +271,12 @@ def _llm_call_once(
     if audit is not None:
         audit.succeed(locals().get("usage"))
     log.info("[file_parser] LLM response (first 300 chars): %r", raw[:300])
-    return _parse_raw_to_records(raw)
+    return raw
 
 
-def _llm_extract(
-    text: str, client, model: str, audit_factory=None, include_usage: bool = False,
-) -> list[dict]:
-    """Split text into chunks and extract records from each, then merge."""
+def extraction_prompts(text: str) -> list[str]:
+    """The LLM prompts that extract knowledge records from *text*: one per
+    chunk of at most ``_CHUNK_SIZE`` characters."""
     # Split on blank lines to avoid cutting mid-sentence
     paragraphs = re.split(r"\n{2,}", text.strip())
 
@@ -290,22 +290,17 @@ def _llm_extract(
             current = (current + "\n\n" + para).strip() if current else para
     if current:
         chunks.append(current.strip())
+    return [_EXTRACT_PROMPT.replace("{text}", chunk) for chunk in chunks]
 
-    if not chunks:
-        return []
 
-    log.debug("[file_parser] split into %d chunk(s) for model=%s", len(chunks), model)
-
+def merge_extracted(replies: list[str]) -> list[dict]:
+    """Records from the model replies to ``extraction_prompts``, in order,
+    keeping the first record per metric name / rule_id / topic."""
     all_records: list[dict] = []
     seen_names: set[str] = set()   # deduplicate by metric name / rule_id / topic
 
-    for i, chunk in enumerate(chunks):
-        log.debug("[file_parser] processing chunk %d/%d", i + 1, len(chunks))
-        recs = _llm_call_once(
-            chunk, client, model, audit_factory=audit_factory,
-            include_usage=include_usage,
-        )
-        for rec in recs:
+    for raw in replies:
+        for rec in _parse_raw_to_records(raw):
             # Dedup key varies by table
             table = rec.get("table", "")
             if table == "metrics":
@@ -325,23 +320,35 @@ def _llm_extract(
     return all_records
 
 
+def _llm_extract(
+    text: str, client, model: str, audit_factory=None, include_usage: bool = False,
+) -> list[dict]:
+    """Split text into chunks and extract records from each, then merge."""
+    prompts = extraction_prompts(text)
+    log.debug("[file_parser] split into %d chunk(s) for model=%s", len(prompts), model)
+    return merge_extracted([
+        _llm_call_once(
+            prompt, client, model, audit_factory=audit_factory,
+            include_usage=include_usage,
+        )
+        for prompt in prompts
+    ])
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def parse_file(
-    filepath: str, client, model: str, audit_factory=None,
-    include_usage: bool = False,
-) -> dict[str, Any]:
-    """Parse a docx or xlsx file into a preview list of knowledge records.
+def read_knowledge_file(filepath: str) -> dict[str, Any]:
+    """Read a docx or xlsx knowledge file without calling a model.
 
     Returns:
       {
-        "format":  "structured" | "unstructured",
-        "preview": [ {table, field1, field2, ...}, ... ]
+        "format":  "structured" | "unstructured" | "mixed",
+        "preview": [ {table, field1, field2, ...}, ... ],  # template-header sheets
+        "text":    str,  # the rest (other sheets / the docx), "" when none
       }
 
-    The caller (api/knowledge.py) returns this directly to the frontend.
-    After the user reviews and edits, POST /api/knowledge/confirm with the
-    final list → KnowledgeBase.bulk_insert().
+    ``text`` still needs LLM extraction: send each of ``extraction_prompts(text)``
+    to the model and merge the replies with ``merge_extracted``.
     """
     path = Path(filepath)
     ext = path.suffix.lower()
@@ -362,29 +369,41 @@ def parse_file(
             else:
                 unstructured_texts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
 
-        # If we found any structured sheets, return them directly.
-        # Unstructured sheets in the same file are also sent to LLM.
-        preview: list[dict] = list(structured_records)
-        if unstructured_texts:
-            combined = "\n\n".join(unstructured_texts)
-            preview.extend(_llm_extract(
-                combined, client, model, audit_factory=audit_factory,
-                include_usage=include_usage,
-            ))
-
         fmt = "structured" if structured_records and not unstructured_texts else "unstructured"
         if structured_records and unstructured_texts:
             fmt = "mixed"
 
-        return {"format": fmt, "preview": preview}
+        # Unstructured sheets in the same file are also sent to the LLM.
+        return {"format": fmt, "preview": structured_records, "text": "\n\n".join(unstructured_texts)}
 
     elif ext == ".docx":
-        text = _extract_docx_text(filepath)
-        preview = _llm_extract(
-            text, client, model, audit_factory=audit_factory,
-            include_usage=include_usage,
-        )
-        return {"format": "unstructured", "preview": preview}
+        return {"format": "unstructured", "preview": [], "text": _extract_docx_text(filepath)}
 
     else:
         raise ValueError(f"Unsupported file type: {ext}. Please upload .xlsx or .docx")
+
+
+def parse_file(
+    filepath: str, client, model: str, audit_factory=None,
+    include_usage: bool = False,
+) -> dict[str, Any]:
+    """Parse a docx or xlsx file into a preview list of knowledge records.
+
+    Returns:
+      {
+        "format":  "structured" | "unstructured" | "mixed",
+        "preview": [ {table, field1, field2, ...}, ... ]
+      }
+
+    The caller (api/knowledge.py) returns this directly to the frontend.
+    After the user reviews and edits, POST /api/knowledge/confirm with the
+    final list → KnowledgeBase.bulk_insert().
+    """
+    parsed = read_knowledge_file(filepath)
+    preview: list[dict] = list(parsed["preview"])
+    if parsed["text"]:
+        preview.extend(_llm_extract(
+            parsed["text"], client, model, audit_factory=audit_factory,
+            include_usage=include_usage,
+        ))
+    return {"format": parsed["format"], "preview": preview}

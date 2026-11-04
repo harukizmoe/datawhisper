@@ -78,7 +78,7 @@ def run_frozen_smoke() -> int:
         }
 
     try:
-        from agent.validate import validate_sql_structured
+        from compute.validate import validate_sql_structured
 
         result = validate_sql_structured("SELECT COUNT(*) FROM test_table")
         checks["sqlglot_duckdb"] = {
