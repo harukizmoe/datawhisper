@@ -8,7 +8,8 @@
 
 import type { JsonValue } from "@earendil-works/chord";
 import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "./types.ts";
-import type { AppDocHost } from "./types.ts";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
+import type { AppDocHost, AppToolDetails } from "./types.ts";
 import {
   VALID_STATUS,
   type TaskBoardDoc,
@@ -126,7 +127,9 @@ function fail(tool: string, error: unknown) {
 
 export function createTaskTools(deps: AppToolDeps): AppTool[] {
   const now = deps.now ?? (() => new Date());
-  const store = (): WorkspaceTaskStore => new WorkspaceTaskStore(deps.docs?.tasks, now);
+  // 文档按会话现取：同一套工具对象服务所有会话，不能在装配时固定一份任务板。
+  const store = (api: ToolExecutionApi<AppToolDetails>): WorkspaceTaskStore =>
+    new WorkspaceTaskStore(deps.docs?.(api).tasks, now);
   return [
     makeAppTool<{
       title: string;
@@ -149,9 +152,9 @@ export function createTaskTools(deps: AppToolDeps): AppTool[] {
         required: ["title"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
-          const task = await store().create(
+          const task = await store(api).create(
             args.title ?? "",
             args.description ?? "",
             args.assignee ?? "",
@@ -176,9 +179,9 @@ export function createTaskTools(deps: AppToolDeps): AppTool[] {
         required: ["task_id"],
       },
       replay: "safe",
-      async execute(args) {
+      async execute(args, api) {
         try {
-          const task = await store().get(args.task_id ?? "");
+          const task = await store(api).get(args.task_id ?? "");
           return okResult("task_get", renderValue(task as unknown as JsonValue), {
             tool: "task_get",
             task: task as unknown as JsonValue,
@@ -199,9 +202,9 @@ export function createTaskTools(deps: AppToolDeps): AppTool[] {
         },
       },
       replay: "safe",
-      async execute(args) {
+      async execute(args, api) {
         try {
-          const tasks = await store().list(args.status ?? "", args.assignee ?? "");
+          const tasks = await store(api).list(args.status ?? "", args.assignee ?? "");
           return okResult("task_list", renderValue(tasks as unknown as JsonValue), {
             tool: "task_list",
             tasks: tasks as unknown as JsonValue,
@@ -235,9 +238,9 @@ export function createTaskTools(deps: AppToolDeps): AppTool[] {
         required: ["task_id"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
-          const task = await store().update(args.task_id ?? "", {
+          const task = await store(api).update(args.task_id ?? "", {
             status: args.status,
             assignee: args.assignee,
             description: args.description,

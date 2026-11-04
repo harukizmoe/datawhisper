@@ -46,6 +46,11 @@ export type TeamMember = {
   status: string;
   last_message: string;
   last_active_at: string;
+  /** 最近一次被委托的子会话；旧实现只有状态，没有可跳转的会话。 */
+  last_conversation_id?: number;
+  last_conversation_title?: string;
+  /** 最近一次委托的用量；字段名与动态计划一致。 */
+  last_usage?: PlanUsage;
 };
 
 export type TeamMessage = {
@@ -57,6 +62,24 @@ export type TeamMessage = {
   read: boolean;
   created_at: string;
   tool_events?: JsonValue[];
+  /** 产生这条结果消息的子会话，供团队视图分组。 */
+  conversation_id?: number;
+  /** 委托失败/取消时的稳定错误码。 */
+  error_code?: string;
+  usage?: PlanUsage;
+};
+
+/** 一次成员委托对应的子会话；团队视图按它列出子会话与用量。 */
+export type TeamSubConversation = {
+  conversation_id: number;
+  member_name: string;
+  title: string;
+  status: string;
+  started_at: string;
+  finished_at: string;
+  error: string;
+  error_code?: string;
+  usage: PlanUsage;
 };
 
 export type TeamRecord = {
@@ -68,6 +91,9 @@ export type TeamRecord = {
   updated_at: string;
   reused?: boolean;
   quality_reviewer?: { name: string; auto_added: boolean };
+  /** 团队累计用量（所有成员委托之和），字段名与动态计划一致。 */
+  usage?: PlanUsage;
+  sub_conversations?: TeamSubConversation[];
 };
 
 export type TeamStoreDoc = { teams: Record<string, TeamRecord> };
@@ -79,6 +105,8 @@ export type PlanUsage = {
   output_tokens: number;
   cached_input_tokens: number;
   tool_calls: number;
+  /** `usage_history` 里的尝试序号；当前用量本身不带。 */
+  attempt?: number;
 };
 
 export type PlanTask = {

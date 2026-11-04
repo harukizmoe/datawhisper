@@ -19,7 +19,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { WorkspaceFs } from "./workspace/fs.ts";
-import type { PlanStoreDoc, TaskBoardDoc, TeamStoreDoc } from "./docs.ts";
+import type { PlanStoreDoc, PlanUsage, TaskBoardDoc, TeamMember, TeamStoreDoc } from "./docs.ts";
 import type { MemoryDirs } from "../../agent/memory.ts";
 import type { SkillDirs } from "../../agent/skills.ts";
 import type { CanvasStore } from "./diagram/canvas.ts";
@@ -43,10 +43,13 @@ export type AppToolDeps = {
   /** 工作区文件系统。必填：文件类工具与 workspace_status 都依赖它。 */
   readonly workspace: WorkspaceFs;
   /**
-   * 任务板/团队/动态计划文档的宿主。会话里由 pi-durable conversation 文档实现；
-   * 测试可以用 `createMemoryDocHost()`。省略时这些工具返回“no workspace is mounted…”风格的错误。
+   * 任务板/团队/动态计划文档的宿主。
+   *
+   * 文档是**会话级**的（每个会话一份任务板/团队表），所以这里按调用传入的执行上下文现取，
+   * 而不是在装配时固定一份：一套工具对象要服务所有会话。测试可以返回 `createMemoryDocHost()`。
+   * 省略时这些工具返回“no workspace is mounted…”风格的错误。
    */
-  readonly docs?: AppDocHosts;
+  readonly docs?: (api: ToolExecutionApi<AppToolDetails>) => AppDocHosts;
   /** 长期记忆目录（user 作用域与 workspace 作用域）；省略时 memory_read 返回不可用文案。 */
   readonly memoryDirs?: MemoryDirs;
   /** 技能目录；省略时 load_analysis_skill 返回未知技能文案。 */
@@ -59,6 +62,8 @@ export type AppToolDeps = {
   readonly shapeLibsDir?: string;
   /** 外溢工具结果的读取源（`tr_<id>`）。 */
   readonly artifacts?: ToolResultArtifactSource;
+  /** 团队成员委托的执行端口；省略时 `team_delegate` 返回能力不可用。 */
+  readonly teamDelegate?: TeamDelegationPort;
   /** MCP 工具目录读取端。 */
   readonly mcpCatalog?: McpCatalogReader;
   /** browse_webpage 使用的 fetch 实现；测试可注入。 */
@@ -77,6 +82,55 @@ export type AppToolDeps = {
    * 的默认数据目录取单例），测试可注入临时目录的实例。
    */
   readonly feishu?: FeishuService;
+};
+
+/** 一次成员委托的请求；由工具层填好团队成员与提示，执行层只负责跑子会话。 */
+export type TeamDelegateRequest = {
+  readonly team_name: string;
+  readonly member: TeamMember;
+  readonly prompt: string;
+  /** 任务标题；写进子会话提示，同时作为结果可读的说明。 */
+  readonly description?: string;
+  /** 已格式化的未读邮件上下文，追加到成员提示之后。 */
+  readonly inbox_context?: string;
+  /** 允许成员调用的工具名；省略时用委托的只读默认集。 */
+  readonly allowed_tools?: readonly string[] | null;
+  readonly timeout_seconds?: number;
+  /** 工具轮次上限；映射到子会话的 `maxTurns`。 */
+  readonly max_tool_calls?: number;
+  /** 父会话：子会话继承它的模型；省略时走服务默认模型。 */
+  readonly parent_conversation_id?: number;
+  readonly request_id?: string;
+  /** 子会话建好后的回调，供团队记录“正在运行”的子会话 id 与标题。 */
+  readonly on_start?: (info: { conversation_id: number; title: string }) => void | Promise<void>;
+};
+
+export type TeamDelegateOutcome = "completed" | "failed" | "canceled";
+
+/** 一次成员委托的结果；字段名与旧团队记录保持一致（`usage` 用 PlanUsage 的键）。 */
+export type TeamDelegateResult = {
+  status: TeamDelegateOutcome;
+  /** 稳定错误码；成功时为空串。 */
+  code: string;
+  error: string;
+  content: string;
+  conversation_id: number;
+  conversation_title: string;
+  usage: PlanUsage;
+  tool_events: JsonValue[];
+};
+
+/** 委托端口：工具层只依赖它，Harness/会话在宿主装配时注入。 */
+export type TeamDelegationPort = {
+  run(request: TeamDelegateRequest): Promise<TeamDelegateResult>;
+  /** 取消某个团队（可限定成员）正在运行的委托；返回命中的数量。 */
+  cancel(teamName: string, memberName?: string): Promise<number>;
+  active(): readonly {
+    conversation_id: number;
+    team_name: string;
+    member_name: string;
+    title: string;
+  }[];
 };
 
 /** 一份文档的读写端口：`update` 在一次 pi-durable commit 内完成。 */

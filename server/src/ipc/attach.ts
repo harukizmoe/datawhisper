@@ -49,6 +49,7 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
       feishu,
       dataDir: options.dataDir ?? loadConfig().dataDir,
       sourceMethods: service.sourceMethods,
+      teamMethods: service.teamMethods,
     }),
     send: (record) => writer.send(record),
     mapError: mapSettingsError,

@@ -1,7 +1,7 @@
 /**
  * A 类（纯 TS）工具装配点。
  *
- * `createAppTools(deps)` 返回 40 个 pi-durable 工具；它们只依赖注入的端口：
+ * `createAppTools(deps)` 返回 41 个 pi-durable 工具；它们只依赖注入的端口：
  * 工作区文件系统、pi-durable 文档、记忆/技能目录、画布、外溢结果、MCP 目录、fetch 与飞书机器人。
  */
 
@@ -19,7 +19,7 @@ import { createDiagramTools } from "./diagram/tools.ts";
 import { createFeishuTools } from "../../feishu/tools.ts";
 import { defaultFeishuService } from "../../feishu/service.ts";
 
-/** 40 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
+/** 41 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
 export const APP_TOOL_NAMES = [
   "workspace_status",
   "workspace_glob",
@@ -42,6 +42,7 @@ export const APP_TOOL_NAMES = [
   "team_status",
   "send_message",
   "team_plan_create",
+  "team_delegate",
   "select_chart",
   "propose_excel_export",
   "propose_report_outline",
@@ -65,7 +66,7 @@ export const APP_TOOL_NAMES = [
 
 export type AppToolName = (typeof APP_TOOL_NAMES)[number];
 
-/** 新建 40 个工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。 */
+/** 新建 41 个工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。 */
 export function createAppTools(deps: AppToolDeps): AppTool[] {
   const effective: AppToolDeps = deps.colorScheme === undefined
     ? { ...deps, colorScheme: { value: "mckinsey" } }

@@ -214,6 +214,12 @@ function makeHarness(overrides: Partial<AppToolDeps> = {}): Harness {
   mkdirSync(join(dataRoot, "uploads"), { recursive: true });
   mkdirSync(join(dataRoot, "outputs"), { recursive: true });
   const canvas = fakeCanvas();
+  // 文档宿主按会话现取，但同一个会话必须拿到同一份：否则「建任务」与「列任务」看到两个世界。
+  const docs = {
+    tasks: createMemoryDocHost(initialTaskBoard()),
+    teams: createMemoryDocHost(initialTeamStore()),
+    plans: createMemoryDocHost(initialPlanStore()),
+  };
   const deps: AppToolDeps = {
     workspace: new NodeWorkspaceFs({
       userRoot: workspace,
@@ -223,11 +229,7 @@ function makeHarness(overrides: Partial<AppToolDeps> = {}): Harness {
       metaDir: join(workspace, ".meta"),
       cacheDir: join(workspace, ".cache"),
     }),
-    docs: {
-      tasks: createMemoryDocHost(initialTaskBoard()),
-      teams: createMemoryDocHost(initialTeamStore()),
-      plans: createMemoryDocHost(initialPlanStore()),
-    },
+    docs: () => docs,
     sessionId: "s1",
     workspaceId: "w1",
     now: () => new Date("2026-01-02T03:04:05"),
@@ -243,10 +245,10 @@ async function statusRoot(tools: readonly AppTool[]): Promise<string> {
 }
 
 describe("app tool registry", () => {
-  test("exposes the 40 typed tools in stable order", () => {
+  test("exposes the 41 typed tools in stable order", () => {
     const { tools } = makeHarness();
     expect(tools.map((tool) => tool.name)).toEqual([...APP_TOOL_NAMES]);
-    expect(tools).toHaveLength(40);
+    expect(tools).toHaveLength(APP_TOOL_NAMES.length);
   });
 
   test("replay policy: reads safe, mutations unsafe", () => {

@@ -7,6 +7,7 @@ import { dataWhisperPrompts } from "./agent/extension.ts";
 import { dataWhisperPolicies } from "./agent/policies.ts";
 import { harnessSettings } from "./agent/settings.ts";
 import { assembleTools } from "./tools/assemble.ts";
+import type { TeamDelegationPort } from "./tools/app/types.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
 import { type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
@@ -22,6 +23,8 @@ import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
 import { WorkExecutorRegistry } from "./jobs/work-task.ts";
 import { createWorkflows, workflowsExtension, type Workflows } from "./workflows/service.ts";
 import { createAgentNodeExecutor } from "./workflows/agent-node.ts";
+import { createTeamDelegateService, teamDelegationGuard } from "./teams/delegate.ts";
+import { teamMethods } from "./ipc/teams.ts";
 import { ModelService } from "./models/service.ts";
 import type { SubmitResponse } from "./protocol.ts";
 import type { RpcMethod } from "./ipc/rpc.ts";
@@ -49,6 +52,8 @@ export type Service = {
   readonly workflows: Workflows;
   /** 数据源、工作区与产物（`source.*` / `workspace.*` / `artifact.*`）的 IPC 方法表。 */
   readonly sourceMethods: Record<string, RpcMethod>;
+  /** 团队的只读视图与委托取消（`teams.*`）。 */
+  readonly teamMethods: Record<string, RpcMethod>;
   /** `conversations.submitTurn` 的便捷入口（测试里常用）。 */
   submitTurn(id: string | number, body: unknown): Promise<SubmitResponse>;
   /** Harness 关闭时落定：`stop()` 之后，或存储失败之后（`kind: "failed"`）。 */
@@ -92,7 +97,18 @@ export async function startService(config: Config, options: ServiceOptions = {})
     onStderr: (line) => console.error(`[compute] ${line}`),
   });
   // 生产工具集：A 类纯 TS + B 类 compute 外壳。测试可以用 `options.tools` 覆盖（桩工具）。
-  const assembled = options.tools === undefined ? assembleTools(config, compute, "local") : undefined;
+  // 团队委托端口：工具集先装配、委托服务后建（它需要会话服务），这里留一个迟绑定转发器。
+  const delegationPort: { current?: TeamDelegationPort } = {};
+  // `harness` 在下面才创建；工具只在执行期用到它（那时一定就绪）。
+  let harness!: Harness;
+  const assembled =
+    options.tools === undefined
+      ? assembleTools(config, compute, "local", {
+          harness: () => harness,
+          context,
+          teamDelegation: delegationPort,
+        })
+      : undefined;
   const tools = options.tools ?? assembled!.tools;
 
   const registry = options.registry ?? createRegistry();
@@ -103,7 +119,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
   if (tools.length > 0) {
     registry.install(defineExtension({ name: "datawhisper-tools", tools }));
   }
-  const harness = await Harness.open(
+  harness = await Harness.open(
     await openNodeSqliteStorage(join(config.dataDir, "datawhisper.sqlite")),
     {
       models: modelService.models,
@@ -152,6 +168,11 @@ export async function startService(config: Config, options: ServiceOptions = {})
     context,
     executeNode: createAgentNodeExecutor({ harness, context, conversations }),
   });
+  // 团队委托：工具在子会话里真正跑一轮；守卫拦下子会话越权使用分配外的工具。
+  const delegation = createTeamDelegateService({ harness, context, conversations });
+  delegationPort.current = delegation;
+  const teams = teamMethods({ harness, context, delegation });
+  registry.install(teamDelegationGuard());
   registry.install(jobsExtension(jobs));
   registry.install(workflowsExtension(workflows));
 
@@ -169,6 +190,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     jobs,
     workflows,
     sourceMethods: sourceApis,
+    teamMethods: teams,
     conversations,
     submitTurn: (id, body) => conversations.submitTurn(id, body),
     closed,
