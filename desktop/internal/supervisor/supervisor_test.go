@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"datawhisper/desktop/internal/api"
+	"datawhisper/desktop/internal/service"
 )
 
 var fakeBin string
@@ -139,12 +139,12 @@ func start(t *testing.T, env []string, tune func(*Config)) *fixture {
 }
 
 // client 连上 ready 状态的管道；读循环随进程退出自行结束，不需要清理。
-func (f *fixture) client(st Status) *api.Client {
-	return api.New(st.Pipe)
+func (f *fixture) client(st Status) *service.Client {
+	return service.New(st.Pipe)
 }
 
 // health 通过管道调用 health 方法，返回解码后的原始结果。
-func health(t *testing.T, c *api.Client) map[string]any {
+func health(t *testing.T, c *service.Client) map[string]any {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -258,7 +258,7 @@ func TestCrashWhileReadyRestarts(t *testing.T) {
 	c := f.client(first)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if _, err := c.Call(ctx, "crash", nil); !errors.Is(err, api.ErrClosed) {
+	if _, err := c.Call(ctx, "crash", nil); !errors.Is(err, service.ErrClosed) {
 		t.Errorf("crash request: %v", err)
 	}
 	restarting, j := f.rec.wait(t, i, StateRestarting)

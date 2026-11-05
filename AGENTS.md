@@ -32,6 +32,23 @@
 
 三条进程边界都是 **stdin/stdout 上的 JSON-RPC 2.0**：桌面端拉起服务，服务拉起计算进程。没有端口、没有令牌、没有 HTTP 服务，也不要有。
 
+### desktop 的包结构
+
+`desktop/main.go` 只解析命令行参数并调用 `app.Run`；`mygo.json`（打包配置，`"main": "."`）与 `resources/`（mygo 的平台资源目录）留在模块根。其余代码都在 `desktop/internal/`，依赖只向下：
+
+| 包 | 内容 |
+|---|---|
+| `app` | MyGo 界面与状态，按功能分文件：`chat*.go`、`sources*.go`、`settings*.go`（`*_view.go` 是视图，其余是状态与动作）、`layout.go`、`appearance.go`、`shell.go`（菜单托盘拖放）、`run.go`（启动与装配） |
+| `conversation` | 会话副本：snapshot 加 ops 还原出的消息、工具调用、图表；`Follow` 断线重订阅 |
+| `service` | agent 服务的类型化客户端：会话、模型、数据源、工作区、产物、仪表盘、订阅 |
+| `jsonrpc` | stdio 上的 JSON-RPC 2.0 传输：分帧、按 id 关联、通知回调；不认识业务方法 |
+| `supervisor` | 服务进程的启动、监管与重启 |
+| `preview` | web view 池与 `dw-preview://` 媒体服务、图表主题注入（不含界面） |
+| `theme` | 配色 JSON（`themes/`）、主题推导、对比度护栏、字体回退 |
+| `prefs` | `ui.json`：外观模式、配色与字体、界面语言的读写与校验 |
+| `i18n` | 界面文案的中英文资源 |
+| `icons` | Lucide 图标子集（`svg/`） |
+
 ## 常用命令
 
 ```bash
@@ -55,7 +72,7 @@ scripts/build/build-app.sh
 
 - 一律使用 MyGo 官方组件（`github.com/egoist/mygo/ui`），不要用 `Row/Column/Text` 手搓控件。
   写之前先 `go doc -all github.com/egoist/mygo/ui | grep <组件>` 或查 `https://mygo.egoist.dev/docs/ui/<组件>.md`。
-- 界面文案用英文，中文只出现在 `desktop/i18n.go` 的资源里；模型输出、工具文案与日志不翻译。
+- 界面文案用英文，中文只出现在 `desktop/internal/i18n/i18n.go` 的资源里；模型输出、工具文案与日志不翻译。
 
 ## 提交
 

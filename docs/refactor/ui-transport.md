@@ -73,7 +73,7 @@
 
 1. `server/src/ipc/`：JSONL 读写（复用 `compute/rpc.py` 的分帧规则）、请求分发、通知推送；现有 `routes/*.ts` 的业务逻辑抽成与传输无关的函数。
 2. `server/src/main.ts`：就绪记录改为 stdout 上的 `{"type":"ready","pid":…}`（不再有端口与令牌）；stdin 关闭即退出。
-3. `desktop/internal/api`：`Subscribe` 改为读 JSONL 通知；`Client` 的请求走同一管道；`Replica`/`ApplyOps` 不变。
+3. `desktop/internal/api`（2026-11-04 起拆为 `internal/jsonrpc`、`internal/service`、`internal/conversation`）：`Subscribe` 改为读 JSONL 通知；`Client` 的请求走同一管道；`Replica`/`ApplyOps` 不变。
 4. `desktop/internal/supervisor`：去掉端口与令牌解析。
 5. 更新 `docs/refactor/ui-protocol.md` 与 TS/Go 两侧类型；删除 `hono` 依赖与 `DW_TOKEN`/`DW_PORT`。
 6. 测试：现有 `conversations`/`models`/`server` 用例改为走管道客户端（同一批断言），新增分帧与背压用例。
