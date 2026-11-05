@@ -187,14 +187,14 @@ func TestLanguageSwitchUpdatesPages(t *testing.T) {
 	q := newQueue()
 	a := newTestApp(t, q)
 	tt := ui.NewTester(a.view, 1180, 760)
-	expectTexts(t, tt, []string{"New chat", "Chats", "Settings", "Ask a question about your data."}, nil)
+	expectTexts(t, tt, []string{"New chat", "Chats", "Settings", "What would you like to analyze?"}, nil)
 
 	a.setLanguage(i18n.ZH)
 	q.run()
 	tt.Frame()
 	// 聊天页与侧边栏都换成了中文。
-	expectTexts(t, tt, []string{"新建对话", "会话", "设置", "数据", "就你的数据提个问题吧。"},
-		[]string{"New chat", "Chats", "Ask a question about your data."})
+	expectTexts(t, tt, []string{"新建对话", "会话", "设置", "数据", "今天想分析什么？"},
+		[]string{"New chat", "Chats", "What would you like to analyze?"})
 
 	if err := tt.Click("设置"); err != nil {
 		t.Fatal(err)

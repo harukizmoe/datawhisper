@@ -71,6 +71,12 @@ func (a *app) sidebar(c *ui.Context) {
 		}).Grow(1).Background(tok.Sidebar).Label("Navigation").Changed() {
 			a.navigate()
 		}
+		// 服务状态放在侧栏底部：正常时只是一个绿点和一个词，不占标题栏；出问题时横幅另有说明。
+		label, color := a.statusLabel(t)
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(2, 8).Children(func() {
+			ui.Text(c, "●").FontSize(a.fs(textCaption)).TextColor(color)
+			ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		})
 	})
 }
 

@@ -30,6 +30,7 @@ var (
 	PanelRight   = mustIcon("panel-right")
 	Pencil       = mustIcon("pencil")
 	ChevronDown  = mustIcon("chevron-down")
+	ChevronUp    = mustIcon("chevron-up")
 	ChevronRight = mustIcon("chevron-right")
 	Copy         = mustIcon("copy")
 	Refresh      = mustIcon("refresh-cw")

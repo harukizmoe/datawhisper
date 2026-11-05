@@ -359,7 +359,7 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 
 	a.onService(fs.ready(41))
 	q.pump(t, tt, "the conversation list", func() bool { return a.listLoaded })
-	expectTexts(t, tt, []string{"Ready", "Greeting", "Getting started", "New chat", "Settings", "Ask a question about your data."},
+	expectTexts(t, tt, []string{"Ready", "Greeting", "Getting started", "New chat", "Settings", "What would you like to analyze?"},
 		[]string{"Starting the agent service", "Reconnected"})
 
 	a.onService(supervisor.Status{State: supervisor.StateRestarting, Err: errors.New("service exited: signal: killed"), Crashes: 1})
@@ -403,7 +403,7 @@ func TestConversationsAndTheMissingModel(t *testing.T) {
 	if err := tt.Click("New chat"); err != nil {
 		t.Fatal(err)
 	}
-	expectTexts(t, tt, []string{"Ask a question about your data."}, []string{"hello there"})
+	expectTexts(t, tt, []string{"What would you like to analyze?"}, []string{"hello there"})
 	if err := tt.Click("Message"); err != nil {
 		t.Fatal(err)
 	}
@@ -496,5 +496,5 @@ func TestChatShowsTheRecordedStream(t *testing.T) {
 	}
 	tt.Advance(2 * time.Second)
 	// 工具结果默认折叠：行里只有名字、耗时与状态。
-	expectTexts(t, tt, []string{"Describe sales", "describe_table", "504ms · ok", "Result", "Hello", "streamed", "metric", `print("ok")`, "Copy", "stub/stub-chat"}, nil)
+	expectTexts(t, tt, []string{"Describe sales", "describe_table", "Done", "504ms", "Result", "Hello", "streamed", "metric", `print("ok")`, "Copy", "stub/stub-chat"}, nil)
 }

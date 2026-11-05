@@ -313,3 +313,59 @@ func TestFollowStopsWithItsContext(t *testing.T) {
 		t.Errorf("follow ended with %v", err)
 	}
 }
+
+// TestThinkingUsageAndQueue 覆盖副本从 pi-ai 消息里读出的附加信息：思考块成为回复前的一行 "thinking"
+// （被遮蔽的块不显示），用量与时间只挂在一次回复的最后一行上，排队的用户输入带上正文（宿主写入的不算）。
+func TestThinkingUsageAndQueue(t *testing.T) {
+	r := Replica{Tree: map[string]any{
+		"conversation": map[string]any{"id": 7},
+		"entries": []any{
+			map[string]any{"id": 1, "kind": "pi.user", "model": []any{map[string]any{"role": "user", "content": "看看销量", "timestamp": 1000.0}}},
+			map[string]any{"id": 2, "kind": "pi.assistant", "byTaskId": 9, "model": []any{map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{"type": "thinking", "thinking": "先查表结构"},
+					map[string]any{"type": "thinking", "thinking": "secret", "redacted": true},
+					map[string]any{"type": "toolCall", "id": "c1", "name": "query_data", "arguments": map[string]any{"sql": "select 1"}},
+				},
+				"usage":     map[string]any{"input": 120.0, "output": 30.0, "cacheRead": 5.0, "totalTokens": 155.0, "cost": map[string]any{"total": 0.002}},
+				"timestamp": 2000.0, "model": "gw/flash",
+			}}},
+		},
+		"docs": map[string]any{
+			"pi.inbox": map[string]any{"items": []any{
+				map[string]any{"id": 1, "mode": "followUp", "content": "再画个图"},
+				map[string]any{"id": 2, "mode": "write", "entry": map[string]any{}},
+			}},
+			"pi.live": map[string]any{
+				"run":        map[string]any{"taskId": 10},
+				"generation": map[string]any{"message": map[string]any{"content": []any{map[string]any{"type": "thinking", "thinking": "正在想"}}}},
+			},
+		},
+	}}
+	st := r.State()
+	var rows []string
+	for _, m := range st.Messages {
+		rows = append(rows, fmt.Sprintf("%s:%s:%t", m.Role, m.Key, m.Done))
+	}
+	want := "user:e1:true thinking:g9.th:true tool:e2.2:true thinking:g10.th:false"
+	if strings.Join(rows, " ") != want {
+		t.Fatalf("rows %q, want %q", strings.Join(rows, " "), want)
+	}
+	if st.Messages[1].Text != "先查表结构" {
+		t.Errorf("thinking %q", st.Messages[1].Text)
+	}
+	if st.Messages[0].Time != 1000 {
+		t.Errorf("user time %d", st.Messages[0].Time)
+	}
+	tool := st.Messages[2]
+	if tool.Usage == nil || tool.Usage.Input != 120 || tool.Usage.Total != 155 || tool.Usage.Cost != 0.002 || tool.Time != 2000 || tool.Model != "gw/flash" {
+		t.Errorf("usage on the last row %+v %+v", tool.Usage, tool)
+	}
+	if st.Messages[1].Usage != nil {
+		t.Error("usage also on the thinking row")
+	}
+	if st.Queued != 2 || len(st.QueuedInputs) != 1 || st.QueuedInputs[0] != (QueuedInput{Text: "再画个图", Mode: "followUp"}) {
+		t.Errorf("queue %d %+v", st.Queued, st.QueuedInputs)
+	}
+}

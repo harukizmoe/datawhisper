@@ -43,6 +43,13 @@ type chatView struct {
 
 	// busyMode 是回复进行中按下 Enter 的行为：0 排队（followUp），1 插队（steer）。
 	busyMode int
+
+	// openThinking 记住哪些思考行被展开；默认折叠成一行「思考 ›」。
+	openThinking map[string]bool
+	// openOutputs 记住哪些工具卡片的输出被完整展开；默认只显示末尾几行（失败的卡片除外）。
+	openOutputs map[string]bool
+	// busySince 是当前这次回复开始的时刻，状态行据此显示已用时；不在回复中时为零值。
+	busySince time.Time
 }
 
 // askUI 是一张 ask_user 卡片的本地状态：单选、多选、自由输入以及是否已经发送。

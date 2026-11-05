@@ -96,6 +96,9 @@ func Run(opts Options) error {
 			Width:   opts.Width,
 			Height:  opts.Height,
 			Content: ui.View(view),
+			// Linux 与 Windows 的菜单栏画在窗口里，占掉一整行：平时藏起来，Alt 或 F10 唤出，快捷键始终可用。
+			// macOS 的菜单在系统顶栏，不受影响。
+			AutoHideMenuBar: true,
 		})
 		a.win = win
 		a.post = win.Update

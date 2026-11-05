@@ -47,11 +47,18 @@ func (r *Replica) Apply(ev service.Event) error {
 // Message 是聊天里的一行。
 type Message struct {
 	// Key 在多次更新之间标识这一行；流式回复在它对应的已提交 entry 接替它时沿用同一个 key（"g<generation task id>"）。
-	Key  string
-	Role string // "user"、"assistant" 或 "tool"
+	Key string
+	// Role 取 "user"、"assistant"、"tool"、"thinking"（回复前的思考，Text 是思考全文）或 "note"（宿主旁注）。
+	Role string
 	Text string
 	// Done 在行仍在流式变化时为 false：即部分回复或正在运行的 tool。
 	Done bool
+	// Time 是消息的时间戳（epoch 毫秒）；未知时为 0。
+	Time int64
+	// Usage 只挂在一次模型回复生成的最后一行上（正文，或回复只有工具调用时的最后一个工具行），
+	// 这样界面把一轮里各行的 Usage 相加就是这一轮的用量，不会重复计算。Model 是那次回复用的模型。
+	Usage *Usage
+	Model string
 	// Tool 在 Role == "tool" 时给出结构化的一次调用：参数、结果、耗时和 ask_user 的问题。界面据它
 	// 画一行摘要（结果默认折叠），而不是把参数和结果的原始 JSON 灌进消息流。
 	Tool *ToolCall
@@ -76,6 +83,29 @@ type ToolCall struct {
 	Charts []Chart
 	// DashboardID 是工具新建的仪表盘 id（dashboard_id）；界面据此提供查看入口。
 	DashboardID string
+}
+
+// Usage 是一次模型回复的 token 用量与费用（pi-ai 的 Usage）。
+type Usage struct {
+	Input, Output, CacheRead, CacheWrite, Total int
+	Cost                                        float64
+}
+
+// Add 把另一次回复的用量累加进来（界面按轮次汇总）。
+func (u *Usage) Add(o Usage) {
+	u.Input += o.Input
+	u.Output += o.Output
+	u.CacheRead += o.CacheRead
+	u.CacheWrite += o.CacheWrite
+	u.Total += o.Total
+	u.Cost += o.Cost
+}
+
+// QueuedInput 是排在 pi.inbox 里、还没进入会话的一条输入。Mode 取 "steer"（并入正在进行的回复）或
+// "followUp"（排在后面）。
+type QueuedInput struct {
+	Text string
+	Mode string
 }
 
 // Chart 是工具结果里的一张图表。服务端把图表 HTML 落盘后，details 里给的是 path；
@@ -104,8 +134,9 @@ type State struct {
 	Busy bool
 	// Failure 说明最新一次运行为何没有答案就结束了（pi.live.runFailure）："reason" 或 "reason: detail"。
 	Failure string
-	// Queued 是 pi.inbox 中排队的输入数。
-	Queued int
+	// Queued 是 pi.inbox 中排队的输入数；QueuedInputs 是其中用户输入的正文（宿主写入的条目不算）。
+	Queued       int
+	QueuedInputs []QueuedInput
 	// Model 是会话保存的模型（pi.agent.model）；还没有时为 nil（此时服务会在第一次 submit 时选默认模型）。
 	// ThinkingLevel 是保存的级别，未设置时为 ""。
 	Model         *service.ModelRef
@@ -127,6 +158,15 @@ func (r *Replica) State() State {
 	}
 	items, _ := field(r.Tree, "docs", "pi.inbox", "items").([]any)
 	st.Queued = len(items)
+	for _, item := range items {
+		mode, _ := field(item, "mode").(string)
+		if mode == "write" {
+			continue
+		}
+		if text := contentText(field(item, "content")); text != "" {
+			st.QueuedInputs = append(st.QueuedInputs, QueuedInput{Text: text, Mode: mode})
+		}
+	}
 	agent := field(r.Tree, "docs", "pi.agent")
 	provider, _ := field(agent, "model", "provider").(string)
 	modelID, _ := field(agent, "model", "modelId").(string)
@@ -194,6 +234,40 @@ func contentText(content any) string {
 		}
 	}
 	return b.String()
+}
+
+// thinkingText 拼出回复里的思考块；被安全过滤器遮蔽（redacted）的块没有可读内容，跳过。
+func thinkingText(content any) string {
+	blocks, _ := content.([]any)
+	var parts []string
+	for _, block := range blocks {
+		if field(block, "type") != "thinking" {
+			continue
+		}
+		if redacted, _ := field(block, "redacted").(bool); redacted {
+			continue
+		}
+		if s, _ := field(block, "thinking").(string); strings.TrimSpace(s) != "" {
+			parts = append(parts, strings.TrimSpace(s))
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// usageOf 读出一条 assistant 消息的 usage；没有时返回 nil。
+func usageOf(m any) *Usage {
+	u := field(m, "usage")
+	if u == nil {
+		return nil
+	}
+	return &Usage{
+		Input:      int(numberOf(field(u, "input"))),
+		Output:     int(numberOf(field(u, "output"))),
+		CacheRead:  int(numberOf(field(u, "cacheRead"))),
+		CacheWrite: int(numberOf(field(u, "cacheWrite"))),
+		Total:      int(numberOf(field(u, "totalTokens"))),
+		Cost:       numberOf(field(u, "cost", "total")),
+	}
 }
 
 // argSummary 把调用参数压成一行键值对，例如 `table=sales, limit=10`；不是对象的参数退化成紧凑 JSON。
@@ -388,10 +462,15 @@ func (r *Replica) messages() []Message {
 			if isSystemNote(text) {
 				role = "note"
 			}
-			out = append(out, Message{Key: "e" + id, Role: role, Text: text, Done: true})
+			out = append(out, Message{Key: "e" + id, Role: role, Text: text, Done: true, Time: int64(numberOf(field(m, "timestamp")))})
 		case "pi.assistant":
 			blocks, _ := field(m, "content").([]any)
 			text := contentText(field(m, "content"))
+			taskKey := fmt.Sprint("g", field(entry, "byTaskId"))
+			first := len(out)
+			if thought := thinkingText(field(m, "content")); thought != "" {
+				out = append(out, Message{Key: taskKey + ".th", Role: "thinking", Text: thought, Done: true})
+			}
 			// 模型可能在调用工具前后都写正文；正文行只有一行，所以按第一段正文与第一个工具调用的先后
 			// 决定这一行放在工具行之前还是之后。常见形状 [text, toolCall] 因此先显示正文再显示工具。
 			firstText, firstTool := -1, -1
@@ -409,7 +488,7 @@ func (r *Replica) messages() []Message {
 			}
 			addText := func() {
 				if text != "" {
-					out = append(out, Message{Key: fmt.Sprint("g", field(entry, "byTaskId")), Role: "assistant", Text: text, Done: true})
+					out = append(out, Message{Key: taskKey, Role: "assistant", Text: text, Done: true})
 					text = ""
 				}
 			}
@@ -430,6 +509,12 @@ func (r *Replica) messages() []Message {
 				out = append(out, Message{Key: fmt.Sprintf("e%s.%d", id, i), Role: "tool", Text: call.Name, Done: true, Tool: call})
 			}
 			addText()
+			// 用量与时间挂在这次回复的最后一行上（见 Message.Usage）。
+			if last := len(out) - 1; last >= first {
+				out[last].Usage = usageOf(m)
+				out[last].Time = int64(numberOf(field(m, "timestamp")))
+				out[last].Model, _ = field(m, "model").(string)
+			}
 		case "pi.tool-result":
 			callID, _ := field(m, "toolCallId").(string)
 			duration := numberOf(field(m, "durationMs"))
@@ -477,8 +562,14 @@ func (r *Replica) messages() []Message {
 		call := &ToolCall{CallID: callID, Name: name, Output: output, Status: "running", Ask: askRequestOf(field(slot, "details"))}
 		out = append(out, Message{Key: "t" + callID, Role: "tool", Text: name, Done: false, Tool: call})
 	}
-	if text := contentText(field(live, "generation", "message", "content")); text != "" {
-		out = append(out, Message{Key: fmt.Sprint("g", field(live, "run", "taskId")), Role: "assistant", Text: text})
+	// 流式回复：先是正在生成的思考，再是正文。key 与提交后的行一致（"g<task id>" 与 "g<task id>.th"）。
+	content := field(live, "generation", "message", "content")
+	key := fmt.Sprint("g", field(live, "run", "taskId"))
+	if thought := thinkingText(content); thought != "" {
+		out = append(out, Message{Key: key + ".th", Role: "thinking", Text: thought})
+	}
+	if text := contentText(content); text != "" {
+		out = append(out, Message{Key: key, Role: "assistant", Text: text})
 	}
 	return out
 }

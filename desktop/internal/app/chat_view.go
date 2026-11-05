@@ -1,11 +1,15 @@
 package app
 
-// 对话页的界面：标题栏、消息列表（用户气泡、旁注、工具调用卡片、ask_user 卡片、回答正文）、输入区与斜杠命令菜单、重命名弹窗。发送、订阅与模型切换在 chat.go。
+// 对话页的界面（docs/refactor/ui-redesign.md §3.3、§3.7，参考 Tern 的会话面板）：标题栏、居中的消息列
+// （用户气泡、思考行、工具调用卡片、ask_user 卡片、回答正文、每轮末尾的元数据）、右侧的用户消息导航轨、
+// 首页空状态，以及输入区（状态行、上下文用量、排队的消息、多行输入与底部的模型标签）。发送、订阅与模型切换
+// 在 chat.go。
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"datawhisper/desktop/internal/conversation"
 	"datawhisper/desktop/internal/icons"
@@ -13,7 +17,13 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// chatPage 构建聊天页：标题栏、横幅、消息列表、错误行与输入区。
+// chatColumnWidth 是对话列的最大宽度：正文一行在这个宽度内最好读，宽窗口里两侧留白而不是把行拉长。
+const chatColumnWidth = 760
+
+// toolPreviewLines 是工具卡片默认显示的输出行数（末尾几行）；更早的行折叠成「前面还有 N 行」。
+const toolPreviewLines = 6
+
+// chatPage 构建对话页：标题栏、横幅、消息列与导航轨、错误提示和输入区。
 func (a *app) chatPage(c *ui.Context) {
 	t := c.Theme()
 	a.chatHeader(c)
@@ -22,34 +32,84 @@ func (a *app) chatPage(c *ui.Context) {
 		ui.Text(c, a.cv.modelsErr).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(4, 24)
 	}
 	messages := a.chat.Messages
-	a.list.Key = func(i int) any { return messages[i].Key }
-	a.list.FollowEnd = true
-	ui.List(c, &a.list, len(messages), func(i int) {
-		a.message(c, messages[i])
-	}).Grow(1).Padding(16, 24).Gap(12).Justify(ui.End).Children(func() {
-		if len(messages) == 0 {
-			hint := a.tr("chat.empty")
-			if a.conv != 0 && !a.connected {
-				hint = a.tr("chat.loading")
-			}
-			ui.Text(c, hint).TextColor(t.TextMuted).Margin(ui.Auto)
-		}
-	})
+	if len(messages) == 0 {
+		a.homeView(c)
+	} else {
+		turns := turnEnds(messages, a.chat.Busy)
+		ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+			a.list.Key = func(i int) any { return messages[i].Key }
+			a.list.FollowEnd = true
+			ui.List(c, &a.list, len(messages), func(i int) {
+				centered(c, func() {
+					a.message(c, messages[i])
+					if meta, ok := turns[i]; ok {
+						a.turnMeta(c, meta)
+					}
+				})
+			}).Grow(1).MinWidth(0).Padding(20, 24).Gap(14).Justify(ui.End)
+			a.navRail(c, messages)
+		})
+	}
 	if a.chat.Failure != "" && !a.chat.Busy {
-		ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(a.fs(textCaption)).TextColor(t.Warning).Padding(4, 24)
+		centered(c, func() {
+			ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(a.fs(textCaption)).TextColor(t.Warning).Padding(4, 0)
+		})
 	}
 	if a.sendErr != "" {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 24).Children(func() {
-			ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
-			if a.needModel && ui.Button(c, a.tr("chat.openSettings")).Clicked() {
-				a.openSettings()
-			}
+		centered(c, func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 0).Children(func() {
+				ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
+				if a.needModel && ui.Button(c, a.tr("chat.openSettings")).Clicked() {
+					a.openSettings()
+				}
+			})
 		})
 	}
 	a.composer(c)
 }
 
-// chatHeader 是聊天页的标题栏：标题单行省略、重命名、模型与思考强度，以及数据面板和服务状态。
+// centered 把一段内容放进居中、限宽的对话列。
+func centered(c *ui.Context, fn func()) {
+	ui.Row(c).Justify(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).MaxWidth(chatColumnWidth).Gap(10).Children(fn)
+	})
+}
+
+// homeView 是还没有消息时的首页：问候、提示、几条示例问题（点一下填进输入框）与打开数据面板的入口。
+// 正在加载已有会话时只显示加载提示。
+func (a *app) homeView(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Grow(1).MinHeight(0).Justify(ui.Center).Padding(24).Children(func() {
+		centered(c, func() {
+			if a.conv != 0 && !a.connected {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+					ui.Spinner(c)
+					ui.Text(c, a.tr("chat.loading")).TextColor(t.TextMuted)
+				})
+				return
+			}
+			ui.Icon(c, icons.Sparkles).FontSize(a.fs(textHero)).TextColor(t.Accent)
+			ui.Text(c, a.tr("chat.homeTitle")).Bold().FontSize(a.fs(textHero))
+			ui.Text(c, a.tr("chat.homeHint")).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("chat.suggestions")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Margin(12, 0, 0, 0)
+			for _, text := range []string{a.tr("chat.suggest1"), a.tr("chat.suggest2"), a.tr("chat.suggest3"), a.tr("chat.suggest4")} {
+				if ui.Button(c, "").Label(text).Justify(ui.Start).Children(func() {
+					ui.Icon(c, icons.ChevronRight).TextColor(t.TextMuted)
+					ui.Text(c, text).SingleLine().MinWidth(0)
+				}).Clicked() {
+					a.input = text
+				}
+			}
+			ui.Row(c).Margin(8, 0, 0, 0).Children(func() {
+				if iconTextButton(c, icons.Database, a.tr("chat.openData")).Clicked() && !a.src.open {
+					a.toggleSources()
+				}
+			})
+		})
+	})
+}
+
+// chatHeader 是对话页的标题栏：标题单行省略，右侧是重命名与数据面板开关。模型与思考强度在输入区。
 func (a *app) chatHeader(c *ui.Context) {
 	t := c.Theme()
 	a.syncModelControls()
@@ -57,39 +117,25 @@ func (a *app) chatHeader(c *ui.Context) {
 	if a.conv != 0 {
 		title = a.sessionTitle(a.conv)
 	}
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(10, 20).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(10, 20).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 		// Grow+MinWidth(0) 让它把多余宽度让给右侧控件，SingleLine 在放不下时以省略号结尾。
 		ui.Text(c, title).Bold().FontSize(a.fs(textSection)).SingleLine().Grow(1).MinWidth(0).Tooltip(title)
-		if a.conv != 0 && iconTextButton(c, icons.Pencil, a.tr("chat.rename")).Tooltip(a.tr("chat.renameTip")).Clicked() {
-			a.openRename()
-		}
-		if options := a.modelOptions(); len(options) > 0 {
-			sel := ui.Select(c, &a.cv.modelChoice, options).MaxWidth(240).MinWidth(0)
-			if sel.Changed() {
-				a.chooseModel(a.cv.modelChoice)
+		ui.Toolbar(c, func() {
+			if a.conv != 0 && iconTextButton(c, icons.Pencil, a.tr("chat.rename")).Tooltip(a.tr("chat.renameTip")).Clicked() {
+				a.openRename()
 			}
-		}
-		if options := a.thinkingOptions(); len(options) > 1 {
-			sel := ui.Select(c, &a.cv.thinkingChoice, options).MaxWidth(120).MinWidth(0)
-			if sel.Changed() {
-				a.chooseThinking(a.cv.thinkingChoice)
+			label := a.tr("chat.data")
+			if a.src.open {
+				label = a.tr("chat.hideData")
 			}
-		}
-		label := a.tr("chat.data")
-		if a.src.open {
-			label = a.tr("chat.hideData")
-		}
-		if iconTextButton(c, icons.PanelRight, label).Tooltip(a.tr("chat.dataTip")).Clicked() {
-			a.toggleSources()
-		}
-		label2, color := a.statusLabel(t)
-		ui.Text(c, "●").FontSize(a.fs(textCaption)).TextColor(color)
-		ui.Text(c, label2).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			if iconTextButton(c, icons.PanelRight, label).Tooltip(a.tr("chat.dataTip")).Clicked() {
+				a.toggleSources()
+			}
+		}).Label(a.tr("chat.toolbar")).Shrink(0)
 	})
 }
 
-// message 构建一行聊天内容：用户的消息放在右侧气泡里，工具调用是一行可展开的摘要，ask_user 是
-// 问题卡片，回复用 Markdown（流式时 markdown.Stream，落定后 markdown.View，同一个列表行）。
+// message 构建一行聊天内容。
 func (a *app) message(c *ui.Context, m conversation.Message) {
 	t := c.Theme()
 	switch {
@@ -101,10 +147,12 @@ func (a *app) message(c *ui.Context, m conversation.Message) {
 	case m.Role == "note":
 		// 宿主写给模型的旁注（质量闸门、系统提醒）：展示成可折叠的灰色提示，不当成用户发言。
 		a.noteRow(c, m)
+	case m.Role == "thinking":
+		a.thinkingRow(c, m)
 	case m.Role == "tool" && m.Tool != nil && m.Tool.Ask != nil:
 		a.askCard(c, m)
 	case m.Role == "tool" && m.Tool != nil:
-		a.toolRow(c, m)
+		a.toolCard(c, m)
 	case m.Role == "tool":
 		ui.Text(c, m.Text).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 	default:
@@ -112,14 +160,50 @@ func (a *app) message(c *ui.Context, m conversation.Message) {
 		if strings.TrimSpace(text) == "" {
 			return
 		}
-		ui.Column(c).MaxWidth(760).Children(func() {
-			if m.Done {
-				markdown.View(c, text, &a.md)
-			} else {
-				markdown.Stream(c, text, &a.md)
-			}
-		})
+		if m.Done {
+			markdown.View(c, text, &a.md)
+		} else {
+			markdown.Stream(c, text, &a.md)
+		}
 	}
+}
+
+// thinkingRow 是回复前的思考：默认折叠成一行斜体灰字「思考 ›」，点开显示全文。思考仍在流式生成时显示
+// 「思考中…」与转圈。
+func (a *app) thinkingRow(c *ui.Context, m conversation.Message) {
+	t := c.Theme()
+	if a.cv.openThinking == nil {
+		a.cv.openThinking = map[string]bool{}
+	}
+	open := a.cv.openThinking[m.Key]
+	label, chevron := a.tr("chat.thought"), icons.ChevronRight
+	if !m.Done {
+		label = a.tr("chat.thinking")
+	}
+	if open {
+		chevron = icons.ChevronDown
+	}
+	ui.Column(c).Gap(6).Children(func() {
+		// 外面套一行并以 Spacer 收尾：按钮只占自己的宽度，靠左，而不是在对话列里居中。
+		ui.Row(c).Children(func() {
+			toggle := ui.ButtonBase(c).Label(label).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					if !m.Done {
+						ui.Spinner(c)
+					}
+					ui.Text(c, label).Italic().TextColor(t.TextMuted)
+					ui.Icon(c, chevron).TextColor(t.TextMuted)
+				})
+			})
+			if toggle.Clicked() {
+				a.cv.openThinking[m.Key] = !open
+			}
+			ui.Spacer(c)
+		})
+		if open {
+			ui.Text(c, m.Text).Italic().TextColor(t.TextMuted).Selectable().Padding(0, 0, 0, 12).BorderWidth(0, 0, 0, 2).BorderColor(t.Border)
+		}
+	})
 }
 
 // noteRow 渲染宿主写进会话的旁注。正文是给模型看的指令，默认折叠；展开后可选可复制，
@@ -136,24 +220,22 @@ func (a *app) noteRow(c *ui.Context, m conversation.Message) {
 		a.cv.openNotes = map[string]bool{}
 	}
 	key := "note:" + m.Key
-	open, seen := a.cv.openNotes[key]
-	ui.Column(c).MaxWidth(760).Children(func() {
+	open := a.cv.openNotes[key]
+	ui.Column(c).Gap(6).Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Badge(c, strings.TrimSpace(strings.Trim(label, "[]")))
-			ui.Text(c, a.tr("chat.noteHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-			ui.Spacer(c)
+			ui.Icon(c, icons.Info).TextColor(t.TextMuted)
+			ui.Text(c, strings.TrimSpace(strings.Trim(label, "[]"))).FontSize(a.fs(textCaption)).Bold().TextColor(t.TextMuted)
+			ui.Text(c, a.tr("chat.noteHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
 			toggle := a.tr("chat.details")
 			if open {
 				toggle = a.tr("chat.hide")
 			}
-			if ui.Button(c, toggle).Clicked() {
+			if ui.Button(c, toggle).FontSize(a.fs(textCaption)).Clicked() {
 				a.cv.openNotes[key] = !open
 			}
 		})
-		if open || seen {
-			ui.Column(c).Padding(8, 12).Radius(10).Background(t.Surface).Children(func() {
-				ui.Text(c, visibleNote(m.Text)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable().MaxWidth(720)
-			})
+		if open {
+			a.buffer(ui.Text(c, visibleNote(m.Text))).TextColor(t.TextMuted).Selectable().Padding(8, 12).Radius(radiusCard).Background(a.tokens().Tok.Card)
 		}
 	})
 }
@@ -169,61 +251,58 @@ func visibleNote(text string) string {
 	return trimmed
 }
 
-// toolRow 是一次工具调用的一行摘要：名字、参数摘要、耗时与状态；结果默认折叠，点击展开后
-// 在限高的滚动区里看全文。参数与结果的原始 JSON 不再进入消息流。
-func (a *app) toolRow(c *ui.Context, m conversation.Message) {
+// toolCard 是一次工具调用（参考 Tern）：卡片外是「图标 + 工具名 + 参数摘要」的标题行；卡片里上半是调用
+// 参数，下半是输出。输出默认只显示末尾几行，更早的行折叠成「前面还有 N 行」，点开看全文；失败的调用默认
+// 完整展开。卡片底部是状态与耗时。
+func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 	t := c.Theme()
+	tok := a.tokens().Tok
 	tool := m.Tool
-	open := a.cv.openTools[m.Key]
 	// ask_user 的结果正文是给模型的指令（见 internalAskInstruction）；没有可解析的问题时也绝不显示它。
 	output := ""
 	if tool.Name != "ask_user" {
-		output = tool.Output
+		output = strings.TrimRight(tool.Output, "\n")
 	}
-	tok := a.tokens().Tok
-	ui.Column(c).MaxWidth(760).Gap(8).Children(func() {
-		// 一次工具调用是一张圆角卡片（参考 Tern）：标题行是图标、工具名（强调色）、参数摘要与状态；
-		// 结果展开后在分隔线下方，用 buffer 字体。
-		ui.Column(c).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(7, 12).Children(func() {
-				ui.Icon(c, icons.Tool).TextColor(t.TextMuted)
-				a.buffer(ui.Text(c, tool.Name)).TextColor(t.Accent).Shrink(0)
+	running := tool.Status == "running" && !m.Done
+	failed := tool.Status == "error"
+	if a.cv.openOutputs == nil {
+		a.cv.openOutputs = map[string]bool{}
+	}
+	expanded := a.cv.openOutputs[m.Key] || failed
+	ui.Column(c).Gap(6).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icons.Tool).TextColor(t.TextMuted)
+			a.buffer(ui.Text(c, tool.Name)).TextColor(t.Accent).Shrink(0)
+		})
+		ui.Column(c).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Clip().Children(func() {
+			if tool.Args != "" {
+				a.buffer(ui.Text(c, tool.Args)).Selectable().Padding(10, 14)
+			}
+			if output != "" {
 				if tool.Args != "" {
-					a.buffer(ui.Text(c, tool.Args)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
-				} else {
-					ui.Spacer(c)
+					ui.Divider(c)
 				}
-				if tool.Status == "running" && !m.Done {
+				a.toolOutput(c, m.Key, output, expanded, failed)
+			}
+			if tool.Args != "" || output != "" {
+				ui.Divider(c)
+			}
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(7, 14).Children(func() {
+				switch {
+				case running:
 					ui.Spinner(c)
-				}
-				switch tool.Status {
-				case "ok":
-					ui.Icon(c, icons.Check).TextColor(t.Success)
-				case "error":
+					ui.Text(c, a.tr("chat.toolRunning")).FontSize(a.fs(textCaption)).TextColor(t.Warning)
+				case failed:
 					ui.Icon(c, icons.CircleX).TextColor(t.Danger)
+					ui.Text(c, a.tr("chat.toolFailed")).FontSize(a.fs(textCaption)).TextColor(t.Danger)
+				default:
+					ui.Icon(c, icons.Check).TextColor(t.Success)
+					ui.Text(c, a.tr("chat.toolDone")).FontSize(a.fs(textCaption)).TextColor(t.Success)
 				}
-				ui.Text(c, toolMeta(tool)).FontSize(a.fs(textCaption)).TextColor(toolStatusColor(t, tool.Status)).Shrink(0)
-				if output != "" {
-					label, chevron := a.tr("chat.details"), icons.ChevronRight
-					if open {
-						label, chevron = a.tr("chat.hide"), icons.ChevronDown
-					}
-					if iconTextButton(c, chevron, label).FontSize(a.fs(textCaption)).Tooltip(a.tr("chat.toolOutputHint")).Clicked() {
-						if a.cv.openTools == nil {
-							a.cv.openTools = map[string]bool{}
-						}
-						a.cv.openTools[m.Key] = !open
-					}
+				if tool.DurationMS > 0 {
+					ui.Text(c, formatDuration(tool.DurationMS)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 				}
 			})
-			if open && output != "" {
-				// 长结果限高并滚动：展开后信息不丢，也不会把消息流撑到看不见正文。Scroll 需要一个确定的
-				// 高度才会给内容可见的窗口，所以按输出长度估一个高度（上限 240 DIP）。
-				ui.Divider(c)
-				ui.Scroll(c).Height(outputHeight(output, 240)).Children(func() {
-					a.buffer(ui.Text(c, output)).Selectable().Padding(8, 12)
-				})
-			}
 		})
 		// 图表与仪表盘：结果里带了就画出来，而不是只留一句 “Chart generated”。图表用
 		// ui.WebView（richcontent.go），尺寸随窗口与数据面板变化。
@@ -232,6 +311,7 @@ func (a *app) toolRow(c *ui.Context, m conversation.Message) {
 		}
 		if tool.DashboardID != "" {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icons.Dashboard).TextColor(t.TextMuted)
 				ui.Text(c, "Dashboard "+tool.DashboardID).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
 				if ui.Button(c, "View dashboard").FontSize(a.fs(textCaption)).Tooltip("Open this chat's dashboard read-only").Clicked() {
 					a.openDashboard(tool.DashboardID)
@@ -241,22 +321,64 @@ func (a *app) toolRow(c *ui.Context, m conversation.Message) {
 	})
 }
 
-// askCard 是 ask_user 的问题卡片：选项来自工具自己的 question/options，点选后通过 conversation.submit
-// 以 followUp 提交；也允许在输入框里自由回答。
+// toolOutput 画工具卡片里的输出。折叠时只画末尾 toolPreviewLines 行，上方一行「前面还有 N 行 ⌃」展开；
+// 展开后全文放进限高的滚动区，末尾一行「收起」（失败的调用一直展开，不给收起）。
+func (a *app) toolOutput(c *ui.Context, key, output string, expanded, failed bool) {
+	t := c.Theme()
+	lines := strings.Split(output, "\n")
+	hidden := len(lines) - toolPreviewLines
+	toggle := func(label string, icon *ui.SVG) {
+		ui.Row(c).Children(func() {
+			if ui.ButtonBase(c).Label(label).Tooltip(a.tr("chat.toolOutputHint")).Children(func() {
+				ui.Row(c).Gap(4).AlignItems(ui.Center).Padding(6, 14, 0, 14).Children(func() {
+					ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+					ui.Icon(c, icon).TextColor(t.TextMuted)
+				})
+			}).Clicked() {
+				a.cv.openOutputs[key] = !a.cv.openOutputs[key]
+			}
+			ui.Spacer(c)
+		})
+	}
+	switch {
+	case hidden <= 0:
+		a.buffer(ui.Text(c, output)).Selectable().Padding(8, 14)
+	case !expanded:
+		toggle(a.tr("chat.earlierLines", "count", strconv.Itoa(hidden)), icons.ChevronUp)
+		a.buffer(ui.Text(c, strings.Join(lines[hidden:], "\n"))).Selectable().Padding(4, 14, 8, 14)
+	default:
+		// Scroll 需要一个确定的高度才会给内容可见的窗口，所以按输出长度估一个高度（上限 320 DIP）。
+		ui.Scroll(c).Height(outputHeight(output, 320)).Children(func() {
+			a.buffer(ui.Text(c, output)).Selectable().Padding(8, 14)
+		})
+		if !failed {
+			toggle(a.tr("chat.showLess"), icons.ChevronDown)
+		}
+	}
+}
+
+// askCard 是 ask_user 的问题卡片：单选时每个选项是一行按钮，点一下就作为回答发出；多选时勾选后发送。
+// 也可以在下方自己输入回答。回答发出后卡片收起为「已回答：…」，问题保留。
 func (a *app) askCard(c *ui.Context, m conversation.Message) {
 	t := c.Theme()
+	tok := a.tokens().Tok
 	ask := m.Tool.Ask
 	callID := m.Tool.CallID
 	if callID == "" {
 		callID = m.Key
 	}
 	st := a.cv.askState(callID)
-	tok := a.tokens().Tok
-	ui.Column(c).MaxWidth(560).Padding(12, 14).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Gap(8).Children(func() {
-		ui.Text(c, "Quick question").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+	ui.Column(c).MaxWidth(600).Padding(14, 16).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Gap(8).Children(func() {
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icons.ListChecks).TextColor(t.Accent)
+			ui.Text(c, a.tr("chat.askTitle")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		})
 		ui.Text(c, ask.Question).Bold()
 		if st.sent != "" {
-			ui.Text(c, "Answer sent: "+oneLine(st.sent, 80)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icons.Check).TextColor(t.Success)
+				ui.Text(c, a.tr("chat.askSent", "answer", oneLine(st.sent, 80))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			})
 			return
 		}
 		if ask.MultiSelect {
@@ -270,45 +392,309 @@ func (a *app) askCard(c *ui.Context, m conversation.Message) {
 				st.checks[option] = checked
 			}
 		} else {
-			ui.RadioGroup(c, func() {
-				for _, option := range ask.Options {
-					ui.Radio(c, &st.choice, option, option)
+			for i, option := range ask.Options {
+				if ui.Button(c, "").Label(option).Justify(ui.Start).Disabled(st.busy).Children(func() {
+					ui.Text(c, strconv.Itoa(i+1)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+					ui.Text(c, option).MinWidth(0)
+				}).Clicked() {
+					st.choice, st.free = option, ""
+					a.answerAsk(callID, ask, st)
 				}
-			}).Label(ask.Question)
+			}
 		}
-		free := ui.TextInput(c, &st.free).Label("Your answer").Placeholder("Or type your own answer")
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			free := ui.TextInput(c, &st.free).Label(a.tr("chat.askLabel")).Placeholder(a.tr("chat.askOther")).Grow(1).MinWidth(0)
 			if st.busy {
 				ui.Spinner(c)
 			}
-			if ui.PrimaryButton(c, "Send answer").Disabled(st.busy).Tooltip("Send this answer as the next message").Clicked() || free.Submitted() {
+			if ui.PrimaryButton(c, a.tr("chat.askSend")).Disabled(st.busy).Tooltip(a.tr("chat.askSendTip")).Shrink(0).Clicked() || free.Submitted() {
 				a.answerAsk(callID, ask, st)
 			}
-			if st.err != "" {
-				ui.Text(c, st.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Grow(1).MinWidth(0)
+		})
+		if st.err != "" {
+			ui.Text(c, st.err).FontSize(a.fs(textCaption)).TextColor(t.Danger)
+		}
+	})
+}
+
+// turnInfo 是一轮对话（一条用户消息到下一条之间）的汇总，画在这一轮最后一行的下方。
+type turnInfo struct {
+	usage    conversation.Usage
+	hasUsage bool
+	end      int64  // 最后一次回复的时间（epoch 毫秒）
+	text     string // 这一轮的回答正文，复制用
+}
+
+// turnEnds 找出每一轮的最后一行（下标）并汇总它的用量、时间与回答正文。还在进行中的最后一轮不画。
+func turnEnds(messages []conversation.Message, busy bool) map[int]turnInfo {
+	out := map[int]turnInfo{}
+	var cur turnInfo
+	last := -1
+	flush := func() {
+		if last >= 0 && (cur.hasUsage || cur.text != "") {
+			out[last] = cur
+		}
+		cur, last = turnInfo{}, -1
+	}
+	for i, m := range messages {
+		if m.Role == "user" {
+			flush()
+			continue
+		}
+		last = i
+		if m.Usage != nil {
+			cur.usage.Add(*m.Usage)
+			cur.hasUsage = true
+		}
+		if m.Time > cur.end {
+			cur.end = m.Time
+		}
+		if m.Role == "assistant" && m.Done {
+			if text := strings.TrimSpace(visibleText(m.Text)); text != "" {
+				if cur.text != "" {
+					cur.text += "\n\n"
+				}
+				cur.text += text
 			}
+		}
+	}
+	if !busy {
+		flush()
+	}
+	return out
+}
+
+// turnMeta 是一轮末尾的一行灰色小字：时间、输入/输出/缓存 token 与费用，右侧是复制这一轮回答的按钮。
+func (a *app) turnMeta(c *ui.Context, info turnInfo) {
+	t := c.Theme()
+	var parts []string
+	if info.end > 0 {
+		parts = append(parts, time.UnixMilli(info.end).Format("15:04"))
+	}
+	if info.hasUsage {
+		u := info.usage
+		parts = append(parts, a.tr("chat.metaIn", "count", formatCount(u.Input)), a.tr("chat.metaOut", "count", formatCount(u.Output)))
+		if u.CacheRead > 0 {
+			parts = append(parts, a.tr("chat.metaCache", "count", formatCount(u.CacheRead)))
+		}
+		if u.Cost > 0 {
+			parts = append(parts, formatCost(u.Cost))
+		}
+	}
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		a.buffer(ui.Text(c, strings.Join(parts, " · "))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+		if info.text != "" {
+			ui.Toolbar(c, func() {
+				if iconButton(c, icons.Copy, a.tr("chat.copy")).Clicked() {
+					c.WriteClipboard(info.text)
+					c.Toast(a.tr("chat.copied"))
+				}
+			}).Label(a.tr("chat.copy"))
+		}
+	})
+}
+
+// navRail 是对话列右侧的导航轨（参考 Tern）：每条用户消息一道短横，按它在对话中的位置排布；视口所在的那条
+// 用强调色。点一道横线跳到那条提问，悬停时显示提问的第一行。少于两条提问时不画。
+func (a *app) navRail(c *ui.Context, messages []conversation.Message) {
+	var users []int
+	for i, m := range messages {
+		if m.Role == "user" {
+			users = append(users, i)
+		}
+	}
+	if len(users) < 2 {
+		return
+	}
+	t := c.Theme()
+	first, _ := a.list.Visible()
+	current := users[0]
+	for _, i := range users {
+		if i <= first {
+			current = i
+		}
+	}
+	n := float32(len(messages))
+	ui.Column(c).Width(18).Shrink(0).Margin(20, 6, 20, 0).Padding(10, 0).Radius(9).Background(a.tokens().Tok.Card).AlignItems(ui.Center).Children(func() {
+		prev := float32(0)
+		for _, i := range users {
+			// 横线之间的空白按消息下标的比例分配：开头几条连续的提问就叠成紧挨的几道。
+			gap := float32(i)/n - prev
+			prev = float32(i) / n
+			if gap > 0 {
+				ui.Spacer(c).Grow(gap)
+			}
+			color := t.TextMuted.Alpha(0.6)
+			if i == current {
+				color = t.Accent
+			}
+			idx := i
+			if ui.ButtonBase(c).Label(a.tr("chat.jumpTo")).Tooltip(oneLine(messages[i].Text, 80)).Padding(3, 3).Children(func() {
+				ui.Box(c).Width(8).Height(2).Radius(1).Background(color)
+			}).Clicked() {
+				a.list.FollowEnd = false
+				a.list.ScrollTo(idx, ui.Start)
+			}
+		}
+		ui.Spacer(c).Grow(1 - prev)
+	})
+}
+
+// composer 是输入区（参考 Tern）：上方是状态行（处理中与已用时）、上下文用量与排队的消息；下方是一张圆角
+// 卡片，里面是随内容长高的多行输入，以及模型、思考强度、回复中的 Enter 行为和圆形的发送/停止按钮。
+// Enter 发送，Shift+Enter 换行；输入还只是 /命令前缀时 Enter 先补全。
+func (a *app) composer(c *ui.Context) {
+	t := c.Theme()
+	busy := a.chat.Busy && a.connected
+	ui.Column(c).Padding(4, 24, 16, 24).Children(func() {
+		centered(c, func() {
+			if a.slashOpen() {
+				a.slashMenu(c)
+			}
+			if busy || len(a.chat.QueuedInputs) > 0 {
+				a.statusLine(c, busy)
+			}
+			a.contextMeter(c)
+			ui.Column(c).Radius(radiusBubble).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Padding(10, 12, 8, 12).Gap(6).Children(func() {
+				ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
+					BorderWidth(0).Background(t.Surface).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
+					if k.Key != ui.KeyEnter || k.Mods != 0 {
+						return false // Shift+Enter 换行
+					}
+					a.input = k.Text()
+					if !a.completeSlash() {
+						if a.canSend() {
+							a.send()
+						}
+					}
+					k.SetText(a.input)
+					return true
+				})
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					if options := a.modelOptions(); len(options) > 0 {
+						sel := ui.Select(c, &a.cv.modelChoice, options).MaxWidth(240).MinWidth(0).FontSize(a.fs(textCaption))
+						if sel.Changed() {
+							a.chooseModel(a.cv.modelChoice)
+						}
+					}
+					if options := a.thinkingOptions(); len(options) > 1 {
+						sel := ui.Select(c, &a.cv.thinkingChoice, options).MaxWidth(120).MinWidth(0).FontSize(a.fs(textCaption))
+						if sel.Changed() {
+							a.chooseThinking(a.cv.thinkingChoice)
+						}
+					}
+					if busy {
+						ui.Segmented(c, &a.cv.busyMode, a.tr("chat.queue"), a.tr("chat.steer")).Shrink(0).Label(a.tr("chat.enterMode")).FontSize(a.fs(textCaption))
+					}
+					ui.Spacer(c)
+					if busy {
+						if iconButton(c, icons.Stop, a.tr("chat.stop")).Radius(999).Tooltip(a.tr("chat.stopTip")).Shrink(0).Clicked() {
+							a.abort()
+						}
+					}
+					if primaryIconButton(c, icons.Send, a.tr("chat.send")).Radius(999).Shrink(0).Disabled(!a.canSend()).Clicked() {
+						if !a.completeSlash() {
+							a.send()
+						}
+					}
+				})
+			})
 		})
 	})
 }
 
-// toolMeta 生成摘要行右侧的「耗时 · 状态」。
-func toolMeta(tool *conversation.ToolCall) string {
-	parts := make([]string, 0, 2)
-	if tool.DurationMS > 0 {
-		parts = append(parts, formatDuration(tool.DurationMS))
-	}
-	switch tool.Status {
-	case "ok":
-		parts = append(parts, "ok")
-	case "error":
-		parts = append(parts, "error")
-	default:
-		parts = append(parts, "running")
-	}
-	return strings.Join(parts, " · ")
+// statusLine 是输入框上方的一行：回复进行中时显示「处理中 │ 已用时」，右侧是排队等待的消息（每条一个
+// 小标签，悬停看全文与它是排队还是引导）。
+func (a *app) statusLine(c *ui.Context, busy bool) {
+	t := c.Theme()
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(0, 4).Children(func() {
+		if busy {
+			ui.Spinner(c)
+			ui.Text(c, a.tr("chat.working")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			if !a.cv.busySince.IsZero() {
+				elapsed := c.Now().Sub(a.cv.busySince)
+				if elapsed < 0 {
+					elapsed = 0
+				}
+				ui.Text(c, "│").FontSize(a.fs(textCaption)).TextColor(t.Border)
+				a.buffer(ui.Text(c, formatElapsed(elapsed))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+				c.After(time.Second - elapsed%time.Second)
+			}
+		}
+		ui.Spacer(c)
+		for _, q := range a.chat.QueuedInputs {
+			tip := a.tr("chat.queuedTip")
+			if q.Mode == "steer" {
+				tip = a.tr("chat.steerTip")
+			}
+			ui.Text(c, oneLine(q.Text, 28)).FontSize(a.fs(textCaption)).Padding(3, 10).Radius(999).Background(a.tokens().Tok.Card).
+				BorderWidth(1).BorderColor(t.Border).Tooltip(tip + "\n" + q.Text).Shrink(1).MinWidth(0).SingleLine()
+		}
+	})
 }
 
-// outputHeight 估一段等宽正文在 limit 高度内需要多少 DIP：约 90 个字符折一行、每行 16 DIP。
+// contextMeter 是输入框上方的一条细进度条：最近一次回复用掉的上下文占当前模型上下文窗口的比例。
+// 不知道模型的上下文窗口、还没有回复，或用量不到 1% 时不画。
+func (a *app) contextMeter(c *ui.Context) {
+	window := a.contextWindow()
+	if window <= 0 {
+		return
+	}
+	used := 0
+	for i := len(a.chat.Messages) - 1; i >= 0; i-- {
+		if u := a.chat.Messages[i].Usage; u != nil {
+			used = u.Input + u.CacheRead + u.CacheWrite + u.Output
+			break
+		}
+	}
+	if used <= 0 {
+		return
+	}
+	t := c.Theme()
+	frac := float32(used) / float32(window)
+	if frac < 0.01 {
+		return // 不到 1% 时一条空进度条加「0%」没有信息量
+	}
+	if frac > 1 {
+		frac = 1
+	}
+	pct := fmt.Sprintf("%.0f%%", frac*100)
+	color := t.Accent
+	if frac > 0.8 {
+		color = t.Warning
+	}
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(0, 4, 4, 4).Tooltip(a.tr("chat.context", "percent", pct, "window", formatCount(window))).Children(func() {
+		ui.Row(c).Grow(1).Height(3).Radius(2).Background(t.Border).Clip().Children(func() {
+			ui.Box(c).WidthPercent(frac * 100).Height(3).Background(color)
+		})
+		a.buffer(ui.Text(c, pct)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+	})
+}
+
+// contextWindow 返回会话当前模型的上下文窗口（token）；不知道时为 0。
+func (a *app) contextWindow() int {
+	ref := a.chat.Model
+	if ref == nil {
+		return 0
+	}
+	for _, m := range a.cv.models {
+		if m.Provider == ref.Provider && m.ID == ref.ModelID {
+			return m.ContextWindow
+		}
+	}
+	return 0
+}
+
+// formatElapsed 把已用时写成 12s、3m 05s。
+func formatElapsed(d time.Duration) string {
+	s := int(d / time.Second)
+	if s < 60 {
+		return fmt.Sprintf("%ds", s)
+	}
+	return fmt.Sprintf("%dm %02ds", s/60, s%60)
+}
+
+// outputHeight 估一段等宽正文在 limit 高度内需要多少 DIP：约 90 个字符折一行、每行 18 DIP。
 // 只决定滚动窗口的高度，不参与内容裁剪，估小了仍然能滚动看全。
 func outputHeight(text string, limit float32) float32 {
 	lines := 0
@@ -318,7 +704,7 @@ func outputHeight(text string, limit float32) float32 {
 			lines += extra
 		}
 	}
-	h := float32(lines)*16 + 12
+	h := float32(lines)*18 + 16
 	if h > limit {
 		h = limit
 	}
@@ -333,54 +719,6 @@ func formatDuration(ms int64) string {
 		return fmt.Sprintf("%dms", ms)
 	}
 	return fmt.Sprintf("%.1fs", float64(ms)/1000)
-}
-
-func toolStatusColor(t *ui.Theme, status string) ui.Color {
-	switch status {
-	case "error":
-		return t.Danger
-	case "ok":
-		return t.TextMuted
-	}
-	return t.Warning
-}
-
-// composer 是输入区：斜杠命令列表、回复进行中的排队/插队选择，以及自适应的输入行。
-func (a *app) composer(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
-		if a.slashOpen() {
-			a.slashMenu(c)
-		}
-		if a.chat.Busy && a.connected {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6, 24).Children(func() {
-				ui.Text(c, a.tr("chat.busy")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
-				ui.Segmented(c, &a.cv.busyMode, a.tr("chat.queue"), a.tr("chat.steer")).Shrink(0).Label(a.tr("chat.enterMode"))
-				hint := a.tr("chat.enterQueues")
-				if a.cv.busyMode == 1 {
-					hint = a.tr("chat.enterSteers")
-				}
-				ui.Text(c, hint).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
-				if a.chat.Queued > 0 {
-					ui.Text(c, a.tr("chat.queued", "count", strconv.Itoa(a.chat.Queued))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
-				}
-			})
-		}
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(14, 20).Children(func() {
-			// MinWidth(0) 让输入框在窄窗口里真的能被压缩，否则按钮会被挤出窗口并裁成 “Sen…”。
-			in := ui.TextInput(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Grow(1).MinWidth(0).AutoFocus()
-			if a.chat.Busy && a.connected && iconTextButton(c, icons.Stop, a.tr("chat.stop")).Shrink(0).Tooltip(a.tr("chat.stopTip")).Clicked() {
-				a.abort()
-			}
-			send := primaryIconTextButton(c, icons.Send, a.tr("chat.send")).Shrink(0).Disabled(!a.canSend())
-			if send.Clicked() || in.Submitted() {
-				// 输入还只是一个 /命令前缀时，Enter 先补全，不直接发送。
-				if !a.completeSlash() {
-					a.send()
-				}
-			}
-		})
-	})
 }
 
 // chatModals 画聊天页的弹窗（标题重命名）。
@@ -411,12 +749,12 @@ func (a *app) chatModals(c *ui.Context) {
 	})
 }
 
-// slashMenu 是输入框上方的一行命令列表；点击一项把命令补进输入框。
+// slashMenu 是输入框上方的命令列表；点击一项把命令补进输入框。
 func (a *app) slashMenu(c *ui.Context) {
 	t := c.Theme()
 	matches := a.slashMatches()
-	ui.Column(c).Padding(6, 24).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		ui.Text(c, "Commands").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+	ui.Column(c).Padding(6, 8).Radius(radiusCard).Background(a.tokens().Tok.Card).BorderWidth(1).BorderColor(t.Border).Children(func() {
+		ui.Text(c, "Commands").FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(0, 6)
 		// 每项约 30 DIP，最多显示 6 项后滚动。
 		menuHeight := float32(30*len(matches) + 8)
 		if menuHeight > 180 {
@@ -428,7 +766,7 @@ func (a *app) slashMenu(c *ui.Context) {
 				if command.ArgumentHint != "" {
 					label += " " + command.ArgumentHint
 				}
-				if ui.Button(c, label).Tooltip(command.Description).Clicked() {
+				if ui.Button(c, label).Tooltip(command.Description).Justify(ui.Start).Clicked() {
 					a.input = "/" + command.Name + " "
 				}
 			}

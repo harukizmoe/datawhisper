@@ -4,6 +4,7 @@ package app
 // 以及窄窗口下发送按钮不被裁切。它们都用 app_test.go 里的假服务（真实 JSON-RPC 形状）。
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -23,9 +24,9 @@ func openRichChat(t *testing.T, fs *fakeService, q *uiQueue, a *app, tt *ui.Test
 	q.pump(t, tt, "conversation 4", func() bool { return a.connected && a.chat.Conversation == 4 })
 }
 
-// TestToolCallsRenderAsSummaries 断言工具调用只画一行摘要：参数与结果的原始 JSON 不进入消息流，
-// 结果默认折叠，展开后能看到全文；ask_user 的内部指令也从可见文本里消失。
-func TestToolCallsRenderAsSummaries(t *testing.T) {
+// TestToolCallsRenderAsCards 断言工具调用画成一张卡片（参考 Tern）：标题是工具名，卡片里是参数摘要与输出，
+// 底部是状态与耗时；ask_user 的内部指令和旧版的箭头记号都不进入可见文本。
+func TestToolCallsRenderAsCards(t *testing.T) {
 	fs := newFakeService(t)
 	q := newQueue()
 	a := &app{post: q.post}
@@ -35,33 +36,59 @@ func TestToolCallsRenderAsSummaries(t *testing.T) {
 	expectTexts(t, tt, []string{
 		"Look at my workspace",
 		"workspace_status",
-		"41ms · ok",
+		`{"system_workspace":{"roots":["/workspace"],"files":[]}}`,
+		"Done",
+		"41ms",
 		"Quick question",
 		"Which analysis should I run?",
 		"Profit analysis",
 		"Structure analysis",
 	}, []string{
-		`{"system_workspace"`,
 		internalAskInstruction,
 		"→",
 		"←",
 	})
-
-	// 折叠时结果不显示；点击 Details 展开后能看到完整文本，再点 Hide 收回。
-	if err := tt.Click("Details"); err != nil {
-		t.Fatal(err)
-	}
-	raw := `{"system_workspace":{"roots":["/workspace"],"files":[]}}`
-	if rect, ok := tt.Find(raw); !ok || rect.H < 10 || rect.W < 100 {
-		t.Fatalf("expanded tool output is not visible: %v, %t; texts %q", rect, ok, tt.Texts())
-	}
-	if err := tt.Click("Hide"); err != nil {
-		t.Fatal(err)
-	}
-	expectTexts(t, tt, nil, []string{`{"system_workspace"`})
 }
 
-// TestAskUserOptionsSubmit 断言 ask_user 的选项来自工具参数，点选后以 followUp 提交，且自由输入也能回答。
+// TestLongToolOutputIsTruncated 断言长输出默认只显示末尾几行，「前面还有 N 行」展开全文、「收起」收回；
+// 失败的调用一直完整展开。
+func TestLongToolOutputIsTruncated(t *testing.T) {
+	q := newQueue()
+	a := newTestApp(t, q)
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("row %02d", i))
+	}
+	output := strings.Join(lines, "\n")
+	a.chat.Messages = []conversation.Message{
+		{Key: "e1", Role: "user", Text: "list rows", Done: true},
+		{Key: "e2.0", Role: "tool", Text: "query_data", Done: true, Tool: &conversation.ToolCall{CallID: "c1", Name: "query_data", Args: "sql=select *", Output: output, Status: "ok", DurationMS: 1200}},
+	}
+	tt := ui.NewTester(a.view, 1180, 900)
+	expectTexts(t, tt, []string{"query_data", "sql=select *", "14 earlier lines", "Done", "1.2s"}, []string{"row 01"})
+	if !strings.Contains(strings.Join(tt.Texts(), "\n"), "row 20") {
+		t.Errorf("the tail is not shown; texts %q", tt.Texts())
+	}
+	if err := tt.Click("14 earlier lines"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !strings.Contains(strings.Join(tt.Texts(), "\n"), "row 01") {
+		t.Errorf("the expanded output lacks its first line; texts %q", tt.Texts())
+	}
+	if err := tt.Click("Show less"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"14 earlier lines"}, nil)
+
+	// 失败的调用：全文展开，没有收起。
+	a.chat.Messages[1].Tool.Status = "error"
+	tt.Frame()
+	expectTexts(t, tt, []string{"Failed"}, []string{"14 earlier lines", "Show less"})
+}
+
+// TestAskUserOptionsSubmit 断言 ask_user 的选项来自工具参数，点一下选项就以 followUp 提交，且自由输入也能回答。
 func TestAskUserOptionsSubmit(t *testing.T) {
 	fs := newFakeService(t)
 	q := newQueue()
@@ -70,9 +97,6 @@ func TestAskUserOptionsSubmit(t *testing.T) {
 	openRichChat(t, fs, q, a, tt)
 
 	if err := tt.Click("Profit analysis"); err != nil {
-		t.Fatal(err)
-	}
-	if err := tt.Click("Send answer"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the submitted answer", func() bool { return len(fs.callsTo("conversation.submit")) > 0 })
@@ -370,5 +394,61 @@ func TestToolCallPairing(t *testing.T) {
 	// 结果正文仍然保留在数据里（模型指令不该丢），由界面负责不显示它。
 	if ask.Output != internalAskInstruction {
 		t.Errorf("ask output %q", ask.Output)
+	}
+}
+
+// TestThinkingTurnMetaAndNavRail 覆盖 P1 的几件事：思考默认折叠成「Thought」、点开显示全文；一轮末尾有
+// 「时间 · 输入 · 输出 · 缓存 · 费用」与复制按钮（还在进行中的轮次不画）；两条以上提问时出现导航轨。
+func TestThinkingTurnMetaAndNavRail(t *testing.T) {
+	q := newQueue()
+	a := newTestApp(t, q)
+	usage := &conversation.Usage{Input: 1200, Output: 300, CacheRead: 4000, Total: 5500, Cost: 0.0125}
+	a.chat.Messages = []conversation.Message{
+		{Key: "e1", Role: "user", Text: "first question", Done: true},
+		{Key: "g9.th", Role: "thinking", Text: "consider the schema first", Done: true},
+		{Key: "g9", Role: "assistant", Text: "first answer", Done: true, Usage: usage},
+		{Key: "e3", Role: "user", Text: "second question", Done: true},
+		{Key: "g10", Role: "assistant", Text: "partial", Done: false},
+	}
+	a.chat.Busy = true
+	tt := ui.NewTester(a.view, 1180, 900)
+	expectTexts(t, tt, []string{"Thought", "first answer", "in 1.2k", "out 300", "cache 4k", "$0.0125", "Copy", "Jump to this question"},
+		[]string{"consider the schema first"})
+	if err := tt.Click("Thought"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"consider the schema first"}, nil)
+
+	// 进行中的第二轮没有元数据：只有第一轮那一份。
+	metas := 0
+	for _, s := range tt.Texts() {
+		if strings.Contains(s, "out ") {
+			metas++
+		}
+	}
+	if metas != 1 {
+		t.Errorf("%d turn summaries, want 1; texts %q", metas, tt.Texts())
+	}
+	if err := tt.Click("Copy"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tt.Clipboard(); got != "first answer" {
+		t.Errorf("copied %q", got)
+	}
+}
+
+// TestHomeSuggestionsFillTheComposer 断言首页的示例问题点一下就填进输入框（不直接发送）。
+func TestHomeSuggestionsFillTheComposer(t *testing.T) {
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, 1180, 760)
+	suggestion := "Chart monthly sales as a line chart"
+	if err := tt.Click(suggestion); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.input != suggestion {
+		t.Errorf("input %q", a.input)
 	}
 }

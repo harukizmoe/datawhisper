@@ -204,6 +204,12 @@ func (a *app) follow() {
 func (a *app) onChat(st conversation.State) {
 	finished := a.chat.Busy && !st.Busy && a.chat.Conversation == st.Conversation
 	switched := st.Conversation != a.chat.Conversation
+	switch {
+	case st.Busy && (!a.chat.Busy || switched):
+		a.cv.busySince = time.Now()
+	case !st.Busy:
+		a.cv.busySince = time.Time{}
+	}
 	a.chat, a.connected, a.streamErr = st, true, ""
 	a.syncFromState(switched)
 	if finished {
