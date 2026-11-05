@@ -50,10 +50,17 @@ func (a *app) chatPage(c *ui.Context) {
 		turns := turnEnds(messages, a.chat.Busy)
 		ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 			a.list.Key = func(i int) any { return messages[i].Key }
-			a.list.FollowEnd = true
+			// 跳到某条提问或某个出处之后暂停跟随底部，否则下一帧又被拉回去；回到底部后恢复（见 jumpTo）。
+			if a.cv.followPaused && a.list.AtEnd() && c.Now().Sub(a.cv.jumpedAt) > 500*time.Millisecond {
+				a.cv.followPaused = false
+			}
+			a.list.FollowEnd = !a.cv.followPaused
 			ui.List(c, &a.list, len(messages), func(i int) {
 				a.centered(c, func() {
 					a.message(c, messages[i])
+					if m := messages[i]; m.Role == "assistant" && m.Done {
+						a.provenanceRow(c, messages, i)
+					}
 					if meta, ok := turns[i]; ok {
 						a.turnMeta(c, meta)
 					}
@@ -545,8 +552,7 @@ func (a *app) navRail(c *ui.Context, messages []conversation.Message) {
 			if ui.ButtonBase(c).Label(a.tr("chat.jumpTo")).Tooltip(oneLine(messages[i].Text, 80)).Padding(3, 3).Children(func() {
 				ui.Box(c).Width(8).Height(2).Radius(1).Background(color)
 			}).Clicked() {
-				a.list.FollowEnd = false
-				a.list.ScrollTo(idx, ui.Start)
+				a.jumpTo(c, idx)
 			}
 		}
 		ui.Spacer(c).Grow(1 - prev)
@@ -785,4 +791,66 @@ func (a *app) slashMenu(c *ui.Context) {
 			}
 		})
 	})
+}
+
+// provEntry 是一条回答的数字出处缓存：消息条数与回答长度不变时结果不变。
+type provEntry struct {
+	messages, textLen int
+	p                 conversation.Provenance
+	ok                bool
+}
+
+// provenanceOf 返回 messages[i] 的数字出处（缓存）。
+func (a *app) provenanceOf(messages []conversation.Message, i int) (conversation.Provenance, bool) {
+	if a.cv.prov == nil {
+		a.cv.prov = map[string]provEntry{}
+	}
+	m := messages[i]
+	if e, ok := a.cv.prov[m.Key]; ok && e.messages == i && e.textLen == len(m.Text) {
+		return e.p, e.ok
+	}
+	p, ok := conversation.ProvenanceOf(messages, i)
+	a.cv.prov[m.Key] = provEntry{messages: i, textLen: len(m.Text), p: p, ok: ok}
+	return p, ok
+}
+
+// provenanceRow 是回答下方的一行「出处」：回答里的数据类数字来自哪些工具调用（点一下跳到那张工具卡片），以及
+// 在工具结果里找不到出处的数字。规则与服务端的质量闸门一致（conversation.ProvenanceOf）。这一轮没有数据类
+// 工具、或回答里没有数据类数字时不画。
+func (a *app) provenanceRow(c *ui.Context, messages []conversation.Message, i int) {
+	p, ok := a.provenanceOf(messages, i)
+	if !ok || p.Checked == 0 {
+		return
+	}
+	t := c.Theme()
+	tok := a.tokens().Tok
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Wrap().Children(func() {
+		ui.Icon(c, icons.Verified).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("chat.sources")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		for _, src := range p.Sources {
+			label := a.tr("chat.sourceNumbers", "tool", src.Tool, "count", strconv.Itoa(len(src.Numbers)))
+			index := src.Index
+			if ui.ButtonBase(c).Label(label).Tooltip(strings.Join(src.Numbers, ", ")).Children(func() {
+				a.buffer(ui.Text(c, label)).FontSize(a.fs(textCaption)).TextColor(t.Accent).
+					Padding(2, 8).Radius(999).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder)
+			}).Clicked() {
+				a.jumpTo(c, index)
+			}
+		}
+		if n := len(p.Unsupported); n > 0 {
+			label := a.tr("chat.unsupported", "count", strconv.Itoa(n))
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Padding(2, 8).Radius(999).Background(t.Warning.Alpha(0.12)).
+				Tooltip(a.tr("chat.unsupportedTip") + "\n" + strings.Join(p.Unsupported, ", ")).Children(func() {
+				ui.Icon(c, icons.Info).TextColor(t.Warning)
+				ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.Warning)
+			})
+		}
+	})
+}
+
+// jumpTo 把消息列表滚到第 i 行（提问或工具卡片），并暂停跟随底部，直到用户滚回底部、发出新消息或换会话。
+func (a *app) jumpTo(c *ui.Context, i int) {
+	a.cv.followPaused, a.cv.jumpedAt = true, c.Now()
+	a.list.FollowEnd = false
+	a.list.ScrollTo(i, ui.Start)
 }

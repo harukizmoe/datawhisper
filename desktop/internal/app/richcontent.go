@@ -112,6 +112,9 @@ func (a *app) chartCard(c *ui.Context, ch conversation.Chart) {
 					a.rich.Forget(pv)
 				}
 			}
+			if iconButton(c, icons.Maximize, a.tr("chat.fullScreen")).Clicked() {
+				a.openFullChart(ch)
+			}
 		})
 		a.webPreview(c, pv, chartHeight(a.chatChartWidth()), "Chart", ch.Path)
 	})
@@ -317,8 +320,7 @@ func (a *app) dashboardPreview(c *ui.Context, id string) {
 func (a *app) dashboardsModal(c *ui.Context, t *ui.Theme) {
 	d := &a.dash
 	if !d.open {
-		a.rich.ReleaseModal()
-		return
+		return // 弹窗的 web view 由 richModals 统一释放：全屏图表也用同一个宿主
 	}
 	ui.Modal(c, &d.open, func() {
 		ui.Column(c).Width(764).Gap(10).Children(func() {
@@ -446,5 +448,47 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 func (a *app) richModals(c *ui.Context) {
 	t := c.Theme()
 	a.dashboardsModal(c, t)
+	a.fullChartModal(c, t)
 	a.canvasModal(c, t)
+	if !a.dash.open && !a.cv.fullOpen {
+		a.rich.ReleaseModal()
+	}
+}
+
+// openFullChart 全屏查看一张图表。
+func (a *app) openFullChart(ch conversation.Chart) {
+	a.dash.open = false
+	a.cv.fullChart, a.cv.fullOpen = ch, true
+}
+
+// fullChartModal 是全屏图表：占窗口大部分的弹窗，图表可交互；同样提供在浏览器里打开原文件。
+func (a *app) fullChartModal(c *ui.Context, t *ui.Theme) {
+	if !a.cv.fullOpen {
+		return
+	}
+	ch := a.cv.fullChart
+	width := a.contentWidth() * 0.85
+	if width < 480 {
+		width = 480
+	}
+	height := roundDIP(clampF(width*0.6, 360, 820))
+	title := ch.Title
+	if title == "" {
+		title = a.tr("chat.chart")
+	}
+	ui.Modal(c, &a.cv.fullOpen, func() {
+		ui.Column(c).Width(width).Gap(10).Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icons.Chart).TextColor(t.TextMuted)
+				ui.Text(c, title).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(title)
+				if ch.Path != "" && ui.Button(c, a.tr("chat.openInBrowser")).Clicked() {
+					c.OpenURL(preview.FileURL(ch.Path))
+				}
+				if iconButton(c, icons.Close, a.tr("chat.close")).Clicked() {
+					a.cv.fullOpen = false
+				}
+			})
+			a.webPreview(c, a.rich.FullChartPreview(previewChart(ch)), height, "Chart", ch.Path)
+		})
+	})
 }

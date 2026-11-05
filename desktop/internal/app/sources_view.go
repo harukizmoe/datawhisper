@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"datawhisper/desktop/internal/conversation"
+	"datawhisper/desktop/internal/icons"
 	"datawhisper/desktop/internal/preview"
 	"datawhisper/desktop/internal/service"
 	"github.com/egoist/mygo/ui"
@@ -52,7 +54,7 @@ func (a *app) sourcesPanel(c *ui.Context) {
 			})
 			return
 		}
-		ui.Tabs(c, &a.src.tab, a.tr("data.tabSources"), a.tr("data.tabWorkspace"), a.tr("data.tabArtifacts")).Label(a.tr("data.tabsLabel")).Changed()
+		ui.Tabs(c, &a.src.tab, a.tr("data.tabSources"), a.tr("data.tabWorkspace"), a.tr("data.tabArtifacts"), a.tr("data.tabRuns")).Label(a.tr("data.tabsLabel")).Changed()
 		ui.Scroll(c).Grow(1).MinWidth(0).Children(func() {
 			ui.Column(c).Padding(14, 16).Gap(14).Children(func() {
 				if a.src.err != "" {
@@ -63,6 +65,8 @@ func (a *app) sourcesPanel(c *ui.Context) {
 					a.workspaceTab(c, t)
 				case sourcesTabArtifacts:
 					a.artifactsTab(c, t)
+				case sourcesTabRuns:
+					a.runsTab(c, t)
 				default:
 					a.sourcesTab(c, t)
 				}
@@ -542,6 +546,7 @@ func permissionLabel(permission string) string {
 
 // artifactsTab 是「产物」页签：列出导出文件，文本产物就地预览，HTML/SVG 用 web view 预览。
 func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
+	a.chatChartsList(c, t)
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "Artifacts").Bold().FontSize(a.fs(textSection))
 		ui.Spacer(c)
@@ -746,4 +751,39 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 			}
 		})
 	})
+}
+
+// chatChartsList 是「产出物」标签顶部的一节：这个对话里生成的全部图表，点一下全屏查看。
+func (a *app) chatChartsList(c *ui.Context, t *ui.Theme) {
+	var charts []conversation.Chart
+	for _, m := range a.chat.Messages {
+		if m.Tool != nil {
+			charts = append(charts, m.Tool.Charts...)
+		}
+	}
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, a.tr("data.charts")).Bold().FontSize(a.fs(textSection))
+		ui.Text(c, strconv.Itoa(len(charts))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+	})
+	if len(charts) == 0 {
+		ui.Text(c, a.tr("data.noCharts")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		return
+	}
+	tok := a.tokens().Tok
+	for _, ch := range charts {
+		title := ch.Title
+		if title == "" {
+			title = a.tr("chat.chart")
+		}
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(8, 10).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Children(func() {
+			ui.Icon(c, icons.Chart).TextColor(t.TextMuted)
+			ui.Text(c, title).SingleLine().Grow(1).MinWidth(0).Tooltip(title)
+			if ch.Type != "" {
+				ui.Badge(c, ch.Type)
+			}
+			if iconButton(c, icons.Maximize, a.tr("chat.fullScreen")).Clicked() {
+				a.openFullChart(ch)
+			}
+		})
+	}
 }

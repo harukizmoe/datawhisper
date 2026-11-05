@@ -327,6 +327,20 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 			})
 		case "usage.summary":
 			respond(req.ID, map[string]any{"models": map[string]any{}, "tools": map[string]any{}})
+		// 「运行」标签：两个长任务（一个运行中）与一个团队委派；workflow.runs.* 故意不实现，界面应隐藏那一节。
+		case "jobs.list":
+			respond(req.ID, map[string]any{"jobs": []any{
+				map[string]any{"id": 12, "type": "export_report", "label": "Quarterly report", "status": "running", "progress": 40, "message": "rendering charts", "error": nil, "conversationId": 4, "createdAt": "2026-11-05T08:00:00Z", "finishedAt": nil},
+				map[string]any{"id": 11, "type": "profile_data", "label": "", "status": "succeeded", "progress": 100, "message": "", "error": nil, "conversationId": 4, "createdAt": "2026-11-05T07:00:00Z", "finishedAt": "2026-11-05T07:01:00Z"},
+			}})
+		case "jobs.cancel":
+			respond(req.ID, map[string]any{"id": 12, "type": "export_report", "label": "Quarterly report", "status": "canceled", "progress": 40, "conversationId": 4, "createdAt": "2026-11-05T08:00:00Z"})
+		case "teams.activeDelegations":
+			respond(req.ID, map[string]any{"delegations": []any{
+				map[string]any{"conversation_id": 9, "team_name": "analysts", "member_name": "sql", "title": "Check the joins"},
+			}})
+		case "teams.cancelDelegate":
+			respond(req.ID, map[string]any{"canceled": 1})
 		default:
 			write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
 				"code": -32601, "message": "method not found: " + req.Method,

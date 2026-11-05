@@ -60,4 +60,6 @@ var (
 	Dashboard    = mustIcon("layout-dashboard")
 	ListChecks   = mustIcon("list-checks")
 	Sparkles     = mustIcon("sparkles")
+	Maximize     = mustIcon("maximize-2")
+	Verified     = mustIcon("badge-check")
 )

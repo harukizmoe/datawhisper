@@ -277,6 +277,7 @@ func (a *app) send() {
 	}
 	p := *a.pending
 	a.input, a.sending, a.sendErr, a.needModel = "", true, "", false
+	a.cv.followPaused = false // 发出新消息后回到底部看回复
 	client, conv := a.client, a.conv
 	command, whenBusy := slashCommandName(text, a.cv.commands), a.whenBusy()
 	go func() {

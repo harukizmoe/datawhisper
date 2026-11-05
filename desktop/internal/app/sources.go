@@ -23,6 +23,7 @@ const (
 	sourcesTabSources = iota
 	sourcesTabWorkspace
 	sourcesTabArtifacts
+	sourcesTabRuns
 )
 
 // 确认对话框要删的东西。
@@ -61,6 +62,9 @@ type sourcesState struct {
 	tab     int
 
 	sources []service.Source
+
+	// runs 是「运行」标签的数据（runs.go）。
+	runs runsState
 
 	// 预览：previewID 是正在看的来源，previewTable 是选中的表。
 	previewID      string

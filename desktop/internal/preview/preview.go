@@ -382,6 +382,23 @@ func (r *Pool) ChartPreview(ch Chart) *Preview {
 	})
 }
 
+// FullChartPreview 返回全屏查看一张图表用的预览：挂在弹窗宿主上，key 带 "full:" 前缀，与对话流里同一张图的
+// web view 各是各的（一个 web view 只能挂在一个宿主上）。
+func (r *Pool) FullChartPreview(ch Chart) *Preview {
+	key := ch.ID
+	if key == "" {
+		key = ch.Path
+	}
+	if key == "" {
+		return &Preview{err: "This tool result has no chart to show."}
+	}
+	key = "full:" + key
+	r.KeepOnly(OwnerModal, key)
+	return r.Acquire(OwnerModal, key, false, func(m *MediaServer) (string, string, error) {
+		return m.AddChart(ch)
+	})
+}
+
 // ArtifactPreview 返回数据面板里一个 HTML/SVG 产物的预览。
 func (r *Pool) ArtifactPreview(path string) *Preview {
 	if path == "" {

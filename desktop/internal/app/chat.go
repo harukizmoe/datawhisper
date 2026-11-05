@@ -48,6 +48,14 @@ type chatView struct {
 	openThinking map[string]bool
 	// openOutputs 记住哪些工具卡片的输出被完整展开；默认只显示末尾几行（失败的卡片除外）。
 	openOutputs map[string]bool
+	// fullChart 与 fullOpen 是全屏查看的图表（richcontent.go）。
+	fullChart conversation.Chart
+	fullOpen  bool
+	// prov 缓存每条回答的数字出处（键是消息 key）；回答文本或之前的消息变了就重算。
+	prov map[string]provEntry
+	// followPaused：用户跳到了某条提问或出处，消息列表暂时不跟随底部；jumpedAt 是跳转的时刻。
+	followPaused bool
+	jumpedAt     time.Time
 	// busySince 是当前这次回复开始的时刻，状态行据此显示已用时；不在回复中时为零值。
 	busySince time.Time
 }
@@ -84,6 +92,8 @@ func (v *chatView) resetConversation() {
 	v.renaming, v.renameText, v.renameErr, v.renameBusy = false, "", "", false
 	v.modelChoice, v.thinkingChoice = "", ""
 	v.modelsTouched = false
+	v.openThinking, v.openOutputs, v.prov = nil, nil, nil
+	v.followPaused, v.fullOpen = false, false
 }
 
 func (v *chatView) askState(callID string) *askUI {
