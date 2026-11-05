@@ -123,7 +123,7 @@ func (a *app) sidebar(c *ui.Context) {
 				ui.SidebarItem(c, navSkills, icons.Skill, a.tr("sidebar.skills"))
 				ui.SidebarItem(c, navSettings, icons.Settings, a.tr("sidebar.settings"))
 			})
-		}).Grow(1).Background(tok.Sidebar).Label("Navigation").Changed() {
+		}).Grow(1).Background(tok.Sidebar).Label(a.tr("chat.navigation")).Changed() {
 			a.navigate()
 		}
 		if a.sess.err != "" {

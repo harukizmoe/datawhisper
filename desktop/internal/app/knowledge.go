@@ -88,7 +88,7 @@ func (a *app) knowledgeCall(fn func(ctx context.Context, c *service.Client) erro
 			if err != nil {
 				// 失败时放开所有「进行中」的状态，页面不会一直转圈；原因显示在页面顶部。
 				k := &a.know
-				k.err = sourceErrorText(err)
+				k.err = a.sourceErr(err)
 				k.loading, k.editBusy, k.importBusy = false, false, false
 				return
 			}

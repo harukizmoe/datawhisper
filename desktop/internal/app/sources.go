@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"datawhisper/desktop/internal/i18n"
 	"datawhisper/desktop/internal/service"
 	"github.com/egoist/mygo"
 )
@@ -33,8 +34,10 @@ const (
 	confirmWorkspace = "workspace"
 )
 
-// 工作区权限的两个标签，顺序与 permissionValueForLabel 一致。
-var workspacePermissionLabels = []string{"Read only", "Read & write"}
+// permissionLabels 是工作区权限的两个标签，顺序与 permissionFromLabel 一致；标签随界面语言变化。
+func (a *app) permissionLabels() []string {
+	return []string{a.tr("data.permReadOnly"), a.tr("data.permReadWrite")}
+}
 
 // remoteKind 是一个远程来源类型：id 与服务端一致，label 是下拉框里的写法。
 type remoteKind struct {
@@ -47,6 +50,21 @@ var remoteKinds = []remoteKind{
 	{ID: "gsheets", Label: "Google Sheets"},
 	{ID: "feishu", Label: "Feishu Bitable"},
 	{ID: "http", Label: "HTTP API"},
+}
+
+// kindLabel 是远程来源类型在界面语言下的名字。
+func (a *app) kindLabel(k remoteKind) string {
+	switch k.ID {
+	case "sql":
+		return a.tr("data.kindSQL")
+	case "gsheets":
+		return a.tr("data.kindGsheets")
+	case "feishu":
+		return a.tr("data.kindFeishu")
+	case "http":
+		return a.tr("data.kindHTTP")
+	}
+	return k.Label
 }
 
 // sourcesState 是数据面板的数据与编辑状态。只有 UI 线程会改它：构建视图时，以及在 post 上排队的函数里。
@@ -195,24 +213,24 @@ func (a *app) loadSources() {
 			a.src.loading, a.src.loaded = false, true
 			switch {
 			case sourcesErr != nil:
-				a.src.err = sourceErrorText(sourcesErr)
+				a.src.err = a.sourceErr(sourcesErr)
 			default:
 				a.src.sources, a.src.err = sources, ""
 			}
 			if workspaceErr != nil {
-				a.src.workspaceErr = sourceErrorText(workspaceErr)
+				a.src.workspaceErr = a.sourceErr(workspaceErr)
 			} else {
 				a.src.current = view.Workspace
 				a.src.workspaces = view.Workspaces
 				a.src.workspaceErr = ""
 			}
 			if artifactsErr != nil {
-				a.src.artifactsErr = sourceErrorText(artifactsErr)
+				a.src.artifactsErr = a.sourceErr(artifactsErr)
 			} else {
 				a.src.artifacts, a.src.artifactsErr = artifacts, ""
 			}
 			if configsErr != nil {
-				a.src.configsErr = sourceErrorText(configsErr)
+				a.src.configsErr = a.sourceErr(configsErr)
 			} else {
 				a.src.configs, a.src.configsErr = configs, ""
 			}
@@ -266,7 +284,7 @@ func (a *app) refreshPreview(sourceID, table string, keep bool) {
 			}
 			a.src.previewLoading = false
 			if err != nil {
-				a.src.previewErr = "Could not read the tables: " + sourceErrorText(err)
+				a.src.previewErr = a.tr("data.readTablesFailed", "error", a.sourceErr(err))
 				return
 			}
 			a.src.preview = &sp
@@ -317,12 +335,12 @@ func (a *app) showPreview(sourceID string) {
 func (a *app) pickFile() {
 	go func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-			Title:   "Import a data file",
-			Message: "CSV, Excel or PDF",
-			Filters: []mygo.FileFilter{{Name: "Data files", Extensions: []string{"csv", "xlsx", "xls", "pdf"}}},
+			Title:   a.tr("data.importDialogTitle"),
+			Message: a.tr("data.importDialogMsg"),
+			Filters: []mygo.FileFilter{{Name: a.tr("data.importFilter"), Extensions: []string{"csv", "xlsx", "xls", "pdf"}}},
 		})
 		if err != nil {
-			a.post(func() { a.src.uploadErr = "The file dialog is unavailable: " + err.Error() })
+			a.post(func() { a.src.uploadErr = a.tr("data.dialogUnavailable", "error", err.Error()) })
 			return
 		}
 		if len(paths) == 0 {
@@ -338,12 +356,12 @@ func (a *app) pickFile() {
 func (a *app) uploadFile(path string) {
 	client, conv := a.client, a.src.conv
 	if client == nil || conv == 0 {
-		a.src.uploadErr = "Open a chat before importing a file."
+		a.src.uploadErr = a.tr("data.importNeedChat")
 		return
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		a.src.uploadErr = "Could not read " + path + ": " + err.Error()
+		a.src.uploadErr = a.tr("data.readFailed", "path", path, "error", err.Error())
 		return
 	}
 	if info.IsDir() {
@@ -370,7 +388,7 @@ func (a *app) uploadFile(path string) {
 			a.post(func() {
 				a.src.uploading = false
 				if client == a.client {
-					a.src.uploadErr = sourceErrorText(err)
+					a.src.uploadErr = a.sourceErr(err)
 				}
 				a.startImport()
 			})
@@ -408,7 +426,7 @@ func (a *app) uploadFile(path string) {
 			a.post(func() {
 				a.src.uploading = false
 				if client == a.client {
-					a.src.uploadErr = "Could not copy " + filename + ": " + err.Error()
+					a.src.uploadErr = a.tr("data.copyFailed", "name", filename, "error", err.Error())
 				}
 				a.startImport()
 			})
@@ -422,7 +440,7 @@ func (a *app) uploadFile(path string) {
 				return
 			}
 			if err != nil {
-				a.src.uploadErr = sourceErrorText(err)
+				a.src.uploadErr = a.sourceErr(err)
 				a.startImport()
 				return
 			}
@@ -430,7 +448,7 @@ func (a *app) uploadFile(path string) {
 			if opened.Source != nil && opened.Source.Name != "" {
 				name = opened.Source.Name
 			}
-			a.src.notice, a.src.noticeErr = "Imported "+name+".", false
+			a.src.notice, a.src.noticeErr = a.tr("data.imported", "name", name), false
 			a.loadSources()
 			a.startImport()
 		})
@@ -509,7 +527,7 @@ func (a *app) setSourceActive(src service.Source, on bool) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not change "+src.Name+": "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.changeFailed", "name", src.Name, "error", a.sourceErr(err)), true
 				return
 			}
 			word := "excluded from"
@@ -537,7 +555,7 @@ func (a *app) openSource(src service.Source) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not open "+src.Name+": "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.openFailed", "name", src.Name, "error", a.sourceErr(err)), true
 				return
 			}
 			a.src.notice, a.src.noticeErr = src.Name+" is open.", false
@@ -561,7 +579,7 @@ func (a *app) closeSource(src service.Source) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not close "+src.Name+": "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.closeFailed", "name", src.Name, "error", a.sourceErr(err)), true
 				return
 			}
 			a.src.notice, a.src.noticeErr = src.Name+" is closed.", false
@@ -585,7 +603,7 @@ func (a *app) removeSource(src service.Source) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not remove "+src.Name+": "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.removeFailed", "name", src.Name, "error", a.sourceErr(err)), true
 				return
 			}
 			if a.src.previewID == src.ID {
@@ -613,12 +631,12 @@ func (a *app) removeAllSources() {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not remove the sources: "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.removeSourcesFailed", "error", a.sourceErr(err)), true
 				return
 			}
 			a.src.previewID, a.src.preview, a.src.table = "", nil, nil
 			a.src.previewTable, a.src.schema = "", ""
-			a.src.notice, a.src.noticeErr = "All data sources are removed.", false
+			a.src.notice, a.src.noticeErr = a.tr("data.allRemoved"), false
 			a.loadSources()
 		})
 	}()
@@ -658,7 +676,7 @@ func (a *app) useConfig(cfg service.SourceConfig) {
 func (a *app) connectRemote() {
 	client, conv := a.client, a.src.conv
 	if client == nil || conv == 0 {
-		a.src.remoteErr = "Open a chat before connecting a source."
+		a.src.remoteErr = a.tr("data.connectNeedChat")
 		return
 	}
 	kind := remoteKinds[a.src.remoteKind]
@@ -666,7 +684,7 @@ func (a *app) connectRemote() {
 	switch kind.ID {
 	case "sql":
 		if a.src.remoteConn == "" && a.src.remoteConfigID == "" {
-			a.src.remoteErr = "Enter the connection string."
+			a.src.remoteErr = a.tr("data.enterConn")
 			return
 		}
 		req.Secret = map[string]string{}
@@ -680,7 +698,7 @@ func (a *app) connectRemote() {
 			req.Secret["creds_json"] = a.src.remoteCreds
 		}
 		if req.Fields["spreadsheet"] == "" && a.src.remoteConfigID == "" {
-			a.src.remoteErr = "Enter the spreadsheet URL or id."
+			a.src.remoteErr = a.tr("data.enterSpread")
 			return
 		}
 	case "feishu":
@@ -689,7 +707,7 @@ func (a *app) connectRemote() {
 			"table":   strings.TrimSpace(a.src.remoteTable),
 		}
 		if req.Fields["bitable"] == "" && a.src.remoteConfigID == "" {
-			a.src.remoteErr = "Enter the Bitable link or app_token."
+			a.src.remoteErr = a.tr("data.enterBitable")
 			return
 		}
 	case "http":
@@ -700,7 +718,7 @@ func (a *app) connectRemote() {
 			req.Secret["auth_value"] = a.src.remoteAuthVal
 		}
 		if req.Fields["url"] == "" && a.src.remoteConfigID == "" {
-			a.src.remoteErr = "Enter the API URL."
+			a.src.remoteErr = a.tr("data.enterURL")
 			return
 		}
 	}
@@ -718,17 +736,17 @@ func (a *app) connectRemote() {
 			}
 			a.src.remoteBusy = false
 			if err != nil {
-				a.src.remoteErr = sourceErrorText(err)
+				a.src.remoteErr = a.sourceErr(err)
 				return
 			}
-			name := kind.Label
+			name := a.kindLabel(kind)
 			if opened.Source != nil && opened.Source.Name != "" {
 				name = opened.Source.Name
 			}
 			// 密钥只写不读：成功后立刻清空输入框。
 			a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
 			a.src.remoteOpen, a.src.remoteErr = false, ""
-			a.src.notice, a.src.noticeErr = "Connected "+name+".", false
+			a.src.notice, a.src.noticeErr = a.tr("data.connected", "name", name), false
 			a.loadSources()
 		})
 	}()
@@ -749,13 +767,13 @@ func (a *app) removeConfig(cfg service.SourceConfig) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not remove the saved connection: "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.forgetFailed", "error", a.sourceErr(err)), true
 				return
 			}
 			if a.src.remoteConfigID == cfg.ID {
 				a.src.remoteConfigID = ""
 			}
-			a.src.notice, a.src.noticeErr = "Saved connection removed.", false
+			a.src.notice, a.src.noticeErr = a.tr("data.forgotten"), false
 			a.loadSources()
 		})
 	}()
@@ -766,15 +784,15 @@ func (a *app) mountWorkspace() {
 	client, conv := a.client, a.src.conv
 	path := strings.TrimSpace(a.src.mountPath)
 	if client == nil || conv == 0 {
-		a.src.mountErr = "Open a chat before mounting a folder."
+		a.src.mountErr = a.tr("data.mountNeedChat")
 		return
 	}
 	if path == "" {
-		a.src.mountErr = "Enter the folder to mount."
+		a.src.mountErr = a.tr("data.enterFolder")
 		return
 	}
 	if !filepath.IsAbs(path) {
-		a.src.mountErr = "Use an absolute path, for example /home/me/data."
+		a.src.mountErr = a.tr("data.absPath")
 		return
 	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
@@ -794,7 +812,7 @@ func (a *app) mountWorkspace() {
 			}
 			a.src.mountBusy = false
 			if err != nil {
-				a.src.mountErr = sourceErrorText(err)
+				a.src.mountErr = a.sourceErr(err)
 				return
 			}
 			label := path
@@ -803,9 +821,9 @@ func (a *app) mountWorkspace() {
 			}
 			a.src.mountPath, a.src.mountName, a.src.mountErr = "", "", ""
 			if len(out.Errors) > 0 {
-				a.src.notice, a.src.noticeErr = "Mounted "+label+" (skipped: "+strings.Join(out.Errors, "; ")+").", true
+				a.src.notice, a.src.noticeErr = a.tr("data.mountedSkipped", "label", label, "skipped", strings.Join(out.Errors, "; ")), true
 			} else {
-				a.src.notice, a.src.noticeErr = "Mounted "+label+".", false
+				a.src.notice, a.src.noticeErr = a.tr("data.mounted", "label", label), false
 			}
 			a.loadSources()
 		})
@@ -827,10 +845,10 @@ func (a *app) unmountWorkspace(id string) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not unmount the folder: "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.unmountFailed", "error", a.sourceErr(err)), true
 				return
 			}
-			a.src.notice, a.src.noticeErr = "Folder unmounted.", false
+			a.src.notice, a.src.noticeErr = a.tr("data.unmounted"), false
 			a.loadSources()
 		})
 	}()
@@ -851,10 +869,10 @@ func (a *app) removeWorkspace(id string) {
 				return
 			}
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not remove the folder: "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.folderRemoveFailed", "error", a.sourceErr(err)), true
 				return
 			}
-			a.src.notice, a.src.noticeErr = "Folder removed from this chat.", false
+			a.src.notice, a.src.noticeErr = a.tr("data.folderRemoved"), false
 			a.loadSources()
 		})
 	}()
@@ -877,10 +895,10 @@ func (a *app) setWorkspacePermission(id, permission string) {
 			}
 			a.src.permBusy = ""
 			if err != nil {
-				a.src.notice, a.src.noticeErr = "Could not change the permission: "+sourceErrorText(err), true
+				a.src.notice, a.src.noticeErr = a.tr("data.permFailed", "error", a.sourceErr(err)), true
 				return
 			}
-			a.src.notice, a.src.noticeErr = "Permission saved.", false
+			a.src.notice, a.src.noticeErr = a.tr("data.permSaved"), false
 			a.loadSources()
 		})
 	}()
@@ -913,7 +931,7 @@ func (a *app) openSourceEditor(src service.Source) {
 			}
 			a.src.editBusy = false
 			if err != nil {
-				a.src.editErr = "Could not read the tables: " + sourceErrorText(err)
+				a.src.editErr = a.tr("data.readTablesFailed", "error", a.sourceErr(err))
 				return
 			}
 			a.src.editTables = nil
@@ -954,7 +972,7 @@ func (a *app) saveSourceTables() {
 			}
 			a.src.editBusy = false
 			if err != nil {
-				a.src.editErr = sourceErrorText(err)
+				a.src.editErr = a.sourceErr(err)
 				return
 			}
 			a.src.editOpen = false
@@ -985,10 +1003,10 @@ func (a *app) previewArtifact(art service.Artifact) {
 				var e *service.Error
 				if errors.As(err, &e) && e.Reason == "file_too_large" {
 					// 产物无法内联预览时只说明路径，用户自己在系统里打开。
-					a.src.artifactErr = "This artifact is too large to show here: " + art.Path
+					a.src.artifactErr = a.tr("data.artifactTooLarge", "path", art.Path)
 					return
 				}
-				a.src.artifactErr = sourceErrorText(err)
+				a.src.artifactErr = a.sourceErr(err)
 				return
 			}
 			a.src.artifactText = content.Text
@@ -996,87 +1014,99 @@ func (a *app) previewArtifact(art service.Artifact) {
 	}()
 }
 
-// sourceErrorText 把数据源/工作区/产物方法的错误翻成用户能照着做的话；上传被拒的每种 reason 单独说明。
+// sourceErrorText 把数据源/工作区/产物方法的错误翻成用户能照着做的话（英文）；没有 app 可用的调用方走这个，
+// 有 app 的调用方用 sourceErr，让文案跟随界面语言。
 func sourceErrorText(err error) string {
+	return sourceErrorIn(i18n.EN, err)
+}
+
+// sourceErr 同 sourceErrorText，但按界面语言给出文案。
+func (a *app) sourceErr(err error) string {
+	return sourceErrorIn(a.lang, err)
+}
+
+// sourceErrorIn 是 sourceErrorText 的实现；上传被拒的每种 reason 单独说明。
+func sourceErrorIn(lang string, err error) string {
+	tr := func(key string, args ...string) string { return i18n.T(lang, key, args...) }
 	var e *service.Error
 	if errors.As(err, &e) {
 		switch e.Reason {
 		case "unsupported_format":
-			return "Only .csv, .xlsx, .xls and .pdf files can be imported."
+			return tr("data.errUnsupportedFormat")
 		case "empty_file":
-			return "The file is empty."
+			return tr("data.errEmptyFile")
 		case "file_too_large":
-			return "The file is larger than the service's import limit: " + e.Message
+			return tr("data.errFileTooLarge", "message", e.Message)
 		case "upload_missing":
-			return "The upload did not reach the service; import the file again."
+			return tr("data.errUploadMissing")
 		case "upload_not_file":
-			return "The upload is not a regular file; import the file again."
+			return tr("data.errUploadNotFile")
 		case "upload_outside_root":
-			return "The upload left the staging folder; import the file again."
+			return tr("data.errUploadOutside")
 		case "upload_size_mismatch":
-			return "The file changed while it was copied; import it again."
+			return tr("data.errUploadSize")
 		case "unknown_upload", "upload_expired":
-			return "The import expired before it finished; import the file again."
+			return tr("data.errImportExpired")
 		case "invalid_workdir":
-			return "That folder cannot be mounted: " + e.Message
+			return tr("data.errInvalidWorkdir", "message", e.Message)
 		case "not_mounted":
-			return "No folder is mounted."
+			return tr("data.errNotMounted")
 		case "workspace_connected":
-			return "Unmount the folder before removing it."
+			return tr("data.errWorkspaceConnected")
 		case "confirmation_required":
-			return "Confirm the removal first."
+			return tr("data.errConfirmRequired")
+		case "not_sql_source":
+			return tr("data.errNotSQL")
+		case "invalid_credentials":
+			return tr("data.errInvalidCreds")
+		case "missing_connection_string":
+			return tr("data.enterConn")
+		case "missing_spreadsheet":
+			return tr("data.enterSpread")
+		case "missing_bitable":
+			return tr("data.enterBitable")
+		case "missing_table":
+			return tr("data.errMissingTable")
+		case "invalid_bitable":
+			return tr("data.errInvalidBitable")
+		case "missing_url":
+			return tr("data.enterURL")
+		case "invalid_url":
+			return tr("data.errInvalidURL")
+		case "invalid_auth_type":
+			return tr("data.errInvalidAuth")
+		case "missing_auth_value":
+			return tr("data.errMissingAuth")
+		case "config_kind_mismatch":
+			return tr("data.errConfigKind")
+		case "invalid_descriptor":
+			return tr("data.errInvalidDescriptor")
+		case "preview_failed":
+			return tr("data.errPreviewFailed", "message", e.Message)
+		case "invalid_artifact_name":
+			return tr("data.errArtifactName")
 		case "invalid_workspace_name":
 			return e.Message
-		case "not_sql_source":
-			return "Only a SQL source chooses its analysis tables."
-		case "invalid_credentials":
-			return "The service account JSON is not valid."
-		case "missing_connection_string":
-			return "Enter the connection string."
-		case "missing_spreadsheet":
-			return "Enter the spreadsheet URL or id."
-		case "missing_bitable":
-			return "Enter the Bitable link or app_token."
-		case "missing_table":
-			return "Enter the table id."
-		case "invalid_bitable":
-			return "The Bitable link or table id is not valid."
-		case "missing_url":
-			return "Enter the API URL."
-		case "invalid_url":
-			return "The API URL must be an http(s) URL."
-		case "invalid_auth_type":
-			return "Choose no auth, a bearer token, or an API key."
-		case "missing_auth_value":
-			return "Enter the token or API key."
-		case "config_kind_mismatch":
-			return "That saved connection belongs to another source type."
-		case "invalid_descriptor":
-			return "The folder produced no usable data source."
-		case "preview_failed":
-			return "The service could not preview this table: " + e.Message
-		case "invalid_artifact_name":
-			return "That artifact name is not valid."
 		}
 		if e.Kind == "not_found" {
-			return "The service could not find it anymore: " + e.Message
+			return tr("data.errNotFound", "message", e.Message)
 		}
 		switch e.Code {
 		case -32601:
-			return "This service build has no data-source support (method not found)."
+			return tr("data.errNoMethod")
 		case -32602:
-			return "The service rejected the request: " + e.Message
+			return tr("data.errRejected", "message", e.Message)
 		case -32000:
-			return "The service could not do that: " + e.Message
+			return tr("data.errCouldNot", "message", e.Message)
 		case -32603:
-			return "The service failed while doing that: " + e.Message
+			return tr("data.errFailed", "message", e.Message)
 		}
 	}
 	if errors.Is(err, service.ErrClosed) {
-		return "The agent service is not running."
+		return tr("data.errNotRunning")
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "The service did not answer in time."
+		return tr("data.errTimeout")
 	}
 	return err.Error()
 }

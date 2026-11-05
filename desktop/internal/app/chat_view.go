@@ -332,8 +332,8 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 		if tool.DashboardID != "" {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, icons.Dashboard).TextColor(t.TextMuted)
-				ui.Text(c, "Dashboard "+tool.DashboardID).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
-				if ui.Button(c, "View dashboard").FontSize(a.fs(textCaption)).Tooltip("Open this chat's dashboard read-only").Clicked() {
+				ui.Text(c, a.tr("dash.dashboardId", "id", tool.DashboardID)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+				if ui.Button(c, a.tr("chat.viewDashboard")).FontSize(a.fs(textCaption)).Tooltip(a.tr("chat.viewDashboardTip")).Clicked() {
 					a.openDashboard(tool.DashboardID)
 				}
 			})
@@ -748,8 +748,8 @@ func (a *app) chatModals(c *ui.Context) {
 	t := c.Theme()
 	ui.Modal(c, &a.cv.renaming, func() {
 		ui.Column(c).WidthPercent(70).MaxWidth(420).MinWidth(260).Gap(10).Children(func() {
-			ui.Text(c, "Rename chat").Bold()
-			in := ui.TextInput(c, &a.cv.renameText).Label("Chat title").MaxWidth(380).AutoFocus()
+			ui.Text(c, a.tr("chat.renameTitle")).Bold()
+			in := ui.TextInput(c, &a.cv.renameText).Label(a.tr("chat.titleLabel")).MaxWidth(380).AutoFocus()
 			if a.cv.renameErr != "" {
 				ui.Text(c, a.cv.renameErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 			}
@@ -757,10 +757,10 @@ func (a *app) chatModals(c *ui.Context) {
 				if a.cv.renameBusy {
 					ui.Spinner(c)
 				}
-				if ui.Button(c, "Cancel").Disabled(a.cv.renameBusy).Clicked() {
+				if ui.Button(c, a.tr("chat.cancel")).Disabled(a.cv.renameBusy).Clicked() {
 					a.cv.renaming = false
 				}
-				if ui.PrimaryButton(c, "Save").Disabled(a.cv.renameBusy).Clicked() || in.Submitted() {
+				if ui.PrimaryButton(c, a.tr("chat.save")).Disabled(a.cv.renameBusy).Clicked() || in.Submitted() {
 					a.renameSession()
 				}
 			})
@@ -773,7 +773,7 @@ func (a *app) slashMenu(c *ui.Context) {
 	t := c.Theme()
 	matches := a.slashMatches()
 	ui.Column(c).Padding(6, 8).Radius(radiusCard).Background(a.tokens().Tok.Card).BorderWidth(1).BorderColor(t.Border).Children(func() {
-		ui.Text(c, "Commands").FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(0, 6)
+		ui.Text(c, a.tr("chat.commands")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(0, 6)
 		// 每项约 30 DIP，最多显示 6 项后滚动。
 		menuHeight := float32(30*len(matches) + 8)
 		if menuHeight > 180 {

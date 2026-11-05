@@ -74,7 +74,7 @@ func (a *app) loadRuns() {
 			r.noJobs, r.noWorkflows, r.noTeams = service.IsUnavailable(jobsErr), service.IsUnavailable(runsErr), service.IsUnavailable(teamsErr)
 			for _, err := range []error{jobsErr, runsErr, teamsErr} {
 				if err != nil && !service.IsUnavailable(err) && r.err == "" {
-					r.err = sourceErrorText(err)
+					r.err = a.sourceErr(err)
 				}
 			}
 			if jobsErr == nil {
@@ -112,7 +112,7 @@ func (a *app) cancelRun(kind, id string, do func(ctx context.Context, client *se
 		a.post(func() {
 			delete(a.src.runs.canceling, key)
 			if err != nil {
-				a.src.runs.err = sourceErrorText(err)
+				a.src.runs.err = a.sourceErr(err)
 			}
 			a.loadRuns()
 		})

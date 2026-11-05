@@ -3,12 +3,12 @@ package app
 // 设置页的界面：模型提供方卡片与编辑器、默认模型、用量、服务状态，以及「通用」分区。状态与动作在 settings.go。
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
 	"datawhisper/desktop/internal/i18n"
+	"datawhisper/desktop/internal/icons"
 	"datawhisper/desktop/internal/service"
 	"datawhisper/desktop/internal/supervisor"
 	"github.com/egoist/mygo/ui"
@@ -72,7 +72,6 @@ func (a *app) settings(c *ui.Context) {
 				a.providerEditor(c, t)
 				a.defaultModelSection(c, t)
 				a.usageSection(c, t)
-				a.serviceSection(c, t)
 			})
 		})
 		a.confirmModal(c, t)
@@ -86,6 +85,7 @@ func (a *app) generalSettings(c *ui.Context, t *ui.Theme) {
 		ui.Column(c).Padding(24, 32).Gap(22).MaxWidth(900).Children(func() {
 			a.languageSection(c, t)
 			a.filesSection(c, t)
+			a.serviceSection(c, t)
 			if a.prefsErr != "" {
 				ui.Text(c, a.tr("settings.saveFailed", "error", a.prefsErr)).FontSize(a.fs(textCaption)).TextColor(themeColor(t, "danger"))
 			}
@@ -178,18 +178,19 @@ func (a *app) providersSection(c *ui.Context, t *ui.Theme) {
 }
 
 func (a *app) providerCard(c *ui.Context, t *ui.Theme, p service.ModelProvider) {
-	ui.Column(c).Gap(8).Padding(14).Radius(10).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Children(func() {
+	tok := a.tokens().Tok
+	ui.Column(c).Gap(8).Padding(14).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, p.Name).Bold()
 			ui.Badge(c, p.Kind)
 			if p.BaseURL != "" {
-				ui.Text(c, p.BaseURL).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Grow(1).MinWidth(0)
+				a.buffer(ui.Text(c, p.BaseURL)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0).Tooltip(p.BaseURL)
 			} else {
 				ui.Spacer(c)
 			}
-			ui.Text(c, keyStatus(p)).FontSize(a.fs(textCaption)).TextColor(keyStatusColor(t, p))
+			ui.Text(c, keyStatus(p)).FontSize(a.fs(textCaption)).TextColor(keyStatusColor(t, p)).Shrink(0)
 			enabled := p.Enabled
-			if ui.Switch(c, &enabled).Label("Enable provider " + p.Name).Changed() {
+			if ui.Switch(c, &enabled).Label(a.tr("settings.enableProvider", "name", p.Name)).Changed() {
 				a.setProviderEnabled(p, enabled)
 			}
 		})
@@ -198,36 +199,42 @@ func (a *app) providerCard(c *ui.Context, t *ui.Theme, p service.ModelProvider) 
 			if p.Kind == "builtin" {
 				count = a.availableCount(p.ID)
 			}
-			modelsLabel := fmt.Sprintf("Show models for %s (%d)", p.Name, count)
+			// 屏幕上只写「模型 N」，无障碍标签保留完整的说明（读屏软件读出提供方的名字）。
+			label, chevron := a.tr("settings.showModels", "name", p.Name, "count", strconv.Itoa(count)), icons.ChevronRight
 			if a.isExpanded(p.ID) {
-				modelsLabel = fmt.Sprintf("Hide models for %s (%d)", p.Name, count)
+				label, chevron = a.tr("settings.hideModels", "name", p.Name, "count", strconv.Itoa(count)), icons.ChevronDown
 			}
-			if ui.Button(c, modelsLabel).Clicked() {
+			if ui.Button(c, "").Label(label).Children(func() {
+				ui.Text(c, a.tr("settings.modelsCount", "count", strconv.Itoa(count))).SingleLine()
+				ui.Icon(c, chevron)
+			}).Clicked() {
 				a.setExpanded(p.ID, !a.isExpanded(p.ID))
 			}
-			if ui.Button(c, "Set key for "+p.Name).Clicked() {
-				a.st.keyProvider = p.ID
-				a.st.keyInput, a.st.keyErr = "", ""
-				a.st.notice = ""
-			}
-			if p.HasStoredKey {
-				if ui.Button(c, "Clear key for "+p.Name).Clicked() {
-					a.st.confirmKind, a.st.confirmProvider, a.st.modalOpen = "clear-key", p.ID, true
-				}
-			}
-			if p.Kind == "custom" {
-				if ui.Button(c, "Edit "+p.Name).Clicked() {
-					a.startEditProvider(p)
-				}
+			if p.AuthSource != nil && *p.AuthSource != "" {
+				ui.Text(c, a.tr("settings.authSource", "source", *p.AuthSource)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().MinWidth(0)
 			}
 			ui.Spacer(c)
-			if ui.Button(c, "Remove "+p.Name).Clicked() {
-				a.st.confirmKind, a.st.confirmProvider, a.st.modalOpen = "remove", p.ID, true
-			}
+			// 次要操作收进「⋯」菜单：卡片上不再并排一串带提供方名字的长按钮。
+			ui.Button(c, "").Label(a.tr("settings.providerActions", "name", p.Name)).Tooltip(a.tr("settings.moreActions")).Children(func() {
+				ui.Icon(c, icons.More)
+			}).Menu(func(m *ui.Menu) {
+				if m.Item(a.tr("settings.setKey")).Chosen() {
+					a.st.keyProvider = p.ID
+					a.st.keyInput, a.st.keyErr = "", ""
+					a.st.notice = ""
+				}
+				if p.HasStoredKey && m.Item(a.tr("settings.clearKey")).Chosen() {
+					a.st.confirmKind, a.st.confirmProvider, a.st.modalOpen = "clear-key", p.ID, true
+				}
+				if p.Kind == "custom" && m.Item(a.tr("settings.editProvider")).Chosen() {
+					a.startEditProvider(p)
+				}
+				m.Separator()
+				if m.Item(a.tr("settings.removeProvider")).Chosen() {
+					a.st.confirmKind, a.st.confirmProvider, a.st.modalOpen = "remove", p.ID, true
+				}
+			})
 		})
-		if p.AuthSource != nil && *p.AuthSource != "" {
-			ui.Text(c, "Authentication: "+*p.AuthSource).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-		}
 		if a.isExpanded(p.ID) {
 			a.providerModels(c, t, p)
 		}
@@ -519,6 +526,7 @@ func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 						a.st.defChoice = choice
 					}
 					a.defThinkingForChoice()
+					a.saveDefaultModel() // 选中即保存，不再另点「保存」
 				}
 			}).Grow(1)
 			ui.Field(c, "Thinking level", func() {
@@ -542,14 +550,11 @@ func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 					} else {
 						a.st.defThinking = think
 					}
+					a.saveDefaultModel()
 				}
 			})
-			save := ui.PrimaryButton(c, "Save default model")
 			if a.st.defBusy {
-				save.Disabled(true)
-			}
-			if save.Clicked() {
-				a.saveDefaultModel()
+				ui.Spinner(c)
 			}
 		})
 		if m := a.selectedDefaultModel(); m != nil && len(m.ThinkingLevels) == 0 {
@@ -615,7 +620,11 @@ func (a *app) usageSection(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		total := usageTotals(a.st.usage)
-		ui.Row(c).Gap(24).Children(func() {
+		if total.TotalTokens == 0 && total.Input == 0 && total.Output == 0 {
+			ui.Text(c, a.tr("settings.noUsage")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			return
+		}
+		ui.Row(c).Gap(24).Wrap().Children(func() {
 			a.usageMetric(c, t, "Input tokens", formatCount(total.Input))
 			a.usageMetric(c, t, "Output tokens", formatCount(total.Output))
 			a.usageMetric(c, t, "Cache hits", formatCount(total.CacheRead))

@@ -53,7 +53,7 @@ func (a *app) loadFeishu() {
 				return
 			}
 			if err != nil {
-				f.err = sourceErrorText(err)
+				f.err = a.sourceErr(err)
 				return
 			}
 			f.err = ""
@@ -92,7 +92,7 @@ func (a *app) feishuCall(notice string, fn func(ctx context.Context, c *service.
 			f := &a.feishu
 			f.busy = false
 			if err != nil {
-				f.err = sourceErrorText(err)
+				f.err = a.sourceErr(err)
 				return
 			}
 			f.notice = notice
@@ -145,7 +145,7 @@ func (a *app) loadFeishuChats() {
 			f := &a.feishu
 			f.busy = false
 			if err != nil {
-				f.err = sourceErrorText(err)
+				f.err = a.sourceErr(err)
 				return
 			}
 			f.chats = chats

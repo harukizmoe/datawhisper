@@ -592,9 +592,7 @@ func TestSettingsKeyEditorWritesButNeverReads(t *testing.T) {
 	a, q, tt := openSettings(t, f, 1400, 2200)
 	expectTexts(t, tt, []string{"No API key"}, nil)
 
-	if err := tt.Click("Set key for Acme"); err != nil {
-		t.Fatal(err)
-	}
+	providerAction(t, tt, "Acme", "Set key")
 	tt.Frame()
 	const secret = "sk-live-secret"
 	if err := tt.Click("API key for Acme"); err != nil {
@@ -622,9 +620,7 @@ func TestSettingsKeyEditorWritesButNeverReads(t *testing.T) {
 		t.Error("the service view contains the key")
 	}
 
-	if err := tt.Click("Clear key for Acme"); err != nil {
-		t.Fatal(err)
-	}
+	providerAction(t, tt, "Acme", "Clear key")
 	tt.Frame()
 	if err := tt.Click("Confirm clear key"); err != nil {
 		t.Fatal(err)
@@ -633,7 +629,17 @@ func TestSettingsKeyEditorWritesButNeverReads(t *testing.T) {
 		p, ok := f.provider("custom-acme")
 		return ok && !p.HasStoredKey && !a.st.loading
 	})
-	expectTexts(t, tt, []string{"No API key"}, []string{"Clear key for Acme"})
+	expectTexts(t, tt, []string{"No API key"}, nil)
+	// 密钥清掉之后，「⋯」菜单里不再有「Clear key」。
+	if err := tt.Click("Actions for Acme"); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range tt.Menu() {
+		if item == "Clear key" {
+			t.Error("the menu still offers Clear key")
+		}
+	}
+	tt.CloseMenu()
 	if !f.hasCall("models.clearKey") {
 		t.Error("no models.clearKey call")
 	}
@@ -677,9 +683,6 @@ func TestSettingsDefaultModelAndThinkingLevel(t *testing.T) {
 	}
 	q.pump(t, tt, "the thinking level", func() bool { return a.st.defThinking == "high" })
 
-	if err := tt.Click("Save default model"); err != nil {
-		t.Fatal(err)
-	}
 	q.pump(t, tt, "the saved default", func() bool {
 		return a.st.view != nil && a.st.view.DefaultModel != nil && !a.st.defBusy
 	})
@@ -768,9 +771,18 @@ func TestSettingsShowsActionableErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the chosen model", func() bool { return a.st.defChoice == "custom-ollama2/m" })
-	if err := tt.Click("Save default model"); err != nil {
-		t.Fatal(err)
-	}
 	q.pump(t, tt, "the default error", func() bool { return !a.st.defBusy && a.st.defErr != "" })
 	expectTexts(t, tt, []string{"The service does not know this model"}, nil)
+}
+
+// providerAction 打开提供方卡片的「⋯」菜单并选一项。
+func providerAction(t *testing.T, tt *ui.Tester, provider, item string) {
+	t.Helper()
+	if err := tt.Click("Actions for " + provider); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(item); err != nil {
+		t.Fatalf("%v; menu %q", err, tt.Menu())
+	}
+	tt.Frame()
 }

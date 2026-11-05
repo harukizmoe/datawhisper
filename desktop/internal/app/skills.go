@@ -38,7 +38,7 @@ func (a *app) loadSkills() {
 			s := &a.skills
 			s.loading, s.loaded = false, true
 			if err != nil {
-				s.err = sourceErrorText(err)
+				s.err = a.sourceErr(err)
 				return
 			}
 			s.err, s.skills, s.diagnostics = "", skills, diags

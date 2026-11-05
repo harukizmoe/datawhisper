@@ -106,7 +106,7 @@ func (a *app) sourcesTab(c *ui.Context, t *ui.Theme) {
 		ui.MenuButton(c, a.tr("data.connect"), func(m *ui.Menu) {
 			for i := range remoteKinds {
 				i := i
-				if m.Item(remoteKinds[i].Label).Chosen() {
+				if m.Item(a.kindLabel(remoteKinds[i])).Chosen() {
 					a.startRemote(i)
 				}
 			}
@@ -123,7 +123,7 @@ func (a *app) sourcesTab(c *ui.Context, t *ui.Theme) {
 	if a.src.uploading {
 		ui.Column(c).Gap(4).Children(func() {
 			ui.Text(c, a.tr("data.copying", "name", a.src.uploadName)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-			ui.Progress(c, a.src.uploadProgress).Label("Import progress")
+			ui.Progress(c, a.src.uploadProgress).Label(a.tr("data.importProgress"))
 		})
 	}
 	if a.src.uploadErr != "" {
@@ -157,7 +157,7 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 		ui.Text(c, a.tr("data.tables", "count", strconv.Itoa(len(src.Tables)), "state", state)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			active := src.Active
-			ui.Switch(c, &active).Label("Use " + src.Name + " in analysis").Changed()
+			ui.Switch(c, &active).Label(a.tr("data.useInAnalysis", "name", src.Name)).Changed()
 			if active != src.Active {
 				a.setSourceActive(src, active)
 			}
@@ -206,12 +206,12 @@ func (a *app) previewPanel(c *ui.Context, t *ui.Theme) {
 		for _, table := range a.src.preview.Tables {
 			names = append(names, table.Name)
 		}
-		ui.Field(c, "Table", func() {
+		ui.Field(c, a.tr("data.fieldTable"), func() {
 			choice := a.src.previewTable
 			if choice == "" {
 				choice = names[0]
 			}
-			if ui.Select(c, &choice, names).Label("Preview table").Changed() && choice != a.src.previewTable {
+			if ui.Select(c, &choice, names).Label(a.tr("data.previewTable")).Changed() && choice != a.src.previewTable {
 				a.src.previewTable = choice
 				a.refreshPreview(a.src.previewID, choice, true)
 			}
@@ -273,7 +273,7 @@ func (a *app) previewTable(c *ui.Context, t *ui.Theme) {
 			cell = rows.Rows[row][col]
 		}
 		ui.Text(c, cell).SingleLine().FontSize(a.fs(textCaption))
-	}).Height(height).Label("Preview rows")
+	}).Height(height).Label(a.tr("data.previewRows"))
 }
 
 // remoteForm 是远程连接表单：类型用 Select，参数用 Field，密钥用 Password。
@@ -281,20 +281,20 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 	kind := remoteKinds[a.src.remoteKind]
 	ui.Column(c).Gap(8).Padding(10).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Accent.Alpha(0.5)).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Connect "+kind.Label).Bold().Grow(1).MinWidth(0)
-			if ui.Button(c, "Cancel").Tooltip("Close the connection form").Clicked() {
+			ui.Text(c, a.tr("data.connectKind", "kind", a.kindLabel(kind))).Bold().Grow(1).MinWidth(0)
+			if ui.Button(c, a.tr("data.cancel")).Tooltip(a.tr("data.closeFormTip")).Clicked() {
 				a.src.remoteOpen, a.src.remoteErr = false, ""
 			}
 		})
 		labels := make([]string, len(remoteKinds))
 		for i := range remoteKinds {
-			labels[i] = remoteKinds[i].Label
+			labels[i] = a.kindLabel(remoteKinds[i])
 		}
-		ui.Field(c, "Type", func() {
-			choice := kind.Label
-			if ui.Select(c, &choice, labels).Label("Source type").Changed() {
+		ui.Field(c, a.tr("data.fieldType"), func() {
+			choice := a.kindLabel(kind)
+			if ui.Select(c, &choice, labels).Label(a.tr("data.sourceType")).Changed() {
 				for i := range remoteKinds {
-					if remoteKinds[i].Label == choice {
+					if a.kindLabel(remoteKinds[i]) == choice {
 						a.startRemote(i)
 						return
 					}
@@ -302,20 +302,20 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 			}
 		})
 		if configs := configsForKind(a.src.configs, kind.ID); len(configs) > 0 {
-			ui.Field(c, "Saved", func() {
-				options := []string{"New connection"}
+			ui.Field(c, a.tr("data.fieldSaved"), func() {
+				options := []string{a.tr("data.newConnection")}
 				for _, cfg := range configs {
 					options = append(options, configLabel(cfg))
 				}
-				choice := "New connection"
+				choice := a.tr("data.newConnection")
 				for _, cfg := range configs {
 					if cfg.ID == a.src.remoteConfigID {
 						choice = configLabel(cfg)
 					}
 				}
-				if ui.Select(c, &choice, options).Label("Saved connection").Changed() {
+				if ui.Select(c, &choice, options).Label(a.tr("data.savedConnection")).Changed() {
 					a.src.remoteErr = ""
-					if choice == "New connection" {
+					if choice == a.tr("data.newConnection") {
 						a.startRemote(a.src.remoteKind)
 					} else {
 						for _, cfg := range configs {
@@ -328,46 +328,46 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		}
-		ui.Field(c, "Name", func() {
-			ui.TextInput(c, &a.src.remoteName).Label("Display name").Placeholder("Optional")
+		ui.Field(c, a.tr("data.fieldName"), func() {
+			ui.TextInput(c, &a.src.remoteName).Label(a.tr("data.displayName")).Placeholder(a.tr("data.optional"))
 		})
 		switch kind.ID {
 		case "sql":
-			ui.Field(c, "Connection", func() {
-				input := ui.TextInput(c, &a.src.remoteConn).Password().Label("Connection string")
+			ui.Field(c, a.tr("data.fieldConnection"), func() {
+				input := ui.TextInput(c, &a.src.remoteConn).Password().Label(a.tr("data.connString"))
 				if a.src.remoteConfigID != "" {
-					input.Placeholder("Saved: leave empty to keep it")
+					input.Placeholder(a.tr("data.savedKeep"))
 				} else {
 					input.Placeholder("postgresql://user:pw@host/db")
 				}
 			})
 		case "gsheets":
-			ui.Field(c, "Spreadsheet", func() {
-				ui.TextInput(c, &a.src.remoteSpread).Label("Spreadsheet URL or id").Placeholder("https://docs.google.com/spreadsheets/d/…")
+			ui.Field(c, a.tr("data.fieldSpreadsheet"), func() {
+				ui.TextInput(c, &a.src.remoteSpread).Label(a.tr("data.spreadsheetLabel")).Placeholder("https://docs.google.com/spreadsheets/d/…")
 			})
-			ui.Field(c, "Service account", func() {
-				input := ui.TextInput(c, &a.src.remoteCreds).Password().Label("Service account JSON")
+			ui.Field(c, a.tr("data.fieldServiceAccount"), func() {
+				input := ui.TextInput(c, &a.src.remoteCreds).Password().Label(a.tr("data.serviceAccountJSON"))
 				if a.src.remoteConfigID != "" {
-					input.Placeholder("Saved: leave empty to keep it")
+					input.Placeholder(a.tr("data.savedKeep"))
 				} else {
 					input.Placeholder(`{"type":"service_account",…}`)
 				}
 			})
 		case "feishu":
-			ui.Field(c, "Bitable", func() {
-				ui.TextInput(c, &a.src.remoteBitable).Label("Bitable link or app_token").Placeholder("https://…/base/appToken?table=tbl…")
+			ui.Field(c, a.tr("data.fieldBitable"), func() {
+				ui.TextInput(c, &a.src.remoteBitable).Label(a.tr("data.bitableLabel")).Placeholder("https://…/base/appToken?table=tbl…")
 			})
-			ui.Field(c, "Table", func() {
-				ui.TextInput(c, &a.src.remoteTable).Label("Table id").Placeholder("tbl…")
+			ui.Field(c, a.tr("data.fieldTable"), func() {
+				ui.TextInput(c, &a.src.remoteTable).Label(a.tr("data.tableId")).Placeholder("tbl…")
 			})
 		case "http":
-			ui.Field(c, "URL", func() {
-				ui.TextInput(c, &a.src.remoteURL).Label("API URL").Placeholder("https://api.example.com/rows")
+			ui.Field(c, a.tr("data.fieldURL"), func() {
+				ui.TextInput(c, &a.src.remoteURL).Label(a.tr("data.apiURL")).Placeholder("https://api.example.com/rows")
 			})
-			ui.Field(c, "Auth", func() {
-				authLabels := []string{"None", "Bearer token", "API key"}
+			ui.Field(c, a.tr("data.fieldAuth"), func() {
+				authLabels := []string{a.tr("data.authNone"), a.tr("data.authBearer"), a.tr("data.authKey")}
 				choice := authLabels[a.src.remoteAuth]
-				if ui.Select(c, &choice, authLabels).Label("Authentication").Changed() {
+				if ui.Select(c, &choice, authLabels).Label(a.tr("data.authentication")).Changed() {
 					for i := range authLabels {
 						if authLabels[i] == choice {
 							a.src.remoteAuth = i
@@ -377,20 +377,20 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 				}
 			})
 			if a.src.remoteAuth != 0 {
-				ui.Field(c, "Secret", func() {
-					input := ui.TextInput(c, &a.src.remoteAuthVal).Password().Label("Token or API key")
+				ui.Field(c, a.tr("data.fieldSecret"), func() {
+					input := ui.TextInput(c, &a.src.remoteAuthVal).Password().Label(a.tr("data.tokenLabel"))
 					if a.src.remoteConfigID != "" {
-						input.Placeholder("Saved: leave empty to keep it")
+						input.Placeholder(a.tr("data.savedKeep"))
 					}
 				})
 			}
 		}
-		ui.Text(c, "Credentials go to the service and never come back to this window.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("data.credsNote")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		if a.src.remoteErr != "" {
 			ui.Text(c, a.src.remoteErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			connect := ui.PrimaryButton(c, "Add source")
+			connect := ui.PrimaryButton(c, a.tr("data.addSource"))
 			if a.src.remoteBusy {
 				connect.Disabled(true)
 				ui.Spinner(c)
@@ -399,7 +399,7 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 				a.connectRemote()
 			}
 			if a.src.remoteConfigID != "" {
-				if ui.Button(c, "Forget").Tooltip("Remove the saved connection").Clicked() {
+				if ui.Button(c, a.tr("data.forget")).Tooltip(a.tr("data.forgetTip")).Clicked() {
 					for _, cfg := range a.src.configs {
 						if cfg.ID == a.src.remoteConfigID {
 							a.removeConfig(cfg)
@@ -435,22 +435,23 @@ func configLabel(cfg service.SourceConfig) string {
 // workspaceTab 是「工作区」页签：挂载表单、当前挂载与已知目录。
 func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(8).Children(func() {
-		ui.Text(c, "Workspace").Bold().FontSize(a.fs(textSection))
-		ui.Text(c, "The agent reads the files in this folder and writes exports to its artifacts folder.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-		ui.Field(c, "Folder", func() {
-			ui.TextInput(c, &a.src.mountPath).Label("Folder to mount").Placeholder("/home/me/data")
+		ui.Text(c, a.tr("data.workspaceTitle")).Bold().FontSize(a.fs(textSection))
+		ui.Text(c, a.tr("data.workspaceHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		ui.Field(c, a.tr("data.fieldFolder"), func() {
+			ui.TextInput(c, &a.src.mountPath).Label(a.tr("data.folderToMount")).Placeholder("/home/me/data")
 		})
-		ui.Field(c, "Name", func() {
-			ui.TextInput(c, &a.src.mountName).Label("Folder name").Placeholder("Optional")
+		ui.Field(c, a.tr("data.fieldName"), func() {
+			ui.TextInput(c, &a.src.mountName).Label(a.tr("data.folderName")).Placeholder(a.tr("data.optional"))
 		})
-		ui.Field(c, "Permission", func() {
-			perm := workspacePermissionLabels[a.src.mountPerm]
-			if ui.Select(c, &perm, workspacePermissionLabels).Label("Workspace permission").Changed() {
-				a.src.mountPerm = permissionIndex(permissionValueForLabel(perm))
+		ui.Field(c, a.tr("data.fieldPermission"), func() {
+			permLabels := a.permissionLabels()
+			perm := permLabels[a.src.mountPerm]
+			if ui.Select(c, &perm, permLabels).Label(a.tr("data.workspacePermission")).Changed() {
+				a.src.mountPerm = permissionIndex(a.permissionFromLabel(perm))
 			}
 		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			mount := ui.PrimaryButton(c, "Mount")
+			mount := ui.PrimaryButton(c, a.tr("data.mount"))
 			if a.src.mountBusy {
 				mount.Disabled(true)
 				ui.Spinner(c)
@@ -469,13 +470,14 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 			ui.Column(c).Gap(6).Padding(10).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Accent.Alpha(0.5)).Children(func() {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, current.Name).Bold().Grow(1).MinWidth(0).SingleLine()
-					ui.Badge(c, "mounted")
+					ui.Badge(c, a.tr("data.badgeMounted"))
 				})
 				ui.Text(c, current.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable()
-				ui.Field(c, "Permission", func() {
-					perm := workspacePermissionLabels[permissionIndex(current.Permission)]
-					if ui.Select(c, &perm, workspacePermissionLabels).Label("Permission of "+current.Name).Changed() && perm != workspacePermissionLabels[permissionIndex(current.Permission)] {
-						a.setWorkspacePermission(current.WorkspaceID, permissionValueForLabel(perm))
+				ui.Field(c, a.tr("data.fieldPermission"), func() {
+					permLabels := a.permissionLabels()
+					perm := permLabels[permissionIndex(current.Permission)]
+					if ui.Select(c, &perm, permLabels).Label(a.tr("data.permissionOf", "name", current.Name)).Changed() && perm != permLabels[permissionIndex(current.Permission)] {
+						a.setWorkspacePermission(current.WorkspaceID, a.permissionFromLabel(perm))
 					}
 				})
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -483,14 +485,14 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 						ui.Spinner(c)
 					}
 					ui.Spacer(c)
-					if ui.Button(c, "Unmount").Tooltip("Stop using this folder").Clicked() {
+					if ui.Button(c, a.tr("data.unmount")).Tooltip(a.tr("data.unmountTip")).Clicked() {
 						a.unmountWorkspace(current.WorkspaceID)
 					}
 				})
 			})
 		}
 		if len(a.src.workspaces) > 0 {
-			ui.Text(c, "Known folders").Bold().FontSize(a.fs(textSection))
+			ui.Text(c, a.tr("data.knownFolders")).Bold().FontSize(a.fs(textSection))
 		}
 		for _, ws := range a.src.workspaces {
 			ws := ws
@@ -507,10 +509,10 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spacer(c)
 					if ws.Mounted {
-						if ui.Button(c, "Unmount").Tooltip("Unmount " + label).Clicked() {
+						if ui.Button(c, a.tr("data.unmount")).Tooltip(a.tr("data.unmountNamedTip", "name", label)).Clicked() {
 							a.unmountWorkspace(ws.WorkspaceID)
 						}
-					} else if ui.Button(c, "Remove").Tooltip("Remove " + label + " from this chat").Clicked() {
+					} else if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeFolderTip", "name", label)).Clicked() {
 						a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmWorkspace, ws.WorkspaceID, label
 						a.src.confirmOpen = true
 					}
@@ -528,9 +530,9 @@ func permissionIndex(permission string) int {
 	return 0
 }
 
-// permissionValueForLabel 把 Select 的标签翻回服务端的权限值。
-func permissionValueForLabel(label string) string {
-	if label == workspacePermissionLabels[1] {
+// permissionFromLabel 把 Select 的标签翻回服务端的权限值。
+func (a *app) permissionFromLabel(label string) string {
+	if label == a.permissionLabels()[1] {
 		return "read_write"
 	}
 	return "read_only"
@@ -548,15 +550,15 @@ func permissionLabel(permission string) string {
 func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 	a.chatChartsList(c, t)
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "Artifacts").Bold().FontSize(a.fs(textSection))
+		ui.Text(c, a.tr("data.artifactsTitle")).Bold().FontSize(a.fs(textSection))
 		ui.Spacer(c)
-		if ui.Button(c, "Dashboards").Tooltip("View this machine's dashboards read-only").Clicked() {
+		if ui.Button(c, a.tr("dash.title")).Tooltip(a.tr("data.dashboardsTip")).Clicked() {
 			a.openDashboards()
 		}
-		if ui.Button(c, "Canvas").Tooltip("Open diagram files from this chat's artifacts").Clicked() {
+		if ui.Button(c, a.tr("dash.canvas")).Tooltip(a.tr("data.canvasTip")).Clicked() {
 			a.openCanvas()
 		}
-		if ui.Button(c, "Refresh").Tooltip("Reload the artifact list").Clicked() {
+		if ui.Button(c, a.tr("data.refresh")).Tooltip(a.tr("data.artifactsRefreshTip")).Clicked() {
 			a.loadSources()
 		}
 	})
@@ -564,7 +566,7 @@ func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 		ui.Text(c, a.src.artifactsErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 	}
 	if len(a.src.artifacts) == 0 {
-		ui.Text(c, "No artifacts yet: ask the agent to export a table or chart.").TextColor(t.TextMuted)
+		ui.Text(c, a.tr("data.noArtifacts")).TextColor(t.TextMuted)
 		return
 	}
 	for _, art := range a.src.artifacts {
@@ -578,19 +580,19 @@ func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 				ui.Spacer(c)
 				switch {
 				case htmlArtifact(art.Name):
-					if ui.Button(c, "Preview").Tooltip("Show " + art.Name + " here").Clicked() {
+					if ui.Button(c, a.tr("data.preview")).Tooltip(a.tr("data.showHereTip", "name", art.Name)).Clicked() {
 						a.showHTMLArtifact(art)
 					}
 				case diagramFile(art.Name):
-					if ui.Button(c, "Open").Tooltip("Open " + art.Name + " with the system's draw.io").Clicked() {
+					if ui.Button(c, a.tr("dash.open")).Tooltip(a.tr("dash.openDrawioTip", "name", art.Name)).Clicked() {
 						c.OpenURL(preview.FileURL(art.Path))
 					}
 				case textArtifact(art.Name):
-					if ui.Button(c, "Preview").Tooltip("Read " + art.Name + " here").Clicked() {
+					if ui.Button(c, a.tr("data.preview")).Tooltip(a.tr("data.readHereTip", "name", art.Name)).Clicked() {
 						a.previewArtifact(art)
 					}
 				default:
-					ui.Text(c, "Open the path to view it").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+					ui.Text(c, a.tr("data.openPathHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 				}
 			})
 			if a.src.artifactName == art.Name {
@@ -603,7 +605,7 @@ func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 					case !a.src.artifactLoaded:
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 							ui.Spinner(c)
-							ui.Text(c, "Reading…").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+							ui.Text(c, a.tr("data.reading")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 						})
 					default:
 						a.buffer(ui.Text(c, a.src.artifactText)).Selectable()
@@ -630,13 +632,13 @@ func (a *app) sourceModals(c *ui.Context, t *ui.Theme) {
 		ui.Modal(c, &a.src.confirmOpen, func() {
 			switch a.src.confirmKind {
 			case confirmSource:
-				ui.Text(c, "Remove this data source?").Bold()
+				ui.Text(c, a.tr("data.confirmSource")).Bold()
 				ui.Textf(c, "%s will be disconnected. Its uploaded copy is deleted; files in a mounted folder stay.", a.src.confirmName).TextColor(t.TextMuted)
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-					if ui.Button(c, "Cancel").Clicked() {
+					if ui.Button(c, a.tr("data.cancel")).Clicked() {
 						a.src.confirmOpen = false
 					}
-					if ui.PrimaryButton(c, "Remove source").Clicked() {
+					if ui.PrimaryButton(c, a.tr("data.removeSource")).Clicked() {
 						a.src.confirmOpen = false
 						for _, src := range a.src.sources {
 							if src.ID == a.src.confirmID {
@@ -647,25 +649,25 @@ func (a *app) sourceModals(c *ui.Context, t *ui.Theme) {
 					}
 				})
 			case confirmSourceAll:
-				ui.Text(c, "Remove all data sources?").Bold()
-				ui.Text(c, "Every source of this chat is disconnected, and mounted folders are unmounted. Files on disk stay.").TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.confirmAll")).Bold()
+				ui.Text(c, a.tr("data.confirmAllHint")).TextColor(t.TextMuted)
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-					if ui.Button(c, "Cancel").Clicked() {
+					if ui.Button(c, a.tr("data.cancel")).Clicked() {
 						a.src.confirmOpen = false
 					}
-					if ui.PrimaryButton(c, "Remove all").Clicked() {
+					if ui.PrimaryButton(c, a.tr("data.removeAll")).Clicked() {
 						a.src.confirmOpen = false
 						a.removeAllSources()
 					}
 				})
 			case confirmWorkspace:
-				ui.Text(c, "Remove this folder?").Bold()
+				ui.Text(c, a.tr("data.confirmFolder")).Bold()
 				ui.Textf(c, "%s is removed from this chat. The folder and its files are not deleted.", a.src.confirmName).TextColor(t.TextMuted)
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-					if ui.Button(c, "Cancel").Clicked() {
+					if ui.Button(c, a.tr("data.cancel")).Clicked() {
 						a.src.confirmOpen = false
 					}
-					if ui.PrimaryButton(c, "Remove folder").Clicked() {
+					if ui.PrimaryButton(c, a.tr("data.removeFolder")).Clicked() {
 						a.src.confirmOpen = false
 						a.removeWorkspace(a.src.confirmID)
 					}
@@ -695,23 +697,23 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	ui.Modal(c, &a.src.editOpen, func() {
-		ui.Text(c, "Source: "+src.Name).Bold()
-		ui.Textf(c, "%s · %d tables", src.Kind, len(src.Tables)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("data.sourceTitle", "name", src.Name)).Bold()
+		ui.Text(c, a.tr("data.kindTables", "kind", src.Kind, "count", strconv.Itoa(len(src.Tables)))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		if src.Open {
-			if ui.Button(c, "Close source").Tooltip("Close it in the compute worker").Clicked() {
+			if ui.Button(c, a.tr("data.closeSource")).Tooltip(a.tr("data.closeSourceTip")).Clicked() {
 				a.src.editOpen = false
 				a.closeSource(src)
 			}
 		} else {
-			if ui.Button(c, "Open source").Tooltip("Open it in the compute worker").Clicked() {
+			if ui.Button(c, a.tr("data.openSource")).Tooltip(a.tr("data.openSourceTip")).Clicked() {
 				a.src.editOpen = false
 				a.openSource(src)
 			}
 		}
 		if src.Kind != "sql" {
-			ui.Text(c, "Only a SQL source chooses which tables the agent may analyse.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.sqlOnlyHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if ui.Button(c, "Cancel").Clicked() {
+				if ui.Button(c, a.tr("data.cancel")).Clicked() {
 					a.src.editOpen = false
 				}
 			})
@@ -720,13 +722,13 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 		if a.src.editBusy {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Spinner(c)
-				ui.Text(c, "Reading the tables…").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.readingTables")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			})
 			return
 		}
-		ui.Text(c, "Tables the agent may analyse").Bold()
+		ui.Text(c, a.tr("data.analyseTables")).Bold()
 		if len(a.src.editTables) == 0 {
-			ui.Text(c, "This source reports no tables.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("data.sourceNoTables")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			return
 		}
 		ui.Scroll(c).Height(220).Children(func() {
@@ -743,10 +745,10 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, a.src.editErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "Cancel").Clicked() {
+			if ui.Button(c, a.tr("data.cancel")).Clicked() {
 				a.src.editOpen = false
 			}
-			if ui.PrimaryButton(c, "Save tables").Clicked() {
+			if ui.PrimaryButton(c, a.tr("data.saveTables")).Clicked() {
 				a.saveSourceTables()
 			}
 		})

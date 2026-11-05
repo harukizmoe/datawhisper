@@ -78,13 +78,13 @@ func (a *app) webPreview(c *ui.Context, pv *preview.Preview, height float32, wha
 func (a *app) previewFallback(c *ui.Context, what, reason, filePath string) {
 	t := c.Theme()
 	ui.Column(c).Gap(6).Padding(10).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Children(func() {
-		ui.Text(c, what+" preview is unavailable").FontSize(a.fs(textCaption)).Bold()
+		ui.Text(c, a.tr("dash.previewUnavailable", "what", what)).FontSize(a.fs(textCaption)).Bold()
 		ui.Text(c, reason).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		if filePath == "" {
 			return
 		}
 		ui.Text(c, filePath).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable().SingleLine().Tooltip(filePath)
-		if ui.Button(c, "Open in browser").FontSize(a.fs(textCaption)).Tooltip("Open this file with the system's browser").Clicked() {
+		if ui.Button(c, a.tr("chat.openInBrowser")).FontSize(a.fs(textCaption)).Tooltip(a.tr("chat.openFileTip")).Clicked() {
 			c.OpenURL(preview.FileURL(filePath))
 		}
 	})
@@ -97,7 +97,7 @@ func (a *app) chartCard(c *ui.Context, ch conversation.Chart) {
 	pv := a.rich.ChartPreview(previewChart(ch))
 	title := ch.Title
 	if title == "" {
-		title = "Chart"
+		title = a.tr("chat.chart")
 	}
 	tok := a.tokens().Tok
 	ui.Column(c).Gap(6).Padding(10).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Children(func() {
@@ -108,7 +108,7 @@ func (a *app) chartCard(c *ui.Context, ch conversation.Chart) {
 				ui.Badge(c, ch.Type)
 			}
 			if pv.Failure() != "" {
-				if ui.Button(c, "Reload").FontSize(a.fs(textCaption)).Tooltip("Load the chart again").Clicked() {
+				if ui.Button(c, a.tr("dash.reload")).FontSize(a.fs(textCaption)).Tooltip(a.tr("chat.reloadChartTip")).Clicked() {
 					a.rich.Forget(pv)
 				}
 			}
@@ -116,7 +116,7 @@ func (a *app) chartCard(c *ui.Context, ch conversation.Chart) {
 				a.openFullChart(ch)
 			}
 		})
-		a.webPreview(c, pv, chartHeight(a.chatChartWidth()), "Chart", ch.Path)
+		a.webPreview(c, pv, chartHeight(a.chatChartWidth()), a.tr("chat.chart"), ch.Path)
 	})
 }
 
@@ -126,17 +126,17 @@ func (a *app) artifactPreviewCard(c *ui.Context, art service.Artifact) {
 	pv := a.rich.ArtifactPreview(art.Path)
 	ui.Column(c).Gap(6).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Preview: "+art.Name).FontSize(a.fs(textCaption)).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(art.Name)
-			if ui.Button(c, "Open").FontSize(a.fs(textCaption)).Tooltip("Open " + art.Name + " in the system's browser").Clicked() {
+			ui.Text(c, a.tr("data.previewTitle", "name", art.Name)).FontSize(a.fs(textCaption)).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(art.Name)
+			if ui.Button(c, a.tr("dash.open")).FontSize(a.fs(textCaption)).Tooltip(a.tr("dash.openBrowserTip", "name", art.Name)).Clicked() {
 				c.OpenURL(preview.FileURL(art.Path))
 			}
 			if pv.Failure() != "" {
-				if ui.Button(c, "Reload").FontSize(a.fs(textCaption)).Tooltip("Load the preview again").Clicked() {
+				if ui.Button(c, a.tr("dash.reload")).FontSize(a.fs(textCaption)).Tooltip(a.tr("dash.reloadPreviewTip")).Clicked() {
 					a.rich.Forget(pv)
 				}
 			}
 		})
-		a.webPreview(c, pv, documentHeight(a.panelWidth()), "Artifact", art.Path)
+		a.webPreview(c, pv, documentHeight(a.panelWidth()), a.tr("data.artifact"), art.Path)
 	})
 }
 
@@ -239,7 +239,7 @@ func (a *app) openDashboard(id string) {
 func (a *app) loadDashboards() {
 	client := a.client
 	if client == nil {
-		a.dash.err = "The agent service is not ready."
+		a.dash.err = a.tr("dash.notReady")
 		return
 	}
 	a.dash.loading = true
@@ -254,7 +254,7 @@ func (a *app) loadDashboards() {
 			}
 			a.dash.loading = false
 			if err != nil {
-				a.dash.err = "Could not load the dashboards: " + err.Error()
+				a.dash.err = a.tr("dash.loadFailed", "error", err.Error())
 				return
 			}
 			a.dash.list, a.dash.err = list, ""
@@ -269,7 +269,7 @@ func (a *app) loadDashboards() {
 func (a *app) showDashboard(id string) {
 	client := a.client
 	if client == nil {
-		a.dash.exportErr = "The agent service is not ready."
+		a.dash.exportErr = a.tr("dash.notReady")
 		return
 	}
 	a.dash.choice = id
@@ -288,7 +288,7 @@ func (a *app) showDashboard(id string) {
 			}
 			a.dash.exporting = false
 			if err != nil {
-				a.dash.exportErr = sourceErrorText(err)
+				a.dash.exportErr = a.sourceErr(err)
 				return
 			}
 			a.dash.html, a.dash.htmlFor = html, id
@@ -306,7 +306,7 @@ func (a *app) dashboardPreview(c *ui.Context, id string) {
 	if d.exporting || d.htmlFor != id {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "Exporting the dashboard…").FontSize(a.fs(textCaption)).TextColor(c.Theme().TextMuted)
+			ui.Text(c, a.tr("dash.exporting")).FontSize(a.fs(textCaption)).TextColor(c.Theme().TextMuted)
 		})
 		return
 	}
@@ -317,7 +317,7 @@ func (a *app) dashboardPreview(c *ui.Context, id string) {
 		token, rawURL := m.AddDoc("d", preview.DashboardDocument(d.html))
 		return token, rawURL, nil
 	})
-	a.webPreview(c, pv, documentHeight(720), "Dashboard", "")
+	a.webPreview(c, pv, documentHeight(720), a.tr("dash.dashboard"), "")
 }
 
 // dashboardsModal 是仪表盘查看器：列表、导出与只读预览。
@@ -329,15 +329,15 @@ func (a *app) dashboardsModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &d.open, func() {
 		ui.Column(c).Width(764).Gap(10).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Dashboards").Bold().FontSize(a.fs(textSection))
+				ui.Text(c, a.tr("dash.title")).Bold().FontSize(a.fs(textSection))
 				ui.Spacer(c)
 				if d.loading || d.exporting {
 					ui.Spinner(c)
 				}
-				if ui.Button(c, "Refresh").Tooltip("Reload the dashboard list").Clicked() {
+				if ui.Button(c, a.tr("data.refresh")).Tooltip(a.tr("dash.refreshTip")).Clicked() {
 					a.loadDashboards()
 				}
-				if ui.Button(c, "Close").Clicked() {
+				if ui.Button(c, a.tr("chat.close")).Clicked() {
 					d.open = false
 				}
 			})
@@ -346,14 +346,14 @@ func (a *app) dashboardsModal(c *ui.Context, t *ui.Theme) {
 			}
 			if len(d.list) == 0 {
 				if !d.loading {
-					ui.Text(c, "No dashboards yet: ask the agent to build one.").TextColor(t.TextMuted)
+					ui.Text(c, a.tr("dash.none")).TextColor(t.TextMuted)
 				}
 				return
 			}
-			ui.Field(c, "Dashboard", func() {
+			ui.Field(c, a.tr("dash.dashboard"), func() {
 				labels := dashboardLabels(d.list)
 				choice := dashboardLabelOf(d.list, labels, d.choice)
-				if ui.Select(c, &choice, labels).Label("Dashboard to view").Changed() {
+				if ui.Select(c, &choice, labels).Label(a.tr("dash.pick")).Changed() {
 					for i := range d.list {
 						if labels[i] == choice {
 							a.showDashboard(d.list[i].ID)
@@ -422,13 +422,13 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &a.canvasOpen, func() {
 		ui.Column(c).Width(640).Gap(10).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Canvas").Bold().FontSize(a.fs(textSection))
+				ui.Text(c, a.tr("dash.canvas")).Bold().FontSize(a.fs(textSection))
 				ui.Spacer(c)
-				if ui.Button(c, "Close").Clicked() {
+				if ui.Button(c, a.tr("chat.close")).Clicked() {
 					a.canvasOpen = false
 				}
 			})
-			ui.Text(c, "The web build drew canvases with its own draw.io editor and stored them outside the agent service. This build lists the diagram files exported to this chat's artifacts and opens them with the app your system uses for draw.io.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("dash.canvasHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			var files []service.Artifact
 			for _, art := range a.src.artifacts {
 				if diagramFile(art.Name) {
@@ -436,13 +436,13 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 				}
 			}
 			if len(files) == 0 {
-				ui.Text(c, "No .drawio or .canvas file in this chat's artifacts.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("dash.canvasNone")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 				return
 			}
 			for _, art := range files {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, art.Name).Grow(1).MinWidth(0).SingleLine().Tooltip(art.Path)
-					if ui.Button(c, "Open").FontSize(a.fs(textCaption)).Tooltip("Open " + art.Name + " with the system's draw.io").Clicked() {
+					if ui.Button(c, a.tr("dash.open")).FontSize(a.fs(textCaption)).Tooltip(a.tr("dash.openDrawioTip", "name", art.Name)).Clicked() {
 						c.OpenURL(preview.FileURL(art.Path))
 					}
 				})
@@ -495,7 +495,7 @@ func (a *app) fullChartModal(c *ui.Context, t *ui.Theme) {
 					a.cv.fullOpen = false
 				}
 			})
-			a.webPreview(c, a.rich.FullChartPreview(previewChart(ch)), height, "Chart", ch.Path)
+			a.webPreview(c, a.rich.FullChartPreview(previewChart(ch)), height, a.tr("chat.chart"), ch.Path)
 		})
 	})
 }
@@ -549,7 +549,7 @@ func (a *app) dashboardCall(fn func(ctx context.Context, c *service.Client) erro
 		err := fn(ctx, client)
 		a.post(func() {
 			if err != nil {
-				a.dash.err = sourceErrorText(err)
+				a.dash.err = a.sourceErr(err)
 				return
 			}
 			a.loadDashboards()

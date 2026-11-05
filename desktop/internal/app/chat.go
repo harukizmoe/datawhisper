@@ -143,7 +143,7 @@ func (a *app) sessionTitle(id int) string {
 			}
 		}
 	}
-	return "New chat"
+	return a.tr("menu.newChat")
 }
 
 // oneLine 把一段文本压成单行并限长：列表行与标题栏都只显示一行，换行会把布局撑成两行。
@@ -181,11 +181,11 @@ func (a *app) openRename() {
 func (a *app) renameSession() {
 	title := strings.TrimSpace(a.cv.renameText)
 	if title == "" {
-		a.cv.renameErr = "The title cannot be empty."
+		a.cv.renameErr = a.tr("chat.titleEmpty")
 		return
 	}
 	if a.client == nil || a.conv == 0 {
-		a.cv.renameErr = "The chat is not connected."
+		a.cv.renameErr = a.tr("chat.notConnected")
 		return
 	}
 	client, conv := a.client, a.conv
@@ -200,7 +200,7 @@ func (a *app) renameSession() {
 			}
 			a.cv.renameBusy = false
 			if err != nil {
-				a.cv.renameErr = "Could not rename the chat: " + err.Error()
+				a.cv.renameErr = a.tr("chat.renameFailed", "error", err.Error())
 				return
 			}
 			for i := range a.sessions {
@@ -234,12 +234,12 @@ func (a *app) answerAsk(callID string, ask *conversation.AskRequest, st *askUI) 
 		}
 	}
 	if text == "" {
-		st.err = "Choose an option or type an answer."
+		st.err = a.tr("chat.askChoose")
 		return
 	}
 	client, conv := a.client, a.conv
 	if client == nil || conv == 0 {
-		st.err = "The chat is not connected."
+		st.err = a.tr("chat.notConnected")
 		return
 	}
 	st.busy, st.err = true, ""
@@ -254,7 +254,7 @@ func (a *app) answerAsk(callID string, ask *conversation.AskRequest, st *askUI) 
 		a.post(func() {
 			st.busy = false
 			if err != nil {
-				st.err = "Could not send the answer: " + err.Error()
+				st.err = a.tr("chat.askFailed", "error", err.Error())
 				return
 			}
 			st.sent = text
@@ -366,7 +366,7 @@ func (a *app) refreshModels() {
 				return
 			}
 			if err != nil {
-				a.cv.modelsErr = "Could not load the models: " + err.Error()
+				a.cv.modelsErr = a.tr("chat.modelsFailed", "error", err.Error())
 				return
 			}
 			a.cv.models, a.cv.modelsErr = models, ""
@@ -493,7 +493,7 @@ func (a *app) chooseModel(label string) {
 		}
 	}
 	if !found {
-		a.cv.modelsErr = "That model is not available: " + label
+		a.cv.modelsErr = a.tr("chat.modelUnavailable", "label", label)
 		a.cv.modelsTouched = false
 		return
 	}
@@ -527,7 +527,7 @@ func (a *app) chooseThinking(label string) {
 // setModel 把模型与思考强度写到会话；下一次模型请求开始生效。
 func (a *app) setModel(ref service.ModelRef, level string) {
 	if a.client == nil || a.conv == 0 {
-		a.cv.modelsErr = "Open a chat before choosing a model."
+		a.cv.modelsErr = a.tr("chat.modelNeedChat")
 		a.cv.modelsTouched = false
 		return
 	}
@@ -547,7 +547,7 @@ func (a *app) setModel(ref service.ModelRef, level string) {
 			}
 			a.cv.modelsTouched = false
 			if err != nil {
-				a.cv.modelsErr = "Could not switch the model: " + err.Error()
+				a.cv.modelsErr = a.tr("chat.modelSwitchFailed", "error", err.Error())
 				return
 			}
 			a.chat.Model = resp.Model
