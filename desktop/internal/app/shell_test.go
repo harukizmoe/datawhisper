@@ -206,14 +206,19 @@ func TestLanguageSwitchUpdatesPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	expectTexts(t, tt, []string{"外观", "跟随系统", "浅色", "深色", "语言", "数据目录", "服务日志", "未设置"}, nil)
+	expectTexts(t, tt, []string{"外观", "跟随系统", "语言", "数据目录", "服务日志", "未设置"}, nil)
+	if err := tt.Click("外观"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"模式", "跟随系统", "浅色", "深色", "配色", "亮色配色", "强调色", "界面风格", "界面字体", "预览"}, nil)
 
 	// 再切回英文，同一个页面的文案跟着回来。
 	a.setLanguage(i18n.EN)
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"Appearance", "System", "Light", "Dark", "Language", "Data folder", "Service log", "Not set"},
-		[]string{"外观", "数据目录"})
+	expectTexts(t, tt, []string{"Appearance", "Mode", "System", "Light", "Dark", "Color scheme", "Interface font", "Preview"},
+		[]string{"外观", "模式"})
 }
 
 // pixelAt 返回最后一帧在 (x, y) 的颜色，忽略透明度。
@@ -463,7 +468,7 @@ func TestSettingsControlsChangeThemeAndLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.Click("General"); err != nil {
+	if err := tt.Click("Appearance"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -483,6 +488,10 @@ func TestSettingsControlsChangeThemeAndLanguage(t *testing.T) {
 		t.Errorf("the sidebar is %v after clicking Dark, want %v", got, want)
 	}
 
+	if err := tt.Click("General"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
 	if err := tt.Click("简体中文"); err != nil {
 		t.Fatal(err)
 	}

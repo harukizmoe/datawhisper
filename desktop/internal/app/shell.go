@@ -11,6 +11,7 @@ import (
 	"image/draw"
 	"image/png"
 	"log"
+	"strings"
 
 	"datawhisper/desktop/internal/i18n"
 	"datawhisper/desktop/internal/prefs"
@@ -390,6 +391,9 @@ func (a *app) about() {
 		return
 	}
 	body := a.tr("menu.aboutBody", "name", "DataWhisper", "version", a.appVersion(), "url", repoURL)
+	// 第三方声明：内置配色的出处与许可证；图标是 Lucide（ISC）。
+	credits := append([]string{"Lucide icons: ISC, https://lucide.dev"}, a.schemes().Credits()...)
+	body += "\n\n" + a.tr("menu.aboutCredits") + "\n" + strings.Join(credits, "\n")
 	a.hooks.message("DataWhisper", body)
 }
 

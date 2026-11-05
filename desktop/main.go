@@ -43,7 +43,7 @@ func main() {
 	flag.IntVar(&opts.Open, "open", 0, "show this conversation on startup (0: a new chat)")
 	flag.IntVar(&opts.Width, "width", 1180, "window width in DIPs")
 	flag.IntVar(&opts.Height, "height", 760, "window height in DIPs")
-	flag.StringVar(&opts.Page, "page", "", "start on the Settings page: settings, or settings-general for the appearance and language tab")
+	flag.StringVar(&opts.Page, "page", "", "start on the Settings page: settings, settings-general (language and files) or settings-appearance")
 	flag.StringVar(&opts.Theme, "theme", "", "the appearance for this run only: system, light or dark (ui.json still decides on the next run)")
 	flag.StringVar(&opts.Lang, "lang", "", "the interface language for this run only: system, en or zh-Hans (ui.json still decides on the next run)")
 	flag.Parse()

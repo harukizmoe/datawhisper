@@ -1,0 +1,32 @@
+{
+  "id": "alucard",
+  "name": "Alucard",
+  "family": "dracula",
+  "appearance": "light",
+  "license": "MIT",
+  "source": "https://draculatheme.com/spec",
+  "palette": {
+    "background": "#fffbeb", "floating": "#efeddc", "background-lighter": "#ece9df", "background-light": "#dedccf",
+    "background-dark": "#ceccc0", "background-darker": "#bcbab3", "selection": "#cfcfde", "foreground": "#1f1f1f",
+    "comment": "#6c664b", "red": "#cb3a2a", "orange": "#a34d14", "yellow": "#846e15",
+    "green": "#14710a", "cyan": "#036a96", "purple": "#644ac9", "pink": "#a3144d",
+    "functional-red": "#de5735", "functional-orange": "#a39514", "functional-green": "#089108", "functional-cyan": "#0081d6",
+    "functional-purple": "#815cd6"
+  },
+  "accents": ["red", "orange", "yellow", "green", "cyan", "purple", "pink"],
+  "roles": {
+    "background": "background", "sidebar": "background-lighter", "inspector": "background-lighter", "surface": "floating",
+    "surfaceHover": "background-light", "surfacePressed": "background-dark", "border": "background-dark", "text": "foreground",
+    "textMuted": "comment", "accent": "purple", "link": "functional-cyan", "focus": "functional-purple/0.6",
+    "selection": "selection", "success": "functional-green", "warning": "functional-orange", "danger": "functional-red",
+    "userBubble": "background-lighter", "codeBackground": "background-lighter", "card": "background-lighter", "cardBorder": "background-dark",
+    "canvas": "background-light"
+  },
+  "syntax": {
+    "keyword": "pink", "string": "yellow", "number": "orange", "comment": "comment",
+    "function": "green", "type": "cyan", "constant": "purple", "operator": "pink",
+    "property": "foreground", "tag": "pink", "attribute": "green", "punctuation": "foreground",
+    "regexp": "red", "escape": "pink"
+  },
+  "chart": ["purple", "orange", "green", "pink", "cyan", "yellow", "red"]
+}

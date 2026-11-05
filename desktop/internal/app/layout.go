@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"datawhisper/desktop/internal/icons"
+	"datawhisper/desktop/internal/prefs"
 	"datawhisper/desktop/internal/supervisor"
 	"github.com/egoist/mygo/ui"
 )
@@ -14,15 +15,29 @@ import (
 func (a *app) view(c *ui.Context) {
 	// 外观在构建任何东西之前定下来：显式选了浅色或深色时，整帧都用选的那一种。
 	a.useTheme(c)
-	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+	t := c.Theme()
+	root := ui.Row(c).Fill().AlignItems(ui.Stretch)
+	if a.islands() {
+		root = root.Background(a.tokens().Tok.Canvas).Padding(islandGap).Gap(islandGap)
+	}
+	root.Children(func() {
 		a.sidebar(c)
-		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+		main := ui.Column(c).Grow(1).MinWidth(0)
+		if a.islands() && !(a.nav != navSettings && a.src.open) {
+			main = a.island(main.Background(t.Background))
+		}
+		main.Children(func() {
 			switch {
 			case a.nav == navSettings:
 				a.settings(c)
 			case a.src.open:
+				// Islands 下对话与数据面板各是一座岛，分栏的拖动条落在两座岛之间的间隙里。
 				ui.SplitPercent(c, &a.src.split, func() {
-					ui.Column(c).Grow(1).MinWidth(0).Children(func() { a.chatPage(c) })
+					chat := ui.Column(c).Grow(1).MinWidth(0)
+					if a.islands() {
+						chat = a.island(chat.Background(t.Background)).Margin(0, islandGap/2, 0, 0)
+					}
+					chat.Children(func() { a.chatPage(c) })
 				}, func() {
 					a.sourcesPanel(c)
 				}).Fill()
@@ -41,7 +56,13 @@ func (a *app) view(c *ui.Context) {
 func (a *app) sidebar(c *ui.Context) {
 	t := c.Theme()
 	tok := a.tokens().Tok
-	ui.Column(c).Width(248).Shrink(0).Padding(14, 10).Gap(10).Background(tok.Sidebar).BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+	side := ui.Column(c).Width(248).Shrink(0).Padding(14, 10).Gap(10).Background(tok.Sidebar)
+	if a.islands() {
+		side = a.island(side)
+	} else {
+		side = side.BorderWidth(0, 1, 0, 0).BorderColor(t.Border)
+	}
+	side.Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(2, 8).Children(func() {
 			ui.Icon(c, icons.Sparkles).TextColor(t.Accent)
 			ui.Text(c, "DataWhisper").Bold().FontSize(a.fs(textSection)).SingleLine()
@@ -145,4 +166,15 @@ func (a *app) banner(c *ui.Context) {
 			a.retry()
 		}
 	})
+}
+
+// islandGap 是 Islands 风格下岛与岛、岛与窗口边缘之间的间隙。
+const islandGap = 8
+
+// islands 报告当前是不是 Islands 界面风格。
+func (a *app) islands() bool { return a.appearance().Layout == prefs.LayoutIslands }
+
+// island 把一个区域画成圆角的岛；内容按圆角裁切，滚动条与分隔线不会画出圆角之外。
+func (a *app) island(e ui.Element) ui.Element {
+	return e.Radius(radiusCard).Clip()
 }

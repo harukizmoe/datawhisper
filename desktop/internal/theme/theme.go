@@ -57,6 +57,7 @@ var knownRoles = map[string]bool{
 	"success": true, "warning": true, "danger": true,
 	"inverse": true, "inverseText": true, "scrollbar": true,
 	"userBubble": true, "codeBackground": true, "card": true, "cardBorder": true,
+	"canvas": true,
 }
 
 // syntaxTokens 把配色文件里 syntax 的键映射到代码高亮的 token 种类。
@@ -161,6 +162,9 @@ func (s *Scheme) color(ref string) (ui.Color, bool) {
 	}
 	return c, true
 }
+
+// Color 解析一个颜色引用（调色板名称或 #hex，可带「/透明度」）；外观页用它画强调色色块。
+func (s *Scheme) Color(ref string) (ui.Color, bool) { return s.color(ref) }
 
 // role 返回一个角色的颜色；配色没给时返回 false，由调用方推导。
 func (s *Scheme) role(name string) (ui.Color, bool) {
@@ -293,6 +297,72 @@ func (cat Catalog) Pick(id string, dark bool) *Scheme {
 	return nil
 }
 
+// List 返回某种外观（亮或暗）可选的全部配色：DataWhisper 自带的在前，其余按名字排序。
+func (cat Catalog) List(dark bool) []*Scheme {
+	want := "light"
+	if dark {
+		want = "dark"
+	}
+	var out []*Scheme
+	for _, s := range cat.schemes {
+		if s.Appearance == want {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		di, dj := out[i].Family == "datawhisper", out[j].Family == "datawhisper"
+		if di != dj {
+			return di
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
+}
+
+// Credits 返回内置配色的出处与许可证（关于对话框的第三方声明），每个家族一行，按名字排序。
+func (cat Catalog) Credits() []string {
+	names := map[string][]string{}
+	lines := map[string]string{}
+	for _, s := range cat.schemes {
+		if !s.builtin || s.License == "" {
+			continue
+		}
+		family := s.Family
+		if family == "" {
+			family = s.ID
+		}
+		names[family] = append(names[family], s.Name)
+		lines[family] = s.License + ", " + s.Source
+	}
+	out := make([]string, 0, len(lines))
+	for family, line := range lines {
+		out = append(out, familyLabel(family, names[family])+": "+line)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// familyLabel 是配色家族的显示名：各变体名字按词的公共前缀（"Catppuccin Latte"、"Catppuccin Mocha" →
+// "Catppuccin"）；没有公共前缀时（Dracula 与 Alucard）用家族 id。
+func familyLabel(family string, names []string) string {
+	if len(names) == 0 {
+		return family
+	}
+	prefix := strings.Fields(names[0])
+	for _, name := range names[1:] {
+		words := strings.Fields(name)
+		n := 0
+		for n < len(prefix) && n < len(words) && prefix[n] == words[n] {
+			n++
+		}
+		prefix = prefix[:n]
+	}
+	if len(prefix) == 0 {
+		return family
+	}
+	return strings.Join(prefix, " ")
+}
+
 // UserDir 是数据目录里放用户配色的地方。
 func UserDir(dataDir string) string {
 	if dataDir == "" {
@@ -359,6 +429,8 @@ func ResolveFonts(ap prefs.Appearance, installed []ui.FontFamily) Fonts {
 
 // Tokens 是 ui.Theme 之外、本应用自己用的颜色。
 type Tokens struct {
+	// Canvas 是 Islands 界面风格下各区域背后的窗口底色。
+	Canvas             ui.Color
 	Sidebar, Inspector ui.Color
 	UserBubble         ui.Color
 	CodeBackground     ui.Color
@@ -475,6 +547,21 @@ func Resolve(scheme *Scheme, dark bool, accent string, fonts Fonts) *Resolved {
 	tok.Inspector = get("inspector", tok.Sidebar)
 	tok.Card = get("card", tok.CodeBackground)
 	tok.CardBorder = get("cardBorder", t.Border)
+	// 窗口底色比内容区深一档（暗色往黑里压，亮色往文字色里混一点），岛才浮得起来。
+	canvas := t.Background.Mix(t.Text, 0.07)
+	if t.Dark {
+		canvas = t.Background.Mix(ui.RGB(0, 0, 0), 0.35)
+	}
+	tok.Canvas = get("canvas", canvas)
+	// 有的配色没有比侧栏更深的中性色（Nord、Solarized Dark），canvas 与侧栏或内容区同色时岛会融进底色：
+	// 再压深一档，配色本身不动。
+	if tok.Canvas == tok.Sidebar || tok.Canvas == t.Background {
+		if t.Dark {
+			tok.Canvas = tok.Sidebar.Mix(ui.RGB(0, 0, 0), 0.3)
+		} else {
+			tok.Canvas = tok.Sidebar.Mix(t.Text, 0.08)
+		}
+	}
 	if accent != "" {
 		tok.Link = t.Accent
 	}
@@ -523,6 +610,25 @@ func Resolve(scheme *Scheme, dark bool, accent string, fonts Fonts) *Resolved {
 		chart.Colorway = append(chart.Colorway, cssColor(c))
 	}
 	return &Resolved{UI: &t, MD: md, Tok: tok, Chart: chart, Fonts: fonts, Scheme: scheme}
+}
+
+// Metrics 把密度与圆角的选项换成 ui.Theme 的 Spacing 与 Radius（MyGo 的默认值是 4 与 6）。
+// 陌生取值按标准处理。
+func Metrics(density, radius string) (spacing, corner float32) {
+	spacing, corner = 4, 6
+	switch density {
+	case prefs.DensityCompact:
+		spacing = 3
+	case prefs.DensityComfortable:
+		spacing = 5
+	}
+	switch radius {
+	case prefs.RadiusSquare:
+		corner = 2
+	case prefs.RadiusRound:
+		corner = 10
+	}
+	return spacing, corner
 }
 
 // syntaxTheme 用配色的 syntax 表给代码高亮上色；配色没给时用 MyGo 按窗口主题挑的默认高亮。

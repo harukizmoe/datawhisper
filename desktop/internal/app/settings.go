@@ -9,14 +9,18 @@ import (
 	"time"
 
 	"datawhisper/desktop/internal/service"
+	"github.com/egoist/mygo/ui"
 )
 
 // settingsState 是设置页的数据与编辑状态。只有 UI 线程会改它：构建视图时，以及在 post 上排队的函数里。
 type settingsState struct {
-	gen     int // 丢弃旧加载的结果
-	loading bool
-	loaded  bool
-	err     string
+	// accentOpen 与 accentPick 是外观页「自定义强调色」取色器的弹层与正在挑的颜色。
+	accentOpen bool
+	accentPick ui.Color
+	gen        int // 丢弃旧加载的结果
+	loading    bool
+	loaded     bool
+	err        string
 
 	view         *service.ModelsView
 	available    []service.AvailableModel
@@ -161,8 +165,11 @@ func (a *app) syncDefaultForm(view *service.ModelsView) {
 	}
 }
 
-// settingsTabGeneral 是设置页「通用」分区的索引。
-const settingsTabGeneral = 1
+// settingsTabGeneral 与 settingsTabAppearance 是设置页「通用」与「外观」分区的索引（0 是模型）。
+const (
+	settingsTabGeneral    = 1
+	settingsTabAppearance = 2
+)
 
 // settingsModelRow 是 provider 模型表与可用模型表共用的行。
 type settingsModelRow struct {

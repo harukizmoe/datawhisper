@@ -4,6 +4,7 @@ package app
 
 import (
 	"log"
+	"os"
 
 	"datawhisper/desktop/internal/prefs"
 	"datawhisper/desktop/internal/theme"
@@ -20,6 +21,8 @@ type themeCache struct {
 	lastDark   bool
 	everDrawn  bool
 	fontFamily func() []ui.FontFamily // 测试换成固定列表；nil 时用 ui.FontFamilies
+	families   []ui.FontFamily        // 已安装字体的缓存：第一次读取较慢，外观页与字体解析共用
+	listed     bool
 }
 
 // invalidateTheme 丢掉缓存，下一帧按新的偏好重新解析。
@@ -48,11 +51,7 @@ func (a *app) schemes() theme.Catalog {
 // resolvedFonts 对照已安装的字体解析字体偏好。字体列表首次读取较慢（字体多时数十毫秒），只在偏好变化后读一次。
 func (a *app) resolvedFonts() theme.Fonts {
 	if a.theme.fonts == nil {
-		list := a.theme.fontFamily
-		if list == nil {
-			list = ui.FontFamilies
-		}
-		fc := theme.ResolveFonts(a.appearance(), list())
+		fc := theme.ResolveFonts(a.appearance(), a.fontFamilies())
 		if fc.UIMissing != "" || fc.BufferMissing != "" {
 			log.Printf("theme: font not installed, using the system font (ui %q, buffer %q)", fc.UIMissing, fc.BufferMissing)
 		}
@@ -78,7 +77,9 @@ func (a *app) themeFor(dark bool) *theme.Resolved {
 		slot, id = &a.theme.dark, ap.DarkScheme
 	}
 	if *slot == nil {
-		*slot = theme.Resolve(a.schemes().Pick(id, dark), dark, ap.Accent, a.resolvedFonts())
+		rt := theme.Resolve(a.schemes().Pick(id, dark), dark, ap.Accent, a.resolvedFonts())
+		rt.UI.Spacing, rt.UI.Radius = theme.Metrics(ap.Density, ap.Radius)
+		*slot = rt
 	}
 	return *slot
 }
@@ -123,4 +124,44 @@ func (a *app) effectiveDark() bool {
 		return a.hooks.isDark()
 	}
 	return a.theme.lastDark
+}
+
+// fontFamilies 返回已安装的字体（缓存）。字体在应用运行中安装的话，重启后才出现，与 ui.FontFamilies 一致。
+func (a *app) fontFamilies() []ui.FontFamily {
+	if !a.theme.listed {
+		list := a.theme.fontFamily
+		if list == nil {
+			list = ui.FontFamilies
+		}
+		a.theme.families, a.theme.listed = list(), true
+	}
+	return a.theme.families
+}
+
+// setAppearance 改一项外观偏好并立即生效：校验、保存（-theme/-lang 锁定的运行不写文件）、丢掉主题缓存后重画；
+// 主题变了的话，下一帧的 useTheme 会顺带把新配色推给已打开的图表页面。
+func (a *app) setAppearance(change func(ap *prefs.Appearance)) {
+	ap := a.appearance()
+	change(&ap)
+	ap = prefs.NormalizeAppearance(ap)
+	if ap == a.appearance() {
+		return
+	}
+	a.prefs.Appearance = ap
+	a.savePrefs()
+	a.invalidateTheme()
+	a.redraw()
+}
+
+// openThemesDir 打开用户配色目录，没有时先建好，用户才有地方放 .json 文件。
+func (a *app) openThemesDir() {
+	dir := theme.UserDir(a.dataDir)
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("theme: %v", err)
+		return
+	}
+	a.openPath(dir)
 }

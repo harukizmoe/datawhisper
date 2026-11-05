@@ -69,6 +69,49 @@ type Appearance struct {
 	// BodyFont 决定回答正文跟哪种字体：BodyFontBuffer（默认）或 BodyFontUI。
 	BodyFont       string  `json:"bodyFont"`
 	BodyLineHeight float32 `json:"bodyLineHeight"`
+	// Layout 是界面风格：LayoutCompact（各区域直接相接，用分隔线隔开）或 LayoutIslands（各区域是浮在
+	// 窗口底色上的圆角岛）。
+	Layout string `json:"layout"`
+	// Density 决定控件内外的留白（ui.Theme.Spacing），Radius 决定控件的圆角，ChatWidth 决定对话列的最大宽度。
+	Density   string `json:"density"`
+	Radius    string `json:"radius"`
+	ChatWidth string `json:"chatWidth"`
+}
+
+// 界面风格、密度、圆角与对话宽度的取值。
+const (
+	LayoutCompact = "compact"
+	LayoutIslands = "islands"
+
+	DensityCompact     = "compact"
+	DensityStandard    = "standard"
+	DensityComfortable = "comfortable"
+
+	RadiusSquare   = "square"
+	RadiusStandard = "standard"
+	RadiusRound    = "round"
+
+	ChatWidthNarrow   = "narrow"
+	ChatWidthStandard = "standard"
+	ChatWidthWide     = "wide"
+	ChatWidthFull     = "full"
+)
+
+// Layouts、Densities、Radii 与 ChatWidths 是各项的全部取值，设置页按这个顺序列出。
+var (
+	Layouts    = []string{LayoutCompact, LayoutIslands}
+	Densities  = []string{DensityCompact, DensityStandard, DensityComfortable}
+	Radii      = []string{RadiusSquare, RadiusStandard, RadiusRound}
+	ChatWidths = []string{ChatWidthNarrow, ChatWidthStandard, ChatWidthWide, ChatWidthFull}
+)
+
+func oneOf(v string, list []string) bool {
+	for _, x := range list {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 func DefaultAppearance() Appearance {
@@ -80,6 +123,10 @@ func DefaultAppearance() Appearance {
 		BufferFont:     Font{Family: DefaultFontFamily, Size: DefaultBufferSize, LineHeight: DefaultBufferLineHeight},
 		BodyFont:       BodyFontBuffer,
 		BodyLineHeight: DefaultBodyLineHeight,
+		Layout:         LayoutCompact,
+		Density:        DensityStandard,
+		Radius:         RadiusStandard,
+		ChatWidth:      ChatWidthStandard,
 	}
 }
 
@@ -114,6 +161,18 @@ func NormalizeAppearance(in Appearance) Appearance {
 	}
 	if out.BodyLineHeight < minBodyLineHeight || out.BodyLineHeight > maxLineHeight {
 		out.BodyLineHeight = def.BodyLineHeight
+	}
+	if !oneOf(out.Layout, Layouts) {
+		out.Layout = def.Layout
+	}
+	if !oneOf(out.Density, Densities) {
+		out.Density = def.Density
+	}
+	if !oneOf(out.Radius, Radii) {
+		out.Radius = def.Radius
+	}
+	if !oneOf(out.ChatWidth, ChatWidths) {
+		out.ChatWidth = def.ChatWidth
 	}
 	return out
 }

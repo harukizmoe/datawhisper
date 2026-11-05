@@ -1,0 +1,34 @@
+{
+  "id": "tokyonight-storm",
+  "name": "Tokyo Night Storm",
+  "family": "tokyonight",
+  "appearance": "dark",
+  "license": "Apache-2.0",
+  "source": "https://github.com/folke/tokyonight.nvim/tree/main/extras/lua",
+  "palette": {
+    "bg_highlight": "#292e42", "blue": "#7aa2f7", "blue0": "#3d59a1", "blue1": "#2ac3de",
+    "blue2": "#0db9d7", "blue5": "#89ddff", "blue6": "#b4f9f8", "blue7": "#394b70",
+    "cyan": "#7dcfff", "green": "#9ece6a", "green1": "#73daca", "green2": "#41a6b5",
+    "magenta": "#bb9af7", "magenta2": "#ff007c", "orange": "#ff9e64", "purple": "#9d7cd8",
+    "red": "#f7768e", "red1": "#db4b4b", "teal": "#1abc9c", "yellow": "#e0af68",
+    "bg": "#24283b", "bg_dark": "#1f2335", "bg_dark1": "#1b1e2d", "bg_visual": "#2e3c64",
+    "border": "#1d202f", "comment": "#565f89", "dark3": "#545c7e", "dark5": "#737aa2",
+    "fg": "#c0caf5", "fg_dark": "#a9b1d6", "fg_gutter": "#3b4261", "terminal_black": "#414868"
+  },
+  "accents": ["blue", "cyan", "teal", "green", "yellow", "orange", "red", "magenta", "purple"],
+  "roles": {
+    "background": "bg", "sidebar": "bg_dark", "inspector": "bg_dark", "surface": "bg_highlight",
+    "surfaceHover": "fg_gutter", "surfacePressed": "terminal_black", "border": "border", "text": "fg",
+    "textMuted": "fg_dark", "accent": "blue", "link": "blue", "focus": "blue/0.6",
+    "selection": "bg_visual", "success": "green", "warning": "yellow", "danger": "red",
+    "userBubble": "bg_highlight", "codeBackground": "bg_dark", "card": "bg_dark", "cardBorder": "border",
+    "canvas": "bg_dark1"
+  },
+  "syntax": {
+    "keyword": "magenta", "string": "green", "number": "orange", "comment": "comment",
+    "function": "blue", "type": "blue1", "constant": "orange", "operator": "blue5",
+    "property": "green1", "tag": "red", "attribute": "blue", "punctuation": "blue5",
+    "regexp": "blue6", "escape": "magenta", "variable": "fg", "meta": "blue1"
+  },
+  "chart": ["blue", "orange", "green", "red", "magenta", "cyan", "yellow", "teal"]
+}

@@ -74,6 +74,8 @@ func Run(opts Options) error {
 		case "settings-general":
 			// 截图与手工验证用：直接落在「通用」分区。
 			a.nav, a.st.tab = navSettings, settingsTabGeneral
+		case "settings-appearance":
+			a.nav, a.st.tab = navSettings, settingsTabAppearance
 		}
 		a.preferred = mygo.App.PreferredLanguages()
 		a.lang = i18n.Resolve(a.prefs.Language, a.preferred)

@@ -1,0 +1,33 @@
+{
+  "id": "catppuccin-frappe",
+  "name": "Catppuccin Frappé",
+  "family": "catppuccin",
+  "appearance": "dark",
+  "license": "MIT",
+  "source": "https://github.com/catppuccin/palette/blob/main/palette.json",
+  "palette": {
+    "rosewater": "#f2d5cf", "flamingo": "#eebebe", "pink": "#f4b8e4", "mauve": "#ca9ee6",
+    "red": "#e78284", "maroon": "#ea999c", "peach": "#ef9f76", "yellow": "#e5c890",
+    "green": "#a6d189", "teal": "#81c8be", "sky": "#99d1db", "sapphire": "#85c1dc",
+    "blue": "#8caaee", "lavender": "#babbf1", "text": "#c6d0f5", "subtext1": "#b5bfe2",
+    "subtext0": "#a5adce", "overlay2": "#949cbb", "overlay1": "#838ba7", "overlay0": "#737994",
+    "surface2": "#626880", "surface1": "#51576d", "surface0": "#414559", "base": "#303446",
+    "mantle": "#292c3c", "crust": "#232634"
+  },
+  "accents": ["rosewater", "flamingo", "pink", "mauve", "red", "maroon", "peach", "yellow", "green", "teal", "sky", "sapphire", "blue", "lavender"],
+  "roles": {
+    "background": "base", "sidebar": "mantle", "inspector": "mantle", "surface": "surface0",
+    "surfaceHover": "surface1", "surfacePressed": "surface2", "border": "surface0", "text": "text",
+    "textMuted": "subtext0", "accent": "mauve", "link": "blue", "focus": "lavender/0.6",
+    "selection": "overlay2/0.25", "success": "green", "warning": "yellow", "danger": "red",
+    "userBubble": "surface0", "codeBackground": "mantle", "card": "mantle", "cardBorder": "surface0",
+    "canvas": "crust"
+  },
+  "syntax": {
+    "keyword": "mauve", "string": "green", "number": "peach", "comment": "overlay2",
+    "function": "blue", "type": "yellow", "constant": "peach", "operator": "sky",
+    "property": "blue", "tag": "blue", "attribute": "yellow", "punctuation": "overlay2",
+    "regexp": "pink", "escape": "pink", "variable": "text", "meta": "peach"
+  },
+  "chart": ["blue", "peach", "green", "red", "mauve", "teal", "yellow", "pink"]
+}

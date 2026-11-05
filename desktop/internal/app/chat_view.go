@@ -13,12 +13,24 @@ import (
 
 	"datawhisper/desktop/internal/conversation"
 	"datawhisper/desktop/internal/icons"
+	"datawhisper/desktop/internal/prefs"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// chatColumnWidth 是对话列的最大宽度：正文一行在这个宽度内最好读，宽窗口里两侧留白而不是把行拉长。
-const chatColumnWidth = 760
+// chatColumnWidth 返回对话列的最大宽度（外观里的「对话宽度」）：标准 760 时正文一行最好读，宽窗口里两侧
+// 留白而不是把行拉长；「铺满」不设上限。
+func (a *app) chatColumnWidth() float32 {
+	switch a.appearance().ChatWidth {
+	case prefs.ChatWidthNarrow:
+		return 640
+	case prefs.ChatWidthWide:
+		return 960
+	case prefs.ChatWidthFull:
+		return 100000
+	}
+	return 760
+}
 
 // toolPreviewLines 是工具卡片默认显示的输出行数（末尾几行）；更早的行折叠成「前面还有 N 行」。
 const toolPreviewLines = 6
@@ -40,7 +52,7 @@ func (a *app) chatPage(c *ui.Context) {
 			a.list.Key = func(i int) any { return messages[i].Key }
 			a.list.FollowEnd = true
 			ui.List(c, &a.list, len(messages), func(i int) {
-				centered(c, func() {
+				a.centered(c, func() {
 					a.message(c, messages[i])
 					if meta, ok := turns[i]; ok {
 						a.turnMeta(c, meta)
@@ -51,12 +63,12 @@ func (a *app) chatPage(c *ui.Context) {
 		})
 	}
 	if a.chat.Failure != "" && !a.chat.Busy {
-		centered(c, func() {
+		a.centered(c, func() {
 			ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(a.fs(textCaption)).TextColor(t.Warning).Padding(4, 0)
 		})
 	}
 	if a.sendErr != "" {
-		centered(c, func() {
+		a.centered(c, func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 0).Children(func() {
 				ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
 				if a.needModel && ui.Button(c, a.tr("chat.openSettings")).Clicked() {
@@ -69,9 +81,10 @@ func (a *app) chatPage(c *ui.Context) {
 }
 
 // centered 把一段内容放进居中、限宽的对话列。
-func centered(c *ui.Context, fn func()) {
+func (a *app) centered(c *ui.Context, fn func()) {
+	width := a.chatColumnWidth()
 	ui.Row(c).Justify(ui.Center).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).MaxWidth(chatColumnWidth).Gap(10).Children(fn)
+		ui.Column(c).Grow(1).MinWidth(0).MaxWidth(width).Gap(10).Children(fn)
 	})
 }
 
@@ -80,7 +93,7 @@ func centered(c *ui.Context, fn func()) {
 func (a *app) homeView(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).MinHeight(0).Justify(ui.Center).Padding(24).Children(func() {
-		centered(c, func() {
+		a.centered(c, func() {
 			if a.conv != 0 && !a.connected {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 					ui.Spinner(c)
@@ -547,7 +560,7 @@ func (a *app) composer(c *ui.Context) {
 	t := c.Theme()
 	busy := a.chat.Busy && a.connected
 	ui.Column(c).Padding(4, 24, 16, 24).Children(func() {
-		centered(c, func() {
+		a.centered(c, func() {
 			if a.slashOpen() {
 				a.slashMenu(c)
 			}

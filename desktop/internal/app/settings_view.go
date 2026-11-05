@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"datawhisper/desktop/internal/i18n"
-	"datawhisper/desktop/internal/prefs"
 	"datawhisper/desktop/internal/service"
 	"datawhisper/desktop/internal/supervisor"
 	"github.com/egoist/mygo/ui"
@@ -34,10 +33,14 @@ func (a *app) settings(c *ui.Context) {
 			}
 		})
 		ui.Row(c).Padding(8, 24).Children(func() {
-			ui.Tabs(c, &a.st.tab, a.tr("settings.models"), a.tr("settings.general"))
+			ui.Tabs(c, &a.st.tab, a.tr("settings.models"), a.tr("settings.general"), a.tr("settings.appearance"))
 		})
-		if a.st.tab == settingsTabGeneral {
+		switch a.st.tab {
+		case settingsTabGeneral:
 			a.generalSettings(c, t)
+			return
+		case settingsTabAppearance:
+			a.appearanceSettings(c, t)
 			return
 		}
 		if a.client == nil {
@@ -78,32 +81,12 @@ func (a *app) generalSettings(c *ui.Context, t *ui.Theme) {
 	a.showNotice(c)
 	ui.Scroll(c).Grow(1).MinWidth(0).Children(func() {
 		ui.Column(c).Padding(24, 32).Gap(22).MaxWidth(900).Children(func() {
-			a.appearanceSection(c, t)
 			a.languageSection(c, t)
 			a.filesSection(c, t)
 			if a.prefsErr != "" {
 				ui.Text(c, a.tr("settings.saveFailed", "error", a.prefsErr)).FontSize(a.fs(textCaption)).TextColor(themeColor(t, "danger"))
 			}
 		})
-	})
-}
-
-// appearanceSection 是外观的三选一：跟随系统、浅色、深色。
-func (a *app) appearanceSection(c *ui.Context, t *ui.Theme) {
-	themes := []string{prefs.ThemeSystem, prefs.ThemeLight, prefs.ThemeDark}
-	labels := []string{a.tr("settings.system"), a.tr("settings.light"), a.tr("settings.dark")}
-	choice := 0
-	for i, pref := range themes {
-		if a.prefs.Theme == pref {
-			choice = i
-		}
-	}
-	ui.Column(c).Gap(8).Children(func() {
-		ui.Text(c, a.tr("settings.appearance")).Bold().FontSize(a.fs(textSection))
-		ui.Text(c, a.tr("settings.themeTip")).FontSize(a.fs(textCaption)).TextColor(themeColor(t, "muted"))
-		if ui.Segmented(c, &choice, labels...).MaxWidth(360).Label(a.tr("settings.appearance")).Changed() {
-			a.setTheme(themes[choice])
-		}
 	})
 }
 

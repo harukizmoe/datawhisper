@@ -16,7 +16,13 @@ import (
 // sourcesPanel 构建右侧的数据面板。
 func (a *app) sourcesPanel(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Grow(1).MinWidth(0).Background(t.Background).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+	panel := ui.Column(c).Grow(1).MinWidth(0).Background(t.Background)
+	if a.islands() {
+		panel = a.island(panel).Margin(0, 0, 0, islandGap/2)
+	} else {
+		panel = panel.BorderWidth(0, 0, 0, 1).BorderColor(t.Border)
+	}
+	panel.Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(10, 16).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 			ui.Text(c, a.tr("data.title")).Bold().FontSize(a.fs(textSection))
 			if a.src.conv != 0 {

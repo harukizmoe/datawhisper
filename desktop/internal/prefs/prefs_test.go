@@ -102,3 +102,18 @@ func TestOldPrefsFileGetsDefaultAppearance(t *testing.T) {
 		t.Errorf("partial appearance %+v, want %+v", got.Appearance, want)
 	}
 }
+
+// TestLayoutChoicesFallBack 断言界面风格、密度、圆角与对话宽度只接受已知取值，其余退回默认。
+func TestLayoutChoicesFallBack(t *testing.T) {
+	in := DefaultAppearance()
+	in.Layout, in.Density, in.Radius, in.ChatWidth = LayoutIslands, DensityCompact, RadiusRound, ChatWidthFull
+	if got := NormalizeAppearance(in); got != in {
+		t.Errorf("valid choices changed: %+v", got)
+	}
+	in.Layout, in.Density, in.Radius, in.ChatWidth = "floating", "tiny", "blob", "huge"
+	got := NormalizeAppearance(in)
+	def := DefaultAppearance()
+	if got.Layout != def.Layout || got.Density != def.Density || got.Radius != def.Radius || got.ChatWidth != def.ChatWidth {
+		t.Errorf("invalid choices kept: %+v", got)
+	}
+}

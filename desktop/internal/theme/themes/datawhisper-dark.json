@@ -18,7 +18,7 @@
     "border": "line", "text": "text", "textMuted": "subtext",
     "accent": "blue", "link": "blue", "focus": "blue/0.6", "selection": "blue/0.3",
     "success": "green", "warning": "yellow", "danger": "red",
-    "userBubble": "surface0", "codeBackground": "mantle", "card": "mantle", "cardBorder": "line"
+    "userBubble": "surface0", "codeBackground": "mantle", "card": "mantle", "cardBorder": "line", "canvas": "crust"
   },
   "syntax": {
     "keyword": "pink", "string": "green", "number": "orange", "comment": "overlay",

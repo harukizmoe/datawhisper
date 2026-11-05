@@ -200,3 +200,18 @@ func TestFontsFallBackToSystem(t *testing.T) {
 		t.Errorf("body follows the system UI font: %+v", fc)
 	}
 }
+
+// TestCanvasStandsApartFromTheIslands 断言每个内置配色在 Islands 下，窗口底色都和侧栏、内容区不同色，
+// 岛才看得出边界。
+func TestCanvasStandsApartFromTheIslands(t *testing.T) {
+	schemes, err := loadBuiltinSchemes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, s := range schemes {
+		rt := Resolve(s, s.Appearance == "dark", "", Fonts{})
+		if rt.Tok.Canvas == rt.Tok.Sidebar || rt.Tok.Canvas == rt.UI.Background {
+			t.Errorf("%s: the canvas %v blends into the sidebar %v or background %v", id, rt.Tok.Canvas, rt.Tok.Sidebar, rt.UI.Background)
+		}
+	}
+}
