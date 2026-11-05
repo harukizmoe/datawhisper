@@ -110,6 +110,19 @@ func (v *chatView) askState(callID string) *askUI {
 
 // sessionTitle 是侧边栏与标题栏共用的会话名：优先会话库里的标题（服务端已经用首条用户消息兜底），
 // 当前会话还没有列表项时用本地副本里的首条用户消息，最后才回退到 New chat。
+// sessionTitleOr 是会话的标题；会话列表里还没有它（例如只在搜索结果里）时用 fallback。
+func (a *app) sessionTitleOr(id int, fallback string) string {
+	for _, s := range a.sessions {
+		if s.ID == id {
+			return a.sessionTitle(id)
+		}
+	}
+	if strings.TrimSpace(fallback) != "" {
+		return fallback
+	}
+	return a.sessionTitle(id)
+}
+
 func (a *app) sessionTitle(id int) string {
 	for _, session := range a.sessions {
 		if session.ID != id {

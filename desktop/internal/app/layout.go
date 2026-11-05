@@ -4,9 +4,12 @@ package app
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"datawhisper/desktop/internal/icons"
 	"datawhisper/desktop/internal/prefs"
+	"datawhisper/desktop/internal/service"
 	"datawhisper/desktop/internal/supervisor"
 	"github.com/egoist/mygo/ui"
 )
@@ -23,13 +26,17 @@ func (a *app) view(c *ui.Context) {
 	root.Children(func() {
 		a.sidebar(c)
 		main := ui.Column(c).Grow(1).MinWidth(0)
-		if a.islands() && !(a.nav != navSettings && a.src.open) {
+		if a.islands() && !(!a.onPage() && a.src.open) {
 			main = a.island(main.Background(t.Background))
 		}
 		main.Children(func() {
 			switch {
 			case a.nav == navSettings:
 				a.settings(c)
+			case a.nav == navKnowledge:
+				a.knowledgePage(c)
+			case a.nav == navSkills:
+				a.skillsPage(c)
 			case a.src.open:
 				// Islands 下对话与数据面板各是一座岛，分栏的拖动条落在两座岛之间的间隙里。
 				ui.SplitPercent(c, &a.src.split, func() {
@@ -47,6 +54,9 @@ func (a *app) view(c *ui.Context) {
 		})
 	})
 	// 弹窗画在窗口根上，不被数据面板的分割线裁掉。
+	a.paletteShortcuts(c)
+	a.paletteModal(c)
+	a.sessionModals(c)
 	a.chatModals(c)
 	a.richModals(c)
 	// 菜单项的勾选与可用状态跟着界面走（数据面板是否打开、能不能导入）。
@@ -72,25 +82,52 @@ func (a *app) sidebar(c *ui.Context) {
 				a.newChat()
 			}
 		})
+		ui.SearchField(c, &a.sideSearch).Label(a.tr("sidebar.search")).Placeholder(a.tr("sidebar.search"))
+		a.maybeSearch(c)
+		groups := a.sessionGroups(c.Now())
+		hits := a.bodyHits(groups)
+		archived := a.archivedSessions()
 		if ui.Sidebar(c, &a.nav, func() {
-			ui.SidebarSection(c, a.tr("sidebar.chats"), nil, func() {
-				for _, session := range a.sessions {
-					title := a.sessionTitle(session.ID)
-					ui.SidebarItem(c, navOf(session.ID), nil, title)
-				}
-				switch {
-				case a.listErr != "":
-					ui.Text(c, a.tr("sidebar.listFailed")).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(4, 8)
-				case a.listLoaded && len(a.sessions) == 0:
-					ui.Text(c, a.tr("sidebar.empty")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(4, 8)
-				}
-			})
+			for _, g := range groups {
+				ui.SidebarSection(c, g.label, nil, func() {
+					for _, session := range g.sessions {
+						a.sessionItem(c, session)
+					}
+				})
+			}
+			if len(hits) > 0 {
+				ui.SidebarSection(c, a.tr("sidebar.bodyMatches"), nil, func() {
+					for _, h := range hits {
+						ui.SidebarItem(c, navOf(h.ID), icons.Search, a.sessionTitleOr(h.ID, h.Title)).Tooltip(h.Snippet)
+					}
+				})
+			}
+			if len(archived) > 0 {
+				ui.SidebarSection(c, a.tr("sidebar.archived"), nil, func() {
+					for _, session := range archived {
+						a.sessionItem(c, session)
+					}
+				})
+			}
+			switch {
+			case a.listErr != "":
+				ui.Text(c, a.tr("sidebar.listFailed")).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(4, 8)
+			case a.listLoaded && len(a.sessions) == 0:
+				ui.Text(c, a.tr("sidebar.empty")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(4, 8)
+			case a.sideSearch != "" && len(groups) == 0 && len(hits) == 0:
+				ui.Text(c, a.tr("sidebar.noMatch")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(4, 8)
+			}
 			ui.SidebarSection(c, a.tr("sidebar.app"), nil, func() {
 				ui.SidebarItem(c, navData, icons.Database, a.tr("sidebar.data"))
+				ui.SidebarItem(c, navKnowledge, icons.Knowledge, a.tr("sidebar.knowledge"))
+				ui.SidebarItem(c, navSkills, icons.Skill, a.tr("sidebar.skills"))
 				ui.SidebarItem(c, navSettings, icons.Settings, a.tr("sidebar.settings"))
 			})
 		}).Grow(1).Background(tok.Sidebar).Label("Navigation").Changed() {
 			a.navigate()
+		}
+		if a.sess.err != "" {
+			ui.Text(c, a.sess.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
 		}
 		// 服务状态放在侧栏底部：正常时只是一个绿点和一个词，不占标题栏；出问题时横幅另有说明。
 		label, color := a.statusLabel(t)
@@ -177,4 +214,86 @@ func (a *app) islands() bool { return a.appearance().Layout == prefs.LayoutIslan
 // island 把一个区域画成圆角的岛；内容按圆角裁切，滚动条与分隔线不会画出圆角之外。
 func (a *app) island(e ui.Element) ui.Element {
 	return e.Radius(radiusCard).Clip()
+}
+
+// sessionGroup 是侧栏里的一组会话。
+type sessionGroup struct {
+	label    string // 已翻译的组名
+	sessions []service.Session
+}
+
+// sessionGroups 把会话按「置顶 / 今天 / 昨天 / 7 天内 / 更早」分组（服务端已按更新时间倒序），归档的不显示；
+// 搜索框有字时只留标题里包含它的会话（不分大小写）。
+func (a *app) sessionGroups(now time.Time) []sessionGroup {
+	query := strings.ToLower(strings.TrimSpace(a.sideSearch))
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	buckets := []sessionGroup{{label: a.tr("sidebar.pinned")}, {label: a.tr("sidebar.today")}, {label: a.tr("sidebar.yesterday")}, {label: a.tr("sidebar.week")}, {label: a.tr("sidebar.earlier")}}
+	for _, s := range a.sessions {
+		if s.Archived {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(a.sessionTitle(s.ID)), query) {
+			continue
+		}
+		i := 4
+		switch {
+		case s.Pinned:
+			i = 0
+		case s.UpdatedAt == nil:
+			i = 1 // 还没有消息的新会话放在「今天」
+		default:
+			at := time.UnixMilli(*s.UpdatedAt)
+			switch {
+			case !at.Before(day):
+				i = 1
+			case !at.Before(day.AddDate(0, 0, -1)):
+				i = 2
+			case !at.Before(day.AddDate(0, 0, -7)):
+				i = 3
+			}
+		}
+		buckets[i].sessions = append(buckets[i].sessions, s)
+	}
+	var out []sessionGroup
+	for _, g := range buckets {
+		if len(g.sessions) > 0 {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// sessionItem 是侧栏里的一个会话：右键菜单里有重命名、置顶与归档（服务端没有对应功能时不显示那一项）。
+func (a *app) sessionItem(c *ui.Context, s service.Session) {
+	id := s.ID
+	ui.SidebarItem(c, navOf(id), nil, a.sessionTitle(id)).ContextMenu(func(m *ui.Menu) {
+		if m.Item(a.tr("chat.rename")).Chosen() {
+			if a.conv != id {
+				a.nav = navOf(id)
+				a.navigate()
+			}
+			a.openRename()
+		}
+		pin := a.tr("sidebar.pin")
+		if s.Pinned {
+			pin = a.tr("sidebar.unpin")
+		}
+		if m.Item(pin).Chosen() {
+			a.setSessionFlag(id, "pinned", !s.Pinned)
+		}
+		archive := a.tr("sidebar.archive")
+		if s.Archived {
+			archive = a.tr("sidebar.unarchive")
+		}
+		if m.Item(archive).Chosen() {
+			a.setSessionFlag(id, "archived", !s.Archived)
+		}
+		if m.Item(a.tr("sidebar.export")).Chosen() {
+			a.exportSession(id)
+		}
+		m.Separator()
+		if m.Item(a.tr("sidebar.delete")).Chosen() {
+			a.askDeleteSession(id)
+		}
+	})
 }

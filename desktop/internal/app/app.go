@@ -26,6 +26,17 @@ const reconnectedFor = 5 * time.Second
 // navSettings 是侧边栏的设置项；会话项为 "c<id>"（见 navOf），新对话为 ""。
 const navSettings = "settings"
 
+// navKnowledge 与 navSkills 是知识库页与技能页。
+const (
+	navKnowledge = "knowledge"
+	navSkills    = "skills"
+)
+
+// onPage 报告侧栏当前选的是不是独立页面（设置、知识库、技能），而不是对话。
+func (a *app) onPage() bool {
+	return a.nav == navSettings || a.nav == navKnowledge || a.nav == navSkills
+}
+
 // navData 是侧边栏的数据入口：它不是页面，选中后展开右侧数据面板并回到聊天页。
 const navData = "data"
 
@@ -49,7 +60,13 @@ type app struct {
 	sessions   []service.Session
 	listLoaded bool
 	listErr    string
-	listGen    int // 给会话列表的加载排序，避免旧结果覆盖新结果
+	sideSearch string         // 侧栏搜索框里的字：按标题过滤会话
+	sess       sessionState   // 会话管理（sessions.go）
+	know       knowledgeState // 知识库页（knowledge.go）
+	skills     skillsState    // 技能页（skills.go）
+	feishu     feishuState    // 设置页的「集成」分区（feishu.go）
+	palette    paletteState   // 命令面板（palette.go）
+	listGen    int            // 给会话列表的加载排序，避免旧结果覆盖新结果
 
 	conv           int                // 当前显示的会话；0 表示新对话，由它的第一条消息创建
 	chat           conversation.State // 该会话复制出的状态
@@ -156,8 +173,13 @@ func (a *app) onService(st supervisor.Status) {
 	a.follow()
 	a.refreshModels()
 	a.refreshCommands()
-	if a.nav == navSettings {
+	switch a.nav {
+	case navSettings:
 		a.loadSettings()
+	case navKnowledge:
+		a.loadKnowledge()
+	case navSkills:
+		a.loadSkills()
 	}
 	a.sourcesReady()
 }
@@ -232,6 +254,11 @@ func (a *app) navigate() {
 		}
 	case a.nav == navSettings:
 		a.loadSettings()
+		a.feishu.loaded = false // 关联的群按会话不同，进设置页时重新读取
+	case a.nav == navKnowledge:
+		a.loadKnowledge()
+	case a.nav == navSkills:
+		a.loadSkills()
 	case strings.HasPrefix(a.nav, "c"):
 		if id, err := strconv.Atoi(a.nav[1:]); err == nil && id != a.conv {
 			a.show(id)

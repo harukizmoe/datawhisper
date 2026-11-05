@@ -61,3 +61,78 @@ func (c *Client) Commands(ctx context.Context) ([]Command, error) {
 	err := c.callInto(ctx, "command.list", nil, &out)
 	return out.Commands, err
 }
+
+// PinSession 置顶或取消置顶会话 id。
+func (c *Client) PinSession(ctx context.Context, id int, pinned bool) error {
+	return c.callInto(ctx, "session.pin", map[string]any{"id": id, "pinned": pinned}, nil)
+}
+
+// ArchiveSession 归档或取消归档会话 id；归档的会话不在侧栏的分组里，只在「已归档」里。
+func (c *Client) ArchiveSession(ctx context.Context, id int, archived bool) error {
+	return c.callInto(ctx, "session.archive", map[string]any{"id": id, "archived": archived}, nil)
+}
+
+// DeleteSession 删除会话 id。服务端是软删除（写墓碑），没有恢复的方法；根会话不能删除（invalid_input）。
+func (c *Client) DeleteSession(ctx context.Context, id int) error {
+	return c.callInto(ctx, "session.delete", map[string]any{"id": id}, nil)
+}
+
+// ExportSession 把会话导出成 Markdown（format "md"）或 JSON，返回建议的文件名与正文。
+func (c *Client) ExportSession(ctx context.Context, id int, format string) (filename, content string, err error) {
+	var out struct {
+		Filename string `json:"filename"`
+		Content  string `json:"content"`
+	}
+	err = c.callInto(ctx, "session.export", map[string]any{"id": id, "format": format}, &out)
+	return out.Filename, out.Content, err
+}
+
+// SessionHit 是 session.search 的一条结果：MatchedIn 是 "title" 或 "body"，Snippet 是命中处的片段。
+type SessionHit struct {
+	ID        int    `json:"id"`
+	Title     string `json:"title"`
+	Pinned    bool   `json:"pinned"`
+	Archived  bool   `json:"archived"`
+	UpdatedAt *int64 `json:"updatedAt"`
+	MatchedIn string `json:"matchedIn"`
+	Snippet   string `json:"snippet"`
+}
+
+// SearchSessions 在会话标题与消息正文里搜索 query，不含已归档的会话。
+func (c *Client) SearchSessions(ctx context.Context, query string) ([]SessionHit, error) {
+	var out struct {
+		Hits []SessionHit `json:"hits"`
+	}
+	err := c.callInto(ctx, "session.search", map[string]any{"query": query, "limit": 30}, &out)
+	return out.Hits, err
+}
+
+// Skill 是 skill.list 的一项：agent 可以调用的技能（内置或用户目录里的）。
+type Skill struct {
+	Name          string   `json:"name"`
+	DisplayName   string   `json:"displayName"`
+	Description   string   `json:"description"`
+	Icon          string   `json:"icon"`
+	Source        string   `json:"source"`
+	Tags          []string `json:"tags"`
+	AllowedTools  []string `json:"allowedTools"`
+	ResourceCount int      `json:"resourceCount"`
+	PromptChars   int      `json:"promptChars"`
+}
+
+// SkillDiagnostic 是读不了的技能文件及原因。
+type SkillDiagnostic struct {
+	Path   string `json:"path"`
+	Source string `json:"source"`
+	Error  string `json:"error"`
+}
+
+// Skills 列出技能目录（每次都重新读磁盘）。
+func (c *Client) Skills(ctx context.Context) ([]Skill, []SkillDiagnostic, error) {
+	var out struct {
+		Skills      []Skill           `json:"skills"`
+		Diagnostics []SkillDiagnostic `json:"diagnostics"`
+	}
+	err := c.callInto(ctx, "skill.list", nil, &out)
+	return out.Skills, out.Diagnostics, err
+}

@@ -273,9 +273,39 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 		case "session.list":
 			respond(req.ID, map[string]any{"conversations": []any{
 				map[string]any{"id": 4, "root": false, "title": "Workspace check", "lastEntryId": 24, "updatedAt": 5},
-				map[string]any{"id": 2, "root": false, "title": "Greeting", "lastEntryId": 6, "updatedAt": 1},
+				map[string]any{"id": 2, "root": false, "title": "Greeting", "lastEntryId": 6, "updatedAt": 1, "pinned": true},
 				map[string]any{"id": 1, "root": true, "title": "Getting started", "lastEntryId": nil, "updatedAt": nil},
+				map[string]any{"id": 7, "root": false, "title": "Old analysis", "lastEntryId": 70, "updatedAt": 2, "archived": true},
 			}})
+		case "session.pin", "session.archive":
+			respond(req.ID, map[string]any{"id": params["id"], "title": "x", "pinned": params["pinned"] == true, "archived": params["archived"] == true})
+		case "session.delete":
+			respond(req.ID, map[string]any{"id": fmt.Sprint(params["id"]), "title": "x", "deleted": true, "alreadyDeleted": false})
+		case "session.search":
+			respond(req.ID, map[string]any{"query": params["query"], "hits": []any{
+				map[string]any{"id": 2, "title": "Greeting", "matchedIn": "body", "snippet": "…revenue by region…", "updatedAt": 1},
+			}})
+		case "skill.list":
+			respond(req.ID, map[string]any{"skills": []any{
+				map[string]any{"name": "cohort", "displayName": "Cohort analysis", "description": "Retention by signup cohort", "source": "builtin", "tags": []any{"retention"}, "allowedTools": []any{"query_data"}, "resourceCount": 2},
+			}, "diagnostics": []any{map[string]any{"path": "broken.md", "source": "user", "error": "no front matter"}}})
+		case "knowledge.list":
+			switch params["kind"] {
+			case "category":
+				respond(req.ID, map[string]any{"items": []any{map[string]any{"id": 1, "name": "Sales", "enabled": 1}}})
+			case "metric":
+				respond(req.ID, map[string]any{"items": []any{map[string]any{"id": 3, "name": "GMV", "alias": "gross sales", "definition": "Sum of order amounts", "enabled": 1}}})
+			default:
+				respond(req.ID, map[string]any{"items": []any{}})
+			}
+		case "knowledge.add", "knowledge.toggle", "knowledge.update", "knowledge.remove":
+			respond(req.ID, map[string]any{"id": 9})
+		case "feishu.status":
+			respond(req.ID, map[string]any{"enabled": true, "configured": true, "appId": "cli_a1", "appSecretConfigured": true,
+				"inboundTransport": "long_connection", "receiveIdType": "chat_id", "receiveId": "oc_1", "receiveIdMasked": "…oc_1",
+				"inboundStatus": "connected", "inboundError": "", "link": nil})
+		case "feishu.setConfig":
+			respond(req.ID, map[string]any{"enabled": true, "configured": true, "appId": params["app_id"], "inboundStatus": "connected"})
 		case "session.rename":
 			respond(req.ID, map[string]any{"id": params["id"], "title": params["title"], "pinned": false, "archived": false})
 		case "command.list":

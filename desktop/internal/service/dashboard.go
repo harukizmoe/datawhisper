@@ -31,3 +31,13 @@ func (c *Client) DashboardHTML(ctx context.Context, id string) (name, html strin
 	err = c.callInto(ctx, "dashboard.exportHtml", map[string]any{"id": id}, &out)
 	return out.Filename, out.HTML, err
 }
+
+// RenameDashboard 改仪表盘的名字。
+func (c *Client) RenameDashboard(ctx context.Context, id, name string) error {
+	return c.callInto(ctx, "dashboard.update", map[string]any{"id": id, "name": name}, nil)
+}
+
+// RemoveDashboard 删除仪表盘文件；已经不存在时也不报错。
+func (c *Client) RemoveDashboard(ctx context.Context, id string) error {
+	return c.callInto(ctx, "dashboard.remove", map[string]any{"id": id}, nil)
+}

@@ -257,9 +257,9 @@ func (a *app) syncMenu() {
 	}
 }
 
-// toggleDataPanel 展开或收起数据面板。面板依附于聊天页，所以在设置页时先回到聊天页，否则打开了也看不见。
+// toggleDataPanel 展开或收起数据面板。面板依附于聊天页，所以在设置、知识库、技能页时先回到聊天页，否则打开了也看不见。
 func (a *app) toggleDataPanel() {
-	if !a.src.open && a.nav == navSettings {
+	if !a.src.open && a.onPage() {
 		if a.conv == 0 {
 			a.nav = ""
 		} else {

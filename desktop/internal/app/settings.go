@@ -167,8 +167,9 @@ func (a *app) syncDefaultForm(view *service.ModelsView) {
 
 // settingsTabGeneral 与 settingsTabAppearance 是设置页「通用」与「外观」分区的索引（0 是模型）。
 const (
-	settingsTabGeneral    = 1
-	settingsTabAppearance = 2
+	settingsTabGeneral      = 1
+	settingsTabAppearance   = 2
+	settingsTabIntegrations = 3
 )
 
 // settingsModelRow 是 provider 模型表与可用模型表共用的行。

@@ -207,6 +207,10 @@ type dashState struct {
 	html      string
 	htmlFor   string
 	gen       int
+
+	// 重命名：renaming 时标题行换成输入框。
+	renaming   bool
+	renameText string
 }
 
 // openDashboards 打开仪表盘查看器（数据面板的入口）。
@@ -358,6 +362,9 @@ func (a *app) dashboardsModal(c *ui.Context, t *ui.Theme) {
 					}
 				}
 			})
+			if d.choice != "" {
+				a.dashboardActions(c, t)
+			}
 			if d.exportErr != "" {
 				ui.Text(c, d.exportErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 			}
@@ -491,4 +498,61 @@ func (a *app) fullChartModal(c *ui.Context, t *ui.Theme) {
 			a.webPreview(c, a.rich.FullChartPreview(previewChart(ch)), height, "Chart", ch.Path)
 		})
 	})
+}
+
+// dashboardActions 是选中仪表盘的操作：重命名与删除（删除的是仪表盘文件，不影响它引用的数据）。
+func (a *app) dashboardActions(c *ui.Context, t *ui.Theme) {
+	d := &a.dash
+	id := d.choice
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+		if d.renaming {
+			in := ui.TextInput(c, &d.renameText).Label(a.tr("dash.name")).AutoFocus().Grow(1).MinWidth(0)
+			if ui.PrimaryButton(c, a.tr("know.save")).Clicked() || in.Submitted() {
+				a.dashboardCall(func(ctx context.Context, cl *service.Client) error {
+					return cl.RenameDashboard(ctx, id, strings.TrimSpace(d.renameText))
+				})
+				d.renaming = false
+			}
+			if ui.Button(c, a.tr("sidebar.cancel")).Clicked() {
+				d.renaming = false
+			}
+			return
+		}
+		ui.Spacer(c)
+		if iconTextButton(c, icons.Pencil, a.tr("chat.rename")).Clicked() {
+			d.renaming = true
+			for _, item := range d.list {
+				if item.ID == id {
+					d.renameText = item.Name
+				}
+			}
+		}
+		if iconTextButton(c, icons.Trash, a.tr("sidebar.delete")).Clicked() {
+			a.dashboardCall(func(ctx context.Context, cl *service.Client) error {
+				return cl.RemoveDashboard(ctx, id)
+			})
+			d.choice = ""
+			a.rich.ReleaseModal()
+		}
+	})
+}
+
+// dashboardCall 在后台改一个仪表盘，完成后重新加载列表。
+func (a *app) dashboardCall(fn func(ctx context.Context, c *service.Client) error) {
+	client := a.client
+	if client == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		err := fn(ctx, client)
+		a.post(func() {
+			if err != nil {
+				a.dash.err = sourceErrorText(err)
+				return
+			}
+			a.loadDashboards()
+		})
+	}()
 }

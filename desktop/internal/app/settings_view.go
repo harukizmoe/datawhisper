@@ -33,7 +33,7 @@ func (a *app) settings(c *ui.Context) {
 			}
 		})
 		ui.Row(c).Padding(8, 24).Children(func() {
-			ui.Tabs(c, &a.st.tab, a.tr("settings.models"), a.tr("settings.general"), a.tr("settings.appearance"))
+			ui.Tabs(c, &a.st.tab, a.tr("settings.models"), a.tr("settings.general"), a.tr("settings.appearance"), a.tr("settings.integrations"))
 		})
 		switch a.st.tab {
 		case settingsTabGeneral:
@@ -41,6 +41,9 @@ func (a *app) settings(c *ui.Context) {
 			return
 		case settingsTabAppearance:
 			a.appearanceSettings(c, t)
+			return
+		case settingsTabIntegrations:
+			a.integrationSettings(c, t)
 			return
 		}
 		if a.client == nil {
