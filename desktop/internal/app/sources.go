@@ -873,6 +873,13 @@ func (a *app) connectRemote() {
 			a.src.sql.password = ""
 			a.src.remoteOpen, a.src.remoteErr = false, ""
 			a.src.notice, a.src.noticeErr = a.tr("data.connected", "name", name), false
+			// 远程 SQL 来源连上后默认不向 agent 开放任何表：直接引导用户选表，而不是等他自己找到「编辑」。
+			if kind.ID == "sql" && opened.Source != nil {
+				if len(opened.Sources) > 0 {
+					a.src.sources = opened.Sources
+				}
+				a.openSourceEditor(*opened.Source, true)
+			}
 			a.loadSources()
 		})
 	}()
@@ -1084,8 +1091,12 @@ func (a *app) setWorkspacePermission(id, permission string) {
 	}()
 }
 
+// maxAnalysisTables 是一个 SQL 来源最多能选几张分析表，与 compute 的上限一致。
+const maxAnalysisTables = 20
+
 // openSourceEditor 打开来源编辑对话框：SQL 来源在这里选分析表，所有来源都能在这里开关。
-func (a *app) openSourceEditor(src service.Source) {
+// firstTime 表示这是刚连上、还没选过表的来源（连接成功后自动弹出，或卡片上的「选择数据表」），此时会默认勾选。
+func (a *app) openSourceEditor(src service.Source, firstTime bool) {
 	a.src.editOpen, a.src.editID, a.src.editErr, a.src.editBusy = true, src.ID, "", false
 	a.src.editPicked = map[string]bool{}
 	a.src.editTables = append([]string(nil), src.Tables...)
@@ -1119,6 +1130,13 @@ func (a *app) openSourceEditor(src service.Source) {
 				a.src.editTables = append(a.src.editTables, t.Name)
 				if t.SelectedForAnalysis {
 					a.src.editPicked[t.Name] = true
+				}
+			}
+			// 第一次选表时，库里的表不多就默认全选：用户多半是想分析整个库，省得对着一排空框发愣；
+			// 表太多时不替用户挑，留空让他自己勾。
+			if firstTime && len(a.src.editPicked) == 0 && len(a.src.editTables) <= maxAnalysisTables {
+				for _, name := range a.src.editTables {
+					a.src.editPicked[name] = true
 				}
 			}
 		})

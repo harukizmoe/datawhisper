@@ -291,7 +291,12 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			if name == "" {
 				name = "Remote " + kind
 			}
-			src := service.Source{ID: "s_00000003", Name: name, Kind: kind, Active: true, Open: true, Tables: []string{"orders"}}
+			// 远程 SQL 来源刚连上时没有分析表（服务端默认不开放任何表）；其余类型直接带表。
+			tables := []string{"orders"}
+			if kind == "sql" {
+				tables = nil
+			}
+			src := service.Source{ID: "s_00000003", Name: name, Kind: kind, Active: true, Open: true, Tables: tables}
 			f.sources = append(f.sources, src)
 			list := snapshotLocked()
 			f.mu.Unlock()
@@ -1062,4 +1067,65 @@ func indexOfMethod(calls []string, method string) int {
 		}
 	}
 	return -1
+}
+
+// TestConnectingASQLSourceAsksForTablesRightAway 回归：远程 SQL 来源连上后默认不向 agent 开放任何表，
+// 界面必须当场弹出选表对话框（库里表不多就默认全选），保存后才算可用；不选就关掉时，卡片上要明说
+// 「还没选数据表」并给出「选择数据表」按钮，而不是只写「0 张表」。
+func TestConnectingASQLSourceAsksForTablesRightAway(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.preview["s_00000003"] = service.SourcePreview{
+		SourceName: "Remote sql",
+		Tables:     []service.PreviewTableInfo{{Name: "customers"}, {Name: "orders"}},
+	}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1600)
+
+	if err := tt.Click("Connect"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("SQL database"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	if err := tt.Click("Use a connection string instead"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Connection string"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("postgresql://u:pw-xx@db/app")
+	if err := tt.Click("Add source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the table picker", func() bool { return a.src.editOpen && !a.src.editBusy && len(a.src.editTables) == 2 })
+	if !a.src.editPicked["customers"] || !a.src.editPicked["orders"] {
+		t.Errorf("a small database should be ticked by default: %v", a.src.editPicked)
+	}
+	expectTexts(t, tt, []string{"Tables the agent may analyse", "2 of 20 selected"}, nil)
+
+	// 先不保存，直接取消：卡片上要提示还没选表。
+	if err := tt.Click("Cancel"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"No tables chosen yet", "Choose tables"}, nil)
+
+	// 卡片上的按钮重新打开选表，保存后把勾选的表发给服务端。
+	if err := tt.Click("Choose tables"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the picker again", func() bool { return a.src.editOpen && !a.src.editBusy && len(a.src.editTables) == 2 })
+	if err := tt.Click("Save tables"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the saved tables", func() bool { return !a.src.editOpen && !a.src.editBusy })
+	params := f.call("source.setAnalysisTables")
+	tables, _ := params["tables"].([]any)
+	if params["sourceId"] != "s_00000003" || len(tables) != 2 {
+		t.Errorf("source.setAnalysisTables params: %v", params)
+	}
 }

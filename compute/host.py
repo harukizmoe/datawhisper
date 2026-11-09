@@ -251,7 +251,9 @@ def apply_table_selection(lease: Lease, tables: Any) -> None:
             missing.append({"source_id": source_id, "source_name": getattr(src, "name", "SQL 数据库")})
     if missing:
         raise RpcError(
-            "请先为 SQL 数据源选择分析表",
+            "SQL 数据源还没有选择分析表，所以现在看不到里面任何内容。"
+            "请告诉用户：在右侧「数据」面板里，点这个数据源卡片上的「选择数据表」（Choose tables），"
+            "勾选要分析的表并保存，然后重新提问。不要建议用户上传文件，也不要编造数据。",
             data={"kind": "sql_table_selection_required", "sources": missing},
         )
 

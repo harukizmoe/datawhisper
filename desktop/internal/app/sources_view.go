@@ -154,7 +154,19 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 		if src.Open {
 			state = a.tr("data.stateOpen")
 		}
-		ui.Text(c, a.tr("data.tables", "count", strconv.Itoa(len(src.Tables)), "state", state)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		// 远程 SQL 来源没选表时 agent 什么都看不到：这里要明说，并给一个直接能点的入口，
+		// 不能只写「0 张表」让人猜。
+		needTables := src.Kind == "sql" && len(src.Tables) == 0
+		if needTables {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, a.tr("data.noTablesChosen")).FontSize(a.fs(textCaption)).TextColor(t.Warning).Grow(1).MinWidth(0)
+				if ui.PrimaryButton(c, a.tr("data.chooseTables")).Tooltip(a.tr("data.chooseTablesTip")).Clicked() {
+					a.openSourceEditor(src, true)
+				}
+			})
+		} else {
+			ui.Text(c, a.tr("data.tables", "count", strconv.Itoa(len(src.Tables)), "state", state)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		}
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			active := src.Active
 			ui.Switch(c, &active).Label(a.tr("data.useInAnalysis", "name", src.Name)).Changed()
@@ -167,7 +179,7 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 				a.showPreview(src.ID)
 			}
 			if ui.Button(c, a.tr("data.edit")).Tooltip(a.tr("data.editTip", "name", src.Name)).Clicked() {
-				a.openSourceEditor(src)
+				a.openSourceEditor(src, false)
 			}
 			if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeTip", "name", src.Name)).Clicked() {
 				a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmSource, src.ID, src.Name
@@ -806,6 +818,7 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, a.tr("data.sourceNoTables")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			return
 		}
+		ui.Text(c, a.tr("data.pickHint", "max", strconv.Itoa(maxAnalysisTables))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		ui.Scroll(c).Height(220).Children(func() {
 			ui.Column(c).Gap(4).Children(func() {
 				for _, name := range a.src.editTables {
@@ -819,11 +832,27 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 		if a.src.editErr != "" {
 			ui.Text(c, a.src.editErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 		}
+		picked := 0
+		for _, name := range a.src.editTables {
+			if a.src.editPicked[name] {
+				picked++
+			}
+		}
+		count := ui.Text(c, a.tr("data.pickedCount", "count", strconv.Itoa(picked), "max", strconv.Itoa(maxAnalysisTables))).FontSize(a.fs(textCaption))
+		if picked > maxAnalysisTables {
+			count.TextColor(t.Danger)
+		} else {
+			count.TextColor(t.TextMuted)
+		}
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, a.tr("data.cancel")).Clicked() {
 				a.src.editOpen = false
 			}
-			if ui.PrimaryButton(c, a.tr("data.saveTables")).Clicked() {
+			save := ui.PrimaryButton(c, a.tr("data.saveTables"))
+			if picked > maxAnalysisTables {
+				save.Disabled(true)
+			}
+			if save.Clicked() {
 				a.saveSourceTables()
 			}
 		})

@@ -425,7 +425,7 @@ describe("failures", () => {
     expect(result.isError).toBe(true);
     expect(result.details?.error?.kind).toBe("sql_table_selection_required");
     expect(result.details?.error?.sources.length).toBe(1);
-    expect(textOf(result)).toBe("请先为 SQL 数据源选择分析表");
+    expect(textOf(result)).toContain("选择数据表");
   });
 
   test("an unopened source is reported, not swallowed", async () => {
