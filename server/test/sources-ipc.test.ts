@@ -650,6 +650,22 @@ describe("数据库表单字段", () => {
     expect(store.peek(1).sources.find((item) => item.id === sourceId)!.name).toBe("月度销售");
   });
 
+  test("同一个文件导入多次：名字自动加序号，删掉后序号可复用", async () => {
+    const first = await openUpload("a.csv", "a\n1\n");
+    const second = await openUpload("a.csv", "a\n2\n");
+    const third = await openUpload("a.csv", "a\n3\n");
+    const names = () => store.peek(1).sources.map((item) => item.name);
+    expect(names()).toEqual(["a.csv", "a.csv (2)", "a.csv (3)"]);
+    // 返回给界面的是去重后的名字，而不是文件原名。
+    expect((second.reply.result as { source: { name: string } }).source.name).toBe("a.csv (2)");
+
+    await server.call("source.remove", { conversationId: 1, sourceId: second.sourceId });
+    const again = await openUpload("a.csv", "a\n4\n");
+    expect(names()).toEqual(["a.csv", "a.csv (3)", "a.csv (2)"]);
+    expect(again.sourceId).not.toBe(first.sourceId);
+    expect(third.sourceId).not.toBe(again.sourceId);
+  });
+
   test("上传的文件没有连接设置可改", async () => {
     const { sourceId } = await openUpload("a.csv", "a\n1\n");
     const reply = await server.call("source.update", { conversationId: 1, sourceId, fields: {} });

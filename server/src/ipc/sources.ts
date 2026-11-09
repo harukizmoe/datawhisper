@@ -298,6 +298,16 @@ function publicSource(record: StoredSource, open: ReadonlySet<string>): Record<s
   };
 }
 
+/** 在已有来源里找一个不重名的显示名：先原名，再 `名 (2)`、`名 (3)`…… */
+function uniqueSourceName(existing: readonly StoredSource[], name: string): string {
+  const taken = new Set(existing.map((item) => item.name));
+  if (!taken.has(name)) return name;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${name} (${n})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 function publicWorkspace(record: WorkspaceRecord): Record<string, JsonValue> {
   return {
     workspace_id: record.workspaceId,
@@ -712,9 +722,14 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     };
   };
 
-  /** 记录一条新来源；返回更新后的来源列表。 */
+  /**
+   * 记录一条新来源；返回更新后的来源列表。
+   * 同一会话里名字重复时自动加后缀（`a.csv (2)`）：同一个文件导入两次，界面和 agent 的 schema 里
+   * 才分得清是哪一份。用户之后自己改名不受这条限制。
+   */
   const appendSource = async (conversationId: number, record: StoredSource): Promise<Record<string, JsonValue>[]> => {
     return state.update(conversationId, (draft) => {
+      record.name = uniqueSourceName(draft.sources, record.name);
       draft.sources.push(record);
       return sourceView(draft);
     });
