@@ -418,6 +418,23 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"configs": configs})
 
+		case "source.update":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			var updated service.Source
+			for i := range f.sources {
+				if f.sources[i].ID == id {
+					if name, _ := params["name"].(string); name != "" {
+						f.sources[i].Name = name
+					}
+					updated = f.sources[i]
+				}
+			}
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"source": updated, "sources": list})
+
 		case "source.test":
 			f.record(req.Method, req.Params)
 			respond(req.ID, map[string]any{"name": "Remote sql", "tables": 3, "server": "PostgreSQL 16.0"})
@@ -597,7 +614,7 @@ func TestDataPanelListsSourcesAndPreviewsTable(t *testing.T) {
 	a, q, tt := openDataPanel(t, f, 1400, 1100)
 
 	expectTexts(t, tt, []string{
-		"sales.csv", "csv", "1 tables · open", "In analysis", "Preview", "Edit", "Remove",
+		"sales.csv", "csv", "1 tables · open", "In analysis", "Preview", "More", "Remove",
 		"Import", "The service sets the limit when the import starts.",
 	}, nil)
 
@@ -1021,11 +1038,11 @@ func TestDataPanelEditsAnalysisTables(t *testing.T) {
 	)
 	a, q, tt := openDataPanel(t, f, 1400, 1300)
 
-	if err := tt.Click("Edit"); err != nil {
+	if err := tt.Click("Tables"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the source editor", func() bool { return a.src.editOpen && !a.src.editBusy })
-	expectTexts(t, tt, []string{"Source: warehouse", "sql", "Tables the agent may analyse", "orders", "customers", "Close source"}, nil)
+	expectTexts(t, tt, []string{"Source: warehouse", "sql", "Tables the agent may analyse", "orders", "customers"}, nil)
 
 	if err := tt.Click("customers"); err != nil {
 		t.Fatal(err)
@@ -1127,5 +1144,67 @@ func TestConnectingASQLSourceAsksForTablesRightAway(t *testing.T) {
 	tables, _ := params["tables"].([]any)
 	if params["sourceId"] != "s_00000003" || len(tables) != 2 {
 		t.Errorf("source.setAnalysisTables params: %v", params)
+	}
+}
+
+// TestEditingAConnectionKeepsTheSecretAndUpdatesTheSource 回归：已连接的数据库改了主机或端口，要能直接在卡片上
+// 「编辑」，而不是删掉重建。表单从来源引用的配置里回填非密字段，密码留空即沿用；保存走 source.update，
+// 来源 id 不变，且不能再换类型。
+func TestEditingAConnectionKeepsTheSecretAndUpdatesTheSource(t *testing.T) {
+	f := newSourceFake(t)
+	f.seedSource(
+		service.Source{ID: "s_00000005", Name: "warehouse", Kind: "sql", Active: true, Open: true, Tables: []string{"orders"}, ConfigID: "ds_00000001"},
+		[]string{"orders"},
+		service.SourcePreview{SourceName: "warehouse", Tables: []service.PreviewTableInfo{{Name: "orders", Columns: []string{"id"}}}},
+		"schema",
+	)
+	f.mu.Lock()
+	f.configs = []service.SourceConfig{{
+		ID: "ds_00000001", Kind: "sql", Name: "warehouse",
+		Fields:       map[string]string{"driver": "postgresql", "host": "10.0.0.5", "port": "5432", "database": "app", "username": "analyst", "ssl": "false"},
+		SecretFields: []string{"password"},
+	}}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1800)
+
+	if err := tt.Click("Edit"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	if a.src.sql.host != "10.0.0.5" || a.src.sql.user != "analyst" || a.src.sql.password != "" {
+		t.Fatalf("the form was filled with %+v", a.src.sql)
+	}
+	expectTexts(t, tt, []string{"Edit SQL database connection", "Save changes"}, []string{"Saved connection"})
+
+	// 主机换了：清空旧值再写新的。
+	if err := tt.Click("Host"); err != nil {
+		t.Fatal(err)
+	}
+	a.src.sql.host = ""
+	tt.Frame()
+	tt.Type("10.0.0.9")
+	if err := tt.Click("Save changes"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the update", func() bool { return !a.src.remoteBusy && !a.src.remoteOpen })
+
+	if f.call("source.open") != nil {
+		t.Error("editing a connection opened a new source instead of updating the old one")
+	}
+	params := f.call("source.update")
+	if params == nil || params["sourceId"] != "s_00000005" {
+		t.Fatalf("source.update params: %v", params)
+	}
+	fields, _ := params["fields"].(map[string]any)
+	if fields["host"] != "10.0.0.9" || fields["database"] != "app" {
+		t.Errorf("fields: %v", fields)
+	}
+	if secret, _ := params["secret"].(map[string]any); secret != nil {
+		if _, sent := secret["password"]; sent {
+			t.Errorf("an untouched password must not be sent again: %v", secret)
+		}
+	}
+	if a.src.remoteEditID != "" {
+		t.Error("the form is still in edit mode after saving")
 	}
 }

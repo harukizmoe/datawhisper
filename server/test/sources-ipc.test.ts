@@ -586,6 +586,59 @@ describe("数据库表单字段", () => {
     expect(failed.error?.message).not.toContain("leaky-pa55");
     expect(failed.error?.message).toContain("认证失败");
   });
+
+  test("source.update：只改主机，密码沿用；试连失败时旧设置原样保留", async () => {
+    const opened = await server.call<{ source: { id: string; configId: string; open: boolean } }>("source.open", {
+      conversationId: 1,
+      kind: "sql",
+      name: "shop",
+      fields: form,
+      secret: { password: "kept-pw-1" },
+    });
+    const id = opened.result!.source.id;
+    const configId = opened.result!.source.configId;
+    expect(configId).toMatch(/^ds_/);
+    // 刚连上的远程来源在 compute 里已经打开，界面不能显示成「已关闭」。
+    expect(opened.result!.source.open).toBe(true);
+    const hostOf = () => new URL(String(compute.opened.get(id)?.connection_string)).host;
+    expect(hostOf()).toBe("db.internal:5433");
+
+    // 失败的修改（新密码被 compute 拒绝）：报错、不泄露密码，连接与配置都没变。
+    const failed = await server.call("source.update", {
+      conversationId: 1,
+      sourceId: id,
+      fields: { ...form, host: "db.moved" },
+      secret: { password: "leaky-pa55" },
+    });
+    expect(failed.error?.message).toContain("认证失败");
+    expect(failed.error?.message).not.toContain("leaky-pa55");
+    expect(hostOf()).toBe("db.internal:5433");
+    const unchanged = await server.call<{ configs: { fields: Record<string, string> }[] }>("source.config.list", {});
+    expect(unchanged.result!.configs[0]!.fields.host).toBe("db.internal");
+
+    // 成功的修改：不带密码就沿用已保存的那个；来源重开、改名、配置原地更新而不是新增一条。
+    const updated = await server.call<{ source: { id: string; name: string; configId: string; open: boolean } }>("source.update", {
+      conversationId: 1,
+      sourceId: id,
+      name: "shop (moved)",
+      fields: { ...form, host: "db.moved", port: "6543" },
+    });
+    expect(updated.error).toBeUndefined();
+    expect(updated.result!.source).toMatchObject({ id, name: "shop (moved)", configId, open: true });
+    expect(hostOf()).toBe("db.moved:6543");
+    expect(decodeURIComponent(new URL(String(compute.opened.get(id)?.connection_string)).password)).toBe("kept-pw-1");
+    expect(compute.closed).toContain(id);
+    const configs = await server.call<{ configs: { id: string; name: string; fields: Record<string, string> }[] }>("source.config.list", {});
+    expect(configs.result!.configs).toHaveLength(1);
+    expect(configs.result!.configs[0]).toMatchObject({ id: configId, name: "shop (moved)", fields: { host: "db.moved", port: "6543" } });
+    expect(store.peek(1).sources[0]!.name).toBe("shop (moved)");
+  });
+
+  test("上传的文件没有连接设置可改", async () => {
+    const { sourceId } = await openUpload("a.csv", "a\n1\n");
+    const reply = await server.call("source.update", { conversationId: 1, sourceId, fields: {} });
+    expect(reasonOf(reply)).toBe("not_editable");
+  });
 });
 
 describe("工作区", () => {

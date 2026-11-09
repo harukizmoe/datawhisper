@@ -174,13 +174,32 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 				a.setSourceActive(src, active)
 			}
 			ui.Text(c, a.tr("data.inAnalysis")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-			ui.Spacer(c)
+		})
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			if ui.Button(c, a.tr("data.preview")).Tooltip(a.tr("data.previewTip", "name", src.Name)).Clicked() {
 				a.showPreview(src.ID)
 			}
-			if ui.Button(c, a.tr("data.edit")).Tooltip(a.tr("data.editTip", "name", src.Name)).Clicked() {
-				a.openSourceEditor(src, false)
+			// 「数据表」管 agent 能看哪些表（只有 SQL 来源有），「编辑」管连接本身（只有远程来源有）。
+			if src.Kind == "sql" {
+				if ui.Button(c, a.tr("data.tablesBtn")).Tooltip(a.tr("data.chooseTablesTip")).Clicked() {
+					a.openSourceEditor(src, false)
+				}
 			}
+			if src.ConfigID != "" {
+				if ui.Button(c, a.tr("data.edit")).Tooltip(a.tr("data.editConnTip", "name", src.Name)).Clicked() {
+					a.editConnection(src)
+				}
+			}
+			ui.MenuButton(c, a.tr("data.more"), func(m *ui.Menu) {
+				if src.Open {
+					if m.Item(a.tr("data.closeSource")).Chosen() {
+						a.closeSource(src)
+					}
+				} else if m.Item(a.tr("data.openSource")).Chosen() {
+					a.openSource(src)
+				}
+			})
+			ui.Spacer(c)
 			if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeTip", "name", src.Name)).Clicked() {
 				a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmSource, src.ID, src.Name
 				a.src.confirmOpen = true
@@ -293,7 +312,11 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 	kind := remoteKinds[a.src.remoteKind]
 	ui.Column(c).Gap(8).Padding(10).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Accent.Alpha(0.5)).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, a.tr("data.connectKind", "kind", a.kindLabel(kind))).Bold().Grow(1).MinWidth(0)
+			title := a.tr("data.connectKind", "kind", a.kindLabel(kind))
+			if a.src.remoteEditID != "" {
+				title = a.tr("data.editKind", "kind", a.kindLabel(kind))
+			}
+			ui.Text(c, title).Bold().Grow(1).MinWidth(0)
 			if ui.Button(c, a.tr("data.cancel")).Tooltip(a.tr("data.closeFormTip")).Clicked() {
 				a.src.remoteOpen, a.src.remoteErr = false, ""
 			}
@@ -302,43 +325,46 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 		for i := range remoteKinds {
 			labels[i] = a.kindLabel(remoteKinds[i])
 		}
-		ui.Field(c, a.tr("data.fieldType"), func() {
-			choice := a.kindLabel(kind)
-			if ui.Select(c, &choice, labels).Label(a.tr("data.sourceType")).Changed() {
-				for i := range remoteKinds {
-					if a.kindLabel(remoteKinds[i]) == choice {
-						a.startRemote(i)
-						return
-					}
-				}
-			}
-		})
-		if configs := configsForKind(a.src.configs, kind.ID); len(configs) > 0 {
-			ui.Field(c, a.tr("data.fieldSaved"), func() {
-				options := []string{a.tr("data.newConnection")}
-				for _, cfg := range configs {
-					options = append(options, configLabel(cfg))
-				}
-				choice := a.tr("data.newConnection")
-				for _, cfg := range configs {
-					if cfg.ID == a.src.remoteConfigID {
-						choice = configLabel(cfg)
-					}
-				}
-				if ui.Select(c, &choice, options).Label(a.tr("data.savedConnection")).Changed() {
-					a.src.remoteErr = ""
-					if choice == a.tr("data.newConnection") {
-						a.startRemote(a.src.remoteKind)
-					} else {
-						for _, cfg := range configs {
-							if configLabel(cfg) == choice {
-								a.useConfig(cfg)
-								return
-							}
+		// 改已有来源时类型和「已保存的连接」都不能换：它们决定的是新建哪个连接。
+		if a.src.remoteEditID == "" {
+			ui.Field(c, a.tr("data.fieldType"), func() {
+				choice := a.kindLabel(kind)
+				if ui.Select(c, &choice, labels).Label(a.tr("data.sourceType")).Changed() {
+					for i := range remoteKinds {
+						if a.kindLabel(remoteKinds[i]) == choice {
+							a.startRemote(i)
+							return
 						}
 					}
 				}
 			})
+			if configs := configsForKind(a.src.configs, kind.ID); len(configs) > 0 {
+				ui.Field(c, a.tr("data.fieldSaved"), func() {
+					options := []string{a.tr("data.newConnection")}
+					for _, cfg := range configs {
+						options = append(options, configLabel(cfg))
+					}
+					choice := a.tr("data.newConnection")
+					for _, cfg := range configs {
+						if cfg.ID == a.src.remoteConfigID {
+							choice = configLabel(cfg)
+						}
+					}
+					if ui.Select(c, &choice, options).Label(a.tr("data.savedConnection")).Changed() {
+						a.src.remoteErr = ""
+						if choice == a.tr("data.newConnection") {
+							a.startRemote(a.src.remoteKind)
+						} else {
+							for _, cfg := range configs {
+								if configLabel(cfg) == choice {
+									a.useConfig(cfg)
+									return
+								}
+							}
+						}
+					}
+				})
+			}
 		}
 		ui.Field(c, a.tr("data.fieldName"), func() {
 			ui.TextInput(c, &a.src.remoteName).Label(a.tr("data.displayName")).Placeholder(a.tr("data.optional"))
@@ -395,7 +421,11 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, a.src.remoteErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			connect := ui.PrimaryButton(c, a.tr("data.addSource"))
+			submit := a.tr("data.addSource")
+			if a.src.remoteEditID != "" {
+				submit = a.tr("data.saveChanges")
+			}
+			connect := ui.PrimaryButton(c, submit)
 			if a.src.remoteBusy {
 				connect.Disabled(true)
 				ui.Spinner(c)
@@ -410,7 +440,7 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 			if test.Clicked() {
 				a.testRemote()
 			}
-			if a.src.remoteConfigID != "" {
+			if a.src.remoteConfigID != "" && a.src.remoteEditID == "" {
 				if ui.Button(c, a.tr("data.forget")).Tooltip(a.tr("data.forgetTip")).Clicked() {
 					for _, cfg := range a.src.configs {
 						if cfg.ID == a.src.remoteConfigID {
@@ -769,7 +799,7 @@ func (a *app) sourceModals(c *ui.Context, t *ui.Theme) {
 	}
 }
 
-// editModal 编辑一个来源：SQL 来源在这里选分析表，任何来源都能在这里开关。
+// editModal 是 SQL 来源的选表对话框：选出允许 agent 分析的数据表。连接本身的修改在来源卡片的「编辑」里。
 func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 	var src service.Source
 	found := false
@@ -786,26 +816,6 @@ func (a *app) editModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &a.src.editOpen, func() {
 		ui.Text(c, a.tr("data.sourceTitle", "name", src.Name)).Bold()
 		ui.Text(c, a.tr("data.kindTables", "kind", src.Kind, "count", strconv.Itoa(len(src.Tables)))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-		if src.Open {
-			if ui.Button(c, a.tr("data.closeSource")).Tooltip(a.tr("data.closeSourceTip")).Clicked() {
-				a.src.editOpen = false
-				a.closeSource(src)
-			}
-		} else {
-			if ui.Button(c, a.tr("data.openSource")).Tooltip(a.tr("data.openSourceTip")).Clicked() {
-				a.src.editOpen = false
-				a.openSource(src)
-			}
-		}
-		if src.Kind != "sql" {
-			ui.Text(c, a.tr("data.sqlOnlyHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if ui.Button(c, a.tr("data.cancel")).Clicked() {
-					a.src.editOpen = false
-				}
-			})
-			return
-		}
 		if a.src.editBusy {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Spinner(c)

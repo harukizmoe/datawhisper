@@ -292,6 +292,8 @@ function publicSource(record: StoredSource, open: ReadonlySet<string>): Record<s
     kind: record.kind,
     active: record.active,
     open: open.has(record.id),
+    // 配置 id 不是密钥；界面据此找到这个来源的连接设置，才能让用户改。
+    ...(record.configId === undefined ? {} : { configId: record.configId }),
     ...(record.tables === undefined ? {} : { tables: record.tables }),
   };
 }
@@ -811,6 +813,8 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     const prepared = await prepareRemote(kind, params);
     const sourceId = randomId("s_");
     const opened = await openCompute(sourceId, prepared.descriptor);
+    // 与上传一致：compute 里已经打开了，要登记，否则界面刚连上就显示「已关闭」，用到时还会被重复打开。
+    openIds.add(sourceId);
     try {
       const saved = await deps.configs.save({
         id: prepared.configId,
@@ -963,6 +967,43 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       });
       const doc = await state.read(conversationId);
       return { ok: true, active: updated.active, source: publicSource(updated, openIds), sources: sourceView(doc) };
+    },
+
+    "source.update": async (params) => {
+      // 改一个已连接来源的连接设置（主机、端口、库名、凭据、名称……）：先用新设置试连，
+      // 通过了才保存配置、关掉旧连接并重新打开；试连失败时旧设置原样保留。
+      const conversationId = conversationIdParam(params);
+      const sourceId = patternParam(params, "sourceId", SOURCE_ID_PATTERN, "s_xxxxxxxx");
+      const before = requireStoredSource(await state.read(conversationId), sourceId);
+      const kind = before.kind;
+      if (before.configId === undefined || !Object.hasOwn(REMOTE_KINDS, kind)) {
+        throw invalidReason("这个数据源没有可修改的连接设置", "not_editable");
+      }
+      const prepared = await prepareRemote(kind as RemoteSourceKind, { ...params, kind, configId: before.configId });
+      try {
+        await deps.compute.call("source.test", { descriptor: prepared.descriptor });
+      } catch (error) {
+        throw mapComputeError(error, secretValues(prepared.descriptor));
+      }
+      const name = prepared.name || before.name;
+      await deps.configs.save({
+        id: prepared.configId,
+        kind: kind as RemoteSourceKind,
+        name,
+        fields: prepared.fields,
+        secret: prepared.secret,
+      });
+      await closeCompute(sourceId);
+      await state.update(conversationId, (draft) => {
+        const record = requireStoredSource(draft, sourceId);
+        record.name = name;
+        record.descriptor = prepared.stored;
+        record.updatedAt = iso();
+      });
+      const doc = await state.read(conversationId);
+      const record = requireStoredSource(doc, sourceId);
+      record.tables = await ensureOpen(record);
+      return { source: publicSource(record, openIds), sources: sourceView(doc) };
     },
 
     "source.schema": async (params) => {

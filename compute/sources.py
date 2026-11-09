@@ -283,9 +283,13 @@ def restore_source(info: dict) -> DataSource:
         if not conn:
             raise ValueError("SQL 连接字符串为空")
         source = SQLDataSource(conn, name)
-        tables = info.get("analysis_tables") or []
-        if tables:
-            source.set_analysis_tables([str(item) for item in tables])
+        # 之前选过的表可能已被删掉，或连接改指到了别的库：只恢复仍然存在的，否则整个来源都打不开。
+        saved = [str(item) for item in (info.get("analysis_tables") or [])]
+        if saved:
+            catalog = set(source.list_catalog_tables())
+            tables = [item for item in saved if item in catalog]
+            if tables:
+                source.set_analysis_tables(tables)
         return source
     if kind == "gsheets":
         creds = info.get("creds_dict")

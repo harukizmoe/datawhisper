@@ -117,6 +117,7 @@ type sourcesState struct {
 	remoteCreds    string // gsheets: creds_json
 	remoteAuthVal  string // http: auth_value
 	remoteConfigID string // 已保存配置的 id，空表示新建
+	remoteEditID   string // 非空表示表单在修改这个来源的连接设置，而不是新建连接
 	remoteErr      string
 	remoteBusy     bool
 	sql            sqlForm // SQL 来源的表单字段
@@ -706,12 +707,33 @@ func (a *app) startRemote(index int) {
 	a.src.remoteOpen = true
 	a.src.remoteKind = index
 	a.src.remoteErr = ""
-	a.src.remoteConfigID = ""
+	a.src.remoteConfigID, a.src.remoteEditID = "", ""
 	a.src.remoteName, a.src.remoteSpread, a.src.remoteBitable = "", "", ""
 	a.src.remoteTable, a.src.remoteURL, a.src.remoteAuth = "", "", 0
 	a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
 	a.src.sql = sqlForm{}
 	a.src.testNote, a.src.testFail = "", false
+}
+
+// editConnection 打开表单修改一个已连接来源的连接设置：非密字段从它引用的配置里填回，
+// 密码等密字段留空，留空即沿用已保存的。
+func (a *app) editConnection(src service.Source) {
+	for i, kind := range remoteKinds {
+		if kind.ID != src.Kind {
+			continue
+		}
+		for _, cfg := range a.src.configs {
+			if cfg.ID != src.ConfigID {
+				continue
+			}
+			a.startRemote(i)
+			a.useConfig(cfg)
+			a.src.remoteEditID = src.ID
+			a.src.remoteName = src.Name
+			return
+		}
+	}
+	a.src.notice, a.src.noticeErr = a.tr("data.errNoConnection"), true
 }
 
 // useConfig 把一条已保存配置的非密字段填进表单；密字段只提示已保存，绝不回填值。
@@ -850,11 +872,18 @@ func (a *app) connectRemote() {
 		return
 	}
 	kind := remoteKinds[a.src.remoteKind]
+	editID := a.src.remoteEditID
 	a.src.remoteBusy, a.src.remoteErr = true, ""
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		opened, err := client.OpenRemote(ctx, conv, req)
+		var opened service.SourceOpenResult
+		var err error
+		if editID != "" {
+			opened, err = client.UpdateRemote(ctx, conv, editID, req)
+		} else {
+			opened, err = client.OpenRemote(ctx, conv, req)
+		}
 		a.post(func() {
 			if client != a.client {
 				return
@@ -872,6 +901,16 @@ func (a *app) connectRemote() {
 			a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
 			a.src.sql.password = ""
 			a.src.remoteOpen, a.src.remoteErr = false, ""
+			if editID != "" {
+				// 改的是已有来源：连接设置已换，预览里看到的还是旧库，重新读一遍。
+				a.src.remoteEditID = ""
+				a.src.notice, a.src.noticeErr = a.tr("data.updated", "name", name), false
+				if a.src.previewID == editID {
+					a.showPreview(editID)
+				}
+				a.loadSources()
+				return
+			}
 			a.src.notice, a.src.noticeErr = a.tr("data.connected", "name", name), false
 			// 远程 SQL 来源连上后默认不向 agent 开放任何表：直接引导用户选表，而不是等他自己找到「编辑」。
 			if kind.ID == "sql" && opened.Source != nil {

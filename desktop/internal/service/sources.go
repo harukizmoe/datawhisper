@@ -14,6 +14,8 @@ type Source struct {
 	Active bool     `json:"active"` // 是否参与分析
 	Open   bool     `json:"open"`   // 计算侧是否已打开
 	Tables []string `json:"tables,omitempty"`
+	// ConfigID 是远程来源的连接配置 id（不是密钥）；文件来源没有。有它才能修改连接设置。
+	ConfigID string `json:"configId,omitempty"`
 }
 
 // SourceNode 是 source.list 的结果。
@@ -221,6 +223,18 @@ func (c *Client) OpenRemote(ctx context.Context, conversationID int, req RemoteR
 	params["conversationId"] = conversationID
 	var out SourceOpenResult
 	err := c.callInto(ctx, "source.open", params, &out)
+	return out, err
+}
+
+// UpdateRemote 修改一个已连接来源的连接设置。服务端先用新设置试连，通过了才保存并重开；
+// 失败时旧设置原样保留。req.ConfigID 不用：配置由来源自己引用。
+func (c *Client) UpdateRemote(ctx context.Context, conversationID int, sourceID string, req RemoteRequest) (SourceOpenResult, error) {
+	params := remoteParams(req)
+	delete(params, "configId")
+	params["conversationId"] = conversationID
+	params["sourceId"] = sourceID
+	var out SourceOpenResult
+	err := c.callInto(ctx, "source.update", params, &out)
 	return out, err
 }
 

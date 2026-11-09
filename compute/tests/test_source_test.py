@@ -8,7 +8,7 @@ from pathlib import Path
 
 from compute.methods import METHODS, _sources
 from compute.rpc import RpcError
-from compute.sources import friendly_conn_error
+from compute.sources import friendly_conn_error, restore_source
 
 
 class SourceTestMethod(unittest.TestCase):
@@ -35,6 +35,23 @@ class SourceTestMethod(unittest.TestCase):
             METHODS["source.test"](None, {"descriptor": {"kind": "sql", "connection_string": "sqlite:////nonexistent/dir/x.db"}})
         self.assertEqual(caught.exception.data["kind"], "open_failed")
         self.assertIn("无法打开数据库文件", str(caught.exception))
+
+
+class RestoreSelection(unittest.TestCase):
+    def test_saved_tables_that_no_longer_exist_do_not_block_opening(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "demo.db"
+            con = sqlite3.connect(db)
+            con.execute("create table sales(region text)")
+            con.commit()
+            con.close()
+            descriptor = {"kind": "sql", "connection_string": f"sqlite:///{db}"}
+            source = restore_source({**descriptor, "analysis_tables": ["sales", "dropped"]})
+            self.addCleanup(source.close)
+            self.assertEqual(source.get_analysis_tables(), ["sales"])
+            gone = restore_source({**descriptor, "analysis_tables": ["dropped"]})
+            self.addCleanup(gone.close)
+            self.assertEqual(gone.get_analysis_tables(), [])
 
 
 class DatabaseErrorWording(unittest.TestCase):
