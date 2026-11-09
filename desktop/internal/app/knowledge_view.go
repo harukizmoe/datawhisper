@@ -105,7 +105,7 @@ func (a *app) knowledgeCategories(c *ui.Context, t *ui.Theme) {
 						ui.Text(c, a.tr("know.off")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 					}
 				})
-			}).ContextMenu(func(m *ui.Menu) {
+			}).PopoverMenu(func(m *ui.Menu) {
 				toggle := a.tr("know.disable")
 				if !cat.Enabled() {
 					toggle = a.tr("know.enable")

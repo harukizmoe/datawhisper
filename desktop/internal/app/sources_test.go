@@ -847,7 +847,7 @@ func TestDataPanelNeverShowsSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.ChooseMenuItem("SQL database"); err != nil {
+	if err := tt.Click("SQL database"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
@@ -900,7 +900,7 @@ func TestDataPanelSQLFormSendsFieldsAndKeepsThePasswordSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.ChooseMenuItem("SQL database"); err != nil {
+	if err := tt.Click("SQL database"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
@@ -965,7 +965,7 @@ func TestDataPanelReusesSavedConnectionWithoutItsSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.ChooseMenuItem("SQL database"); err != nil {
+	if err := tt.Click("SQL database"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
@@ -1119,7 +1119,7 @@ func TestConnectingASQLSourceAsksForTablesRightAway(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.ChooseMenuItem("SQL database"); err != nil {
+	if err := tt.Click("SQL database"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
@@ -1240,9 +1240,9 @@ func TestAnySourceCanBeRenamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if err := tt.ChooseMenuItem("Rename"); err != nil {
-		t.Fatal(err)
-	}
+	// 界面上还有标题栏的「Rename」按钮，按文字点会点到它；菜单已经拿到焦点，用键盘选第一项（重命名）。
+	tt.Key(0, ui.KeyDown)
+	tt.Key(0, ui.KeyEnter)
 	q.pump(t, tt, "the rename dialog", func() bool { return a.src.renameOpen })
 	if a.src.renameText != "sales.csv" {
 		t.Fatalf("the dialog starts with %q", a.src.renameText)

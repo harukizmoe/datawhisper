@@ -103,7 +103,7 @@ func (a *app) sourcesTab(c *ui.Context, t *ui.Theme) {
 		if button.Clicked() {
 			a.pickFile()
 		}
-		ui.MenuButton(c, a.tr("data.connect"), func(m *ui.Menu) {
+		ui.PopoverMenuButton(c, a.tr("data.connect"), func(m *ui.Menu) {
 			for i := range remoteKinds {
 				i := i
 				if m.Item(a.kindLabel(remoteKinds[i])).Chosen() {
@@ -190,7 +190,7 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 					a.editConnection(src)
 				}
 			}
-			ui.MenuButton(c, a.tr("data.more"), func(m *ui.Menu) {
+			ui.PopoverMenuButton(c, a.tr("data.more"), func(m *ui.Menu) {
 				if m.Item(a.tr("data.rename")).Chosen() {
 					a.openSourceRename(src)
 				}

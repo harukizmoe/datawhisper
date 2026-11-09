@@ -217,7 +217,7 @@ func (a *app) providerCard(c *ui.Context, t *ui.Theme, p service.ModelProvider) 
 			// 次要操作收进「⋯」菜单：卡片上不再并排一串带提供方名字的长按钮。
 			ui.Button(c, "").Label(a.tr("settings.providerActions", "name", p.Name)).Tooltip(a.tr("settings.moreActions")).Children(func() {
 				ui.Icon(c, icons.More)
-			}).Menu(func(m *ui.Menu) {
+			}).PopoverMenuButton(func(m *ui.Menu) {
 				if m.Item(a.tr("settings.setKey")).Chosen() {
 					a.st.keyProvider = p.ID
 					a.st.keyInput, a.st.keyErr = "", ""

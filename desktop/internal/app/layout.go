@@ -266,7 +266,7 @@ func (a *app) sessionGroups(now time.Time) []sessionGroup {
 // sessionItem 是侧栏里的一个会话：右键菜单里有重命名、置顶与归档（服务端没有对应功能时不显示那一项）。
 func (a *app) sessionItem(c *ui.Context, s service.Session) {
 	id := s.ID
-	ui.SidebarItem(c, navOf(id), nil, a.sessionTitle(id)).ContextMenu(func(m *ui.Menu) {
+	ui.SidebarItem(c, navOf(id), nil, a.sessionTitle(id)).PopoverMenu(func(m *ui.Menu) {
 		if m.Item(a.tr("chat.rename")).Chosen() {
 			if a.conv != id {
 				a.nav = navOf(id)

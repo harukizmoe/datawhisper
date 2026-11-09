@@ -634,12 +634,11 @@ func TestSettingsKeyEditorWritesButNeverReads(t *testing.T) {
 	if err := tt.Click("Actions for Acme"); err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range tt.Menu() {
-		if item == "Clear key" {
-			t.Error("the menu still offers Clear key")
-		}
+	tt.Frame()
+	if tt.HasText("Clear key") {
+		t.Error("the menu still offers Clear key")
 	}
-	tt.CloseMenu()
+	tt.Key(0, ui.KeyEscape)
 	if !f.hasCall("models.clearKey") {
 		t.Error("no models.clearKey call")
 	}
@@ -781,8 +780,9 @@ func providerAction(t *testing.T, tt *ui.Tester, provider, item string) {
 	if err := tt.Click("Actions for " + provider); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem(item); err != nil {
-		t.Fatalf("%v; menu %q", err, tt.Menu())
+	// 菜单画在窗口里（PopoverMenuButton），直接点菜单项的文字。
+	if err := tt.Click(item); err != nil {
+		t.Fatal(err)
 	}
 	tt.Frame()
 }

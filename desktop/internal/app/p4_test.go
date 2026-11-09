@@ -30,8 +30,8 @@ func TestSidebarGroupsAndSessionActions(t *testing.T) {
 	if err := tt.RightClick("Workspace check"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("Pin"); err != nil {
-		t.Fatalf("%v; menu %q", err, tt.Menu())
+	if err := tt.Click("Pin"); err != nil {
+		t.Fatal(err)
 	}
 	q.pump(t, tt, "session.pin", func() bool { return len(fs.callsTo("session.pin")) > 0 })
 	if got := fs.callsTo("session.pin")[0]; got["id"] != float64(4) || got["pinned"] != true {
@@ -41,7 +41,7 @@ func TestSidebarGroupsAndSessionActions(t *testing.T) {
 	if err := tt.RightClick("Greeting"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("Delete"); err != nil {
+	if err := tt.Click("Delete"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
