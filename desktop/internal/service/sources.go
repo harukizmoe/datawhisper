@@ -302,6 +302,13 @@ func (c *Client) ToggleSource(ctx context.Context, conversationID int, sourceID 
 	return out, err
 }
 
+// RenameSource 改一个来源在界面里显示的名称；连接设置的修改用 UpdateRemote。
+func (c *Client) RenameSource(ctx context.Context, conversationID int, sourceID, name string) (SourceOpenResult, error) {
+	var out SourceOpenResult
+	err := c.callInto(ctx, "source.rename", map[string]any{"conversationId": conversationID, "sourceId": sourceID, "name": name}, &out)
+	return out, err
+}
+
 // SourceSchema 返回一个来源的 schema 文本。
 func (c *Client) SourceSchema(ctx context.Context, conversationID int, sourceID string) (string, error) {
 	var out struct {

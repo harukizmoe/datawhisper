@@ -418,6 +418,22 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"configs": configs})
 
+		case "source.rename":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			name, _ := params["name"].(string)
+			f.mu.Lock()
+			var renamed service.Source
+			for i := range f.sources {
+				if f.sources[i].ID == id {
+					f.sources[i].Name = name
+					renamed = f.sources[i]
+				}
+			}
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"source": renamed, "sources": list})
+
 		case "source.update":
 			f.record(req.Method, req.Params)
 			id, _ := params["sourceId"].(string)
@@ -1207,4 +1223,51 @@ func TestEditingAConnectionKeepsTheSecretAndUpdatesTheSource(t *testing.T) {
 	if a.src.remoteEditID != "" {
 		t.Error("the form is still in edit mode after saving")
 	}
+}
+
+// TestAnySourceCanBeRenamed 回归：文件来源没有连接设置，也要能改名；名称里的首尾空白被去掉，空名在界面上就被拦下。
+func TestAnySourceCanBeRenamed(t *testing.T) {
+	f := newSourceFake(t)
+	f.seedSource(
+		service.Source{ID: "s_00000001", Name: "sales.csv", Kind: "csv", Active: true, Open: true, Tables: []string{"sales"}},
+		[]string{"sales"},
+		service.SourcePreview{SourceName: "sales.csv"},
+		"schema",
+	)
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	if err := tt.Click("More"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("Rename"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the rename dialog", func() bool { return a.src.renameOpen })
+	if a.src.renameText != "sales.csv" {
+		t.Fatalf("the dialog starts with %q", a.src.renameText)
+	}
+
+	// 空名：不发请求，对话框里提示。
+	a.src.renameText = "   "
+	tt.Frame()
+	if err := tt.Click("Save"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if f.call("source.rename") != nil || a.src.renameErr == "" {
+		t.Errorf("a blank name was sent or not reported: err=%q", a.src.renameErr)
+	}
+
+	a.src.renameText = "  Monthly sales  "
+	tt.Frame()
+	if err := tt.Click("Save"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the renamed source", func() bool { return !a.src.renameOpen && !a.src.renameBusy })
+	params := f.call("source.rename")
+	if params == nil || params["sourceId"] != "s_00000001" || params["name"] != "Monthly sales" {
+		t.Fatalf("source.rename params: %v", params)
+	}
+	q.pump(t, tt, "the refreshed list", func() bool { return len(a.src.sources) == 1 && a.src.sources[0].Name == "Monthly sales" })
 }

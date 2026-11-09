@@ -6,6 +6,11 @@
   不必删掉重建。保存前先用新设置试连，失败时旧设置原样保留；成功后原地重连，来源 id 与已选的表保留。
   选表单独放到「数据表」按钮；打开/关闭连接收进「更多」。
 - 连上 SQL 数据库后自动弹出选表对话框（≤ 20 张默认全选）；没选表时卡片明说「还没选数据表」。
+- 所有数据源（包括 CSV、Excel、PDF）都能重命名：卡片上「更多」→「重命名」。
+- 画布：旧的 draw.io 画布从未接上存储，模型调用 `display_diagram` 等只会得到「Canvas storage is not available」。
+  现在没有存储时这三个工具不再暴露给模型，界面里过期的「画布」入口也去掉了。原生画布的需求见
+  `docs/refactor/native-canvas-prd.md`，尚未实现。
+- 重新打包 compute，安装版现在带 `psycopg`，PostgreSQL 可用（用打好的包经真实 server 连 docker 里的 postgres 验证）。
 - 修复：刚连上的远程来源被显示成「已关闭」（服务端没登记它已打开）。
 - 修复：之前选过的表被删掉、或连接改指到别的库时，来源整个打不开；现在只恢复仍然存在的表。
 - 数据库来源改为按字段填写：选类型（PostgreSQL / MySQL / SQL Server / SQLite），填主机、端口、库名、用户名与密码，
@@ -64,7 +69,7 @@
 ### 已知限制
 
 - 浏览器交互类工具（点击/填表/截图）本轮未移植；纯 HTTP 取正文可用。
-- draw.io 画布只提供只读入口（用外部编辑器打开），桌面端不内嵌编辑器。
+- 画布（画流程图、SWOT 等）暂不可用：旧的 draw.io 方案已放弃，原生画布见 `docs/refactor/native-canvas-prd.md`。
 - 工作流审批（`key_approval` / `exception_review`）、verifier rework、手动重试节点未迁移。
 - 飞书长连接按官方 SDK 源码复刻协议，未在真实飞书环境验证。
 - Linux 上窗口顶部原生菜单栏跟随 GTK 主题，不跟随应用内选的深浅色。

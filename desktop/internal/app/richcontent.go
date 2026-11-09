@@ -405,58 +405,11 @@ func dashboardLabelOf(list []service.Dashboard, labels []string, id string) stri
 	return ""
 }
 
-// ---------------------------------------------------------------------------
-// 画布
-// ---------------------------------------------------------------------------
-
-// openCanvas 打开画布的只读入口：列出本会话产物里的 drawio 图。
-func (a *app) openCanvas() { a.canvasOpen = true }
-
-// canvasModal 是画布入口。旧界面用内嵌的 draw.io 编辑器渲染画布（static/drawio，147 MB，
-// 配旧 Flask 前端的 postMessage 协议，而且画布项目存在那个前端自己的 store 里）；这个服务
-// 没有画布 IPC，所以只读入口列出导出到产物的 .drawio/.canvas 文件，交给系统的 draw.io 打开。
-func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
-	if !a.canvasOpen {
-		return
-	}
-	ui.Modal(c, &a.canvasOpen, func() {
-		ui.Column(c).Width(640).Gap(10).Children(func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, a.tr("dash.canvas")).Bold().FontSize(a.fs(textSection))
-				ui.Spacer(c)
-				if ui.Button(c, a.tr("chat.close")).Clicked() {
-					a.canvasOpen = false
-				}
-			})
-			ui.Text(c, a.tr("dash.canvasHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-			var files []service.Artifact
-			for _, art := range a.src.artifacts {
-				if diagramFile(art.Name) {
-					files = append(files, art)
-				}
-			}
-			if len(files) == 0 {
-				ui.Text(c, a.tr("dash.canvasNone")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-				return
-			}
-			for _, art := range files {
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, art.Name).Grow(1).MinWidth(0).SingleLine().Tooltip(art.Path)
-					if ui.Button(c, a.tr("dash.open")).FontSize(a.fs(textCaption)).Tooltip(a.tr("dash.openDrawioTip", "name", art.Name)).Clicked() {
-						c.OpenURL(preview.FileURL(art.Path))
-					}
-				})
-			}
-		})
-	})
-}
-
 // richModals 画图表与富内容自己的弹窗；与聊天弹窗并列画在窗口根上。
 func (a *app) richModals(c *ui.Context) {
 	t := c.Theme()
 	a.dashboardsModal(c, t)
 	a.fullChartModal(c, t)
-	a.canvasModal(c, t)
 	if !a.dash.open && !a.cv.fullOpen {
 		a.rich.ReleaseModal()
 	}

@@ -191,6 +191,9 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 				}
 			}
 			ui.MenuButton(c, a.tr("data.more"), func(m *ui.Menu) {
+				if m.Item(a.tr("data.rename")).Chosen() {
+					a.openSourceRename(src)
+				}
 				if src.Open {
 					if m.Item(a.tr("data.closeSource")).Chosen() {
 						a.closeSource(src)
@@ -672,9 +675,6 @@ func (a *app) artifactsTab(c *ui.Context, t *ui.Theme) {
 		if ui.Button(c, a.tr("dash.title")).Tooltip(a.tr("data.dashboardsTip")).Clicked() {
 			a.openDashboards()
 		}
-		if ui.Button(c, a.tr("dash.canvas")).Tooltip(a.tr("data.canvasTip")).Clicked() {
-			a.openCanvas()
-		}
 		if ui.Button(c, a.tr("data.refresh")).Tooltip(a.tr("data.artifactsRefreshTip")).Clicked() {
 			a.loadSources()
 		}
@@ -794,9 +794,36 @@ func (a *app) sourceModals(c *ui.Context, t *ui.Theme) {
 			}
 		})
 	}
+	if a.src.renameOpen {
+		a.renameModal(c, t)
+	}
 	if a.src.editOpen {
 		a.editModal(c, t)
 	}
+}
+
+// renameModal 是来源改名对话框。
+func (a *app) renameModal(c *ui.Context, t *ui.Theme) {
+	ui.Modal(c, &a.src.renameOpen, func() {
+		ui.Column(c).WidthPercent(70).MaxWidth(420).MinWidth(260).Gap(10).Children(func() {
+			ui.Text(c, a.tr("data.renameTitle")).Bold()
+			in := ui.TextInput(c, &a.src.renameText).Label(a.tr("data.nameLabel")).MaxWidth(380).AutoFocus()
+			if a.src.renameErr != "" {
+				ui.Text(c, a.src.renameErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
+			}
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if a.src.renameBusy {
+					ui.Spinner(c)
+				}
+				if ui.Button(c, a.tr("data.cancel")).Disabled(a.src.renameBusy).Clicked() {
+					a.src.renameOpen = false
+				}
+				if ui.PrimaryButton(c, a.tr("chat.save")).Disabled(a.src.renameBusy).Clicked() || in.Submitted() {
+					a.renameSource()
+				}
+			})
+		})
+	})
 }
 
 // editModal 是 SQL 来源的选表对话框：选出允许 agent 分析的数据表。连接本身的修改在来源卡片的「编辑」里。

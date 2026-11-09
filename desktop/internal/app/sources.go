@@ -118,14 +118,21 @@ type sourcesState struct {
 	remoteAuthVal  string // http: auth_value
 	remoteConfigID string // 已保存配置的 id，空表示新建
 	remoteEditID   string // 非空表示表单在修改这个来源的连接设置，而不是新建连接
-	remoteErr      string
-	remoteBusy     bool
-	sql            sqlForm // SQL 来源的表单字段
-	testBusy       bool    // 正在试连接
-	testNote       string  // 试连接的结果文案
-	testFail       bool    // testNote 是失败原因
-	configs        []service.SourceConfig
-	configsErr     string
+
+	// 改名对话框（所有来源都能改名，包括没有连接设置的文件来源）。
+	renameOpen bool
+	renameID   string
+	renameText string
+	renameErr  string
+	renameBusy bool
+	remoteErr  string
+	remoteBusy bool
+	sql        sqlForm // SQL 来源的表单字段
+	testBusy   bool    // 正在试连接
+	testNote   string  // 试连接的结果文案
+	testFail   bool    // testNote 是失败原因
+	configs    []service.SourceConfig
+	configsErr string
 
 	// 工作区。
 	current      *service.Workspace
@@ -713,6 +720,43 @@ func (a *app) startRemote(index int) {
 	a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
 	a.src.sql = sqlForm{}
 	a.src.testNote, a.src.testFail = "", false
+}
+
+// openSourceRename 打开来源改名对话框。
+func (a *app) openSourceRename(src service.Source) {
+	a.src.renameOpen, a.src.renameID, a.src.renameText, a.src.renameErr, a.src.renameBusy = true, src.ID, src.Name, "", false
+}
+
+// renameSource 把新名称发给服务端；名称没变就直接关掉对话框。
+func (a *app) renameSource() {
+	name := strings.TrimSpace(a.src.renameText)
+	if name == "" {
+		a.src.renameErr = a.tr("data.renameEmpty")
+		return
+	}
+	client, conv, id := a.client, a.src.conv, a.src.renameID
+	if client == nil || conv == 0 {
+		a.src.renameErr = a.tr("data.connectNeedChat")
+		return
+	}
+	a.src.renameBusy, a.src.renameErr = true, ""
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, err := client.RenameSource(ctx, conv, id, name)
+		a.post(func() {
+			if client != a.client {
+				return
+			}
+			a.src.renameBusy = false
+			if err != nil {
+				a.src.renameErr = a.sourceErr(err)
+				return
+			}
+			a.src.renameOpen = false
+			a.loadSources()
+		})
+	}()
 }
 
 // editConnection 打开表单修改一个已连接来源的连接设置：非密字段从它引用的配置里填回，

@@ -969,6 +969,23 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       return { ok: true, active: updated.active, source: publicSource(updated, openIds), sources: sourceView(doc) };
     },
 
+    "source.rename": async (params) => {
+      // 只改界面里显示的来源名；连接设置的修改走 source.update。文件来源也能改名。
+      const conversationId = conversationIdParam(params);
+      const sourceId = patternParam(params, "sourceId", SOURCE_ID_PATTERN, "s_xxxxxxxx");
+      const name = stringParam(params, "name");
+      if (name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) {
+        throw invalidReason("名称最多 200 个字符，且不能含控制字符", "invalid_name");
+      }
+      await state.update(conversationId, (draft) => {
+        const record = requireStoredSource(draft, sourceId);
+        record.name = name;
+        record.updatedAt = iso();
+      });
+      const doc = await state.read(conversationId);
+      return { source: publicSource(requireStoredSource(doc, sourceId), openIds), sources: sourceView(doc) };
+    },
+
     "source.update": async (params) => {
       // 改一个已连接来源的连接设置（主机、端口、库名、凭据、名称……）：先用新设置试连，
       // 通过了才保存配置、关掉旧连接并重新打开；试连失败时旧设置原样保留。

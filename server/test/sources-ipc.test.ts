@@ -634,6 +634,22 @@ describe("数据库表单字段", () => {
     expect(store.peek(1).sources[0]!.name).toBe("shop (moved)");
   });
 
+  test("source.rename：文件来源也能改名；空名和过长的名被拒绝", async () => {
+    const { sourceId } = await openUpload("a.csv", "a\n1\n");
+    const renamed = await server.call<{ source: { name: string }; sources: { id: string; name: string }[] }>("source.rename", {
+      conversationId: 1,
+      sourceId,
+      name: "  月度销售  ",
+    });
+    expect(renamed.error).toBeUndefined();
+    expect(renamed.result!.source.name).toBe("月度销售");
+    expect(store.peek(1).sources.find((item) => item.id === sourceId)!.name).toBe("月度销售");
+    expect((await server.call("source.rename", { conversationId: 1, sourceId, name: "   " })).error).toBeDefined();
+    expect(reasonOf(await server.call("source.rename", { conversationId: 1, sourceId, name: "x".repeat(201) }))).toBe("invalid_name");
+    expect(reasonOf(await server.call("source.rename", { conversationId: 1, sourceId, name: "a\nb" }))).toBe("invalid_name");
+    expect(store.peek(1).sources.find((item) => item.id === sourceId)!.name).toBe("月度销售");
+  });
+
   test("上传的文件没有连接设置可改", async () => {
     const { sourceId } = await openUpload("a.csv", "a\n1\n");
     const reply = await server.call("source.update", { conversationId: 1, sourceId, fields: {} });

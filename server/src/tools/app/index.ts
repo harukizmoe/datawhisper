@@ -66,7 +66,13 @@ export const APP_TOOL_NAMES = [
 
 export type AppToolName = (typeof APP_TOOL_NAMES)[number];
 
-/** 新建 41 个工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。 */
+/**
+ * 新建工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。
+ *
+ * 画图三件套依赖画布存储端口：没有端口就根本不创建，而不是创建出来、让模型调用后只得到
+ * 「Canvas storage is not available」。宿主目前没有注入画布存储（新的原生画布见
+ * `docs/refactor/native-canvas-prd.md`），所以实际暴露的是 38 个。
+ */
 export function createAppTools(deps: AppToolDeps): AppTool[] {
   const effective: AppToolDeps = deps.colorScheme === undefined
     ? { ...deps, colorScheme: { value: "mckinsey" } }
@@ -82,7 +88,7 @@ export function createAppTools(deps: AppToolDeps): AppTool[] {
     ...createArtifactTool(effective),
     ...createMemoryTools(effective),
     ...createWebTools(effective),
-    ...createDiagramTools(effective),
+    ...(effective.canvas === undefined ? [] : createDiagramTools(effective)),
     ...createFeishuTools({ connections: () => feishu.connections() }),
   ];
   const order = new Map<string, number>(APP_TOOL_NAMES.map((name, index) => [name, index]));

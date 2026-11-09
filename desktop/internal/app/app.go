@@ -96,11 +96,10 @@ type app struct {
 
 	// win 是主窗口。没有窗口（测试）时内容宽度用默认值，图表按它定高度。
 	win *mygo.Window
-	// rich 是图表与富内容的网页层（图表、HTML 产物、仪表盘、画布），见 richcontent.go。
+	// rich 是图表与富内容的网页层（图表、HTML 产物、仪表盘），见 richcontent.go。
 	rich preview.Pool
-	// dash 与 canvasOpen 是仪表盘查看器与画布入口的界面状态（richcontent.go）。
-	dash       dashState
-	canvasOpen bool
+	// dash 是仪表盘查看器的界面状态（richcontent.go）。
+	dash dashState
 
 	// 界面外壳的偏好与动作（prefs.go、shell.go）：外观、语言、菜单、托盘与文件拖放。
 	prefs     prefs.Prefs
