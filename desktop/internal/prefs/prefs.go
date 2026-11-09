@@ -32,7 +32,7 @@ const AppearanceVersion = 1
 const (
 	DefaultFontFamily       = "Maple Mono NF CN"
 	DefaultUIFontSize       = 14
-	DefaultBufferSize       = 13
+	DefaultBufferSize       = 14
 	DefaultBufferLineHeight = 1.5
 	DefaultBodyLineHeight   = 1.7
 	minUIFontSize           = 12

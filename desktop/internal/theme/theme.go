@@ -377,13 +377,22 @@ func UserDir(dataDir string) string {
 const SystemMonospace = "monospace"
 
 // Fonts 是解析后的字体：界面、buffer（代码、SQL、schema、数据表、工具输出）与回答正文各用哪个 family。
-// 空的 UI family 表示系统 UI 字体。
+// 回答正文的字号跟着它所用的字体走：用 buffer 字体就是 buffer 字号，用界面字体就是界面字号，
+// 否则在设置里改了 buffer 字号，回答正文不会跟着变。空的 UI family 表示系统 UI 字体。
 type Fonts struct {
 	UI, Buffer, Body                 string
-	UISize, BufferSize               float32
+	UISize, BufferSize, BodySize     float32
 	BufferLineHeight, BodyLineHeight float32
 	// UIMissing、BufferMissing 记下用户选的字体没有装、已经回退到系统字体（设置页据此提示）。
 	UIMissing, BufferMissing string
+}
+
+// bodySize 是回答正文的字号；没解析过（零值）时退回界面字号。
+func (f Fonts) bodySize() float32 {
+	if f.BodySize > 0 {
+		return f.BodySize
+	}
+	return f.UISize
 }
 
 // ResolveFonts 把字体偏好对照系统已安装的字体：装了就用，没装就回退到系统字体（UI → 系统 UI 字体，
@@ -418,9 +427,9 @@ func ResolveFonts(ap prefs.Appearance, installed []ui.FontFamily) Fonts {
 			fc.BufferMissing = f
 		}
 	}
-	fc.Body = fc.Buffer
+	fc.Body, fc.BodySize = fc.Buffer, ap.BufferFont.Size
 	if ap.BodyFont == prefs.BodyFontUI {
-		fc.Body = fc.UI
+		fc.Body, fc.BodySize = fc.UI, ap.UIFont.Size
 	}
 	return fc
 }
@@ -578,7 +587,7 @@ func Resolve(scheme *Scheme, dark bool, accent string, fonts Fonts) *Resolved {
 	md := &markdown.Theme{
 		Font:                fonts.Body,
 		CodeFont:            fonts.Buffer,
-		FontSize:            fonts.UISize,
+		FontSize:            fonts.bodySize(),
 		LineHeight:          fonts.BodyLineHeight,
 		CodeLineHeight:      fonts.BufferLineHeight,
 		Text:                t.Text,
@@ -593,8 +602,9 @@ func Resolve(scheme *Scheme, dark bool, accent string, fonts Fonts) *Resolved {
 		Rule:                t.Border,
 		CodeColors:          syntaxTheme(scheme, &t, tok),
 	}
-	if fonts.UISize > 0 && fonts.BufferSize > 0 {
-		md.CodeSize = fonts.BufferSize / fonts.UISize
+	// 代码在正文里按「相对正文字号的倍数」放大缩小，所以用正文字号做分母。
+	if bodySize := fonts.bodySize(); bodySize > 0 && fonts.BufferSize > 0 {
+		md.CodeSize = fonts.BufferSize / bodySize
 	}
 
 	grid := t.Border

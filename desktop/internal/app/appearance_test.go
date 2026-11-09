@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"datawhisper/desktop/internal/conversation"
 	"datawhisper/desktop/internal/prefs"
 	"github.com/egoist/mygo/ui"
 )
@@ -129,5 +130,40 @@ func TestBuiltinSchemesAreListed(t *testing.T) {
 		if !strings.Contains(credits, want) {
 			t.Errorf("credits lack %q:\n%s", want, credits)
 		}
+	}
+}
+
+// TestBufferFontSizeReachesAnswerText 回归：回答正文默认用 buffer 字体，它的字号也得跟着 buffer 字号走；
+// 改了 buffer 字号后回到已有对话，正文要变大。正文改用界面字体时，则只跟界面字号。
+func TestBufferFontSizeReachesAnswerText(t *testing.T) {
+	answerHeight := func(bodyFont string, change func(ap *prefs.Appearance)) float32 {
+		q := newQueue()
+		a := newTestApp(t, q)
+		a.prefs = prefs.Default()
+		a.prefs.Appearance.BodyFont = bodyFont
+		a.chat.Messages = []conversation.Message{
+			{Key: "e1", Role: "user", Text: "question", Done: true},
+			{Key: "e2", Role: "assistant", Text: "Plain answer text", Done: true},
+		}
+		tt := ui.NewTester(a.view, 1180, 900)
+		tt.Frame()
+		a.setAppearance(change)
+		tt.Frame()
+		r, ok := tt.Find("Plain answer text")
+		if !ok {
+			t.Fatal("the answer is not shown")
+		}
+		return r.H
+	}
+	baseline := answerHeight(prefs.BodyFontBuffer, func(*prefs.Appearance) {})
+	if got := answerHeight(prefs.BodyFontBuffer, func(ap *prefs.Appearance) { ap.BufferFont.Size += 3 }); got <= baseline {
+		t.Errorf("a larger buffer font left the answer at %v (was %v)", got, baseline)
+	}
+	baselineUI := answerHeight(prefs.BodyFontUI, func(*prefs.Appearance) {})
+	if got := answerHeight(prefs.BodyFontUI, func(ap *prefs.Appearance) { ap.BufferFont.Size += 3 }); got != baselineUI {
+		t.Errorf("the buffer font size changed an answer set in the interface font: %v vs %v", got, baselineUI)
+	}
+	if got := answerHeight(prefs.BodyFontUI, func(ap *prefs.Appearance) { ap.UIFont.Size += 3 }); got <= baselineUI {
+		t.Errorf("a larger interface font left the answer at %v (was %v)", got, baselineUI)
 	}
 }
