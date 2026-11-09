@@ -49,6 +49,7 @@ import {
   within,
   workspaceIdFor,
 } from "./source-store.ts";
+import { sqlConfigProblem, sqlConnectionString } from "./sql-connection.ts";
 
 /** 只下载/预览、可能很大的产物不放进 JSONL：`artifact.read` 返回服务端路径。 */
 export const MAX_ARTIFACT_TEXT_BYTES = 1024 * 1024;
@@ -261,6 +262,16 @@ function secretValues(descriptor: SourceDescriptor): string[] {
     const value = descriptor[name];
     if (typeof value === "string" && value.length >= 4) values.push(value);
   }
+  // 表单模式下连接串是服务端拼的，密码要单独从中取出来，错误文案里才能把它遮住。
+  const connection = descriptor.connection_string;
+  if (typeof connection === "string") {
+    try {
+      const password = decodeURIComponent(new URL(connection).password);
+      if (password.length >= 4) values.push(password);
+    } catch {
+      // 不是标准 URL（如 SQLite 文件路径）或没有密码：无需额外遮蔽。
+    }
+  }
   const creds = descriptor.creds_dict;
   if (typeof creds === "object" && creds !== null && !Array.isArray(creds)) {
     const record = creds as Record<string, unknown>;
@@ -313,7 +324,8 @@ function requireWorkspace(doc: SourceDoc, workspaceId: string): WorkspaceRecord 
 function requireRemoteConfig(kind: SourceConfigKind, fields: Record<string, string>, secret: Record<string, string>): void {
   const has = (name: string): boolean => (fields[name] ?? secret[name] ?? "") !== "";
   if (kind === "sql") {
-    if (!has("connection_string")) throw invalidReason("连接字符串不能为空", "missing_connection_string");
+    const problem = sqlConfigProblem(fields, secret);
+    if (problem !== undefined) throw invalidReason(problem.message, problem.reason);
     return;
   }
   if (kind === "gsheets") {
@@ -462,9 +474,9 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     const config = await deps.configs.get(record.configId);
     if (config === undefined) throw appError("not_found", `data source config not found: ${record.configId}`);
     const secret = await deps.configs.secret(record.configId);
-    if (secret === undefined) return descriptor;
+    if (secret === undefined && record.kind !== "sql") return descriptor;
     if (record.kind === "gsheets") {
-      const creds = secret.creds_json;
+      const creds = secret?.creds_json;
       if (creds !== undefined) {
         try {
           descriptor.creds_dict = JSON.parse(creds) as JsonValue;
@@ -472,8 +484,11 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
           throw appReason("服务账号 JSON 格式无效", "invalid_credentials");
         }
       }
+    } else if (record.kind === "sql") {
+      // 表单字段在配置里，密码在凭据库；连接串在这一刻才拼出来，不落盘。
+      descriptor.connection_string = sqlConnectionString(config.fields, secret ?? {});
     } else {
-      for (const [key, value] of Object.entries(secret)) descriptor[key] = value;
+      for (const [key, value] of Object.entries(secret ?? {})) descriptor[key] = value;
     }
     return descriptor;
   };
@@ -661,7 +676,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     let descriptor: SourceDescriptor;
     let stored: Record<string, JsonValue>;
     if (kind === "sql") {
-      descriptor = { kind, connection_string: secret.connection_string ?? "" };
+      descriptor = { kind, connection_string: sqlConnectionString(fields, secret) };
       stored = { kind };
     } else if (kind === "gsheets") {
       let creds: JsonValue;
@@ -1043,6 +1058,17 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         target.updatedAt = iso();
       });
       return { source_id: sourceId, tables: selected };
+    },
+
+    "source.test": async (params) => {
+      // 与 source.open 同一套字段与凭据合并，但只在 compute 里试连一次就关，不保存配置也不登记来源。
+      const kind = remoteKindParam(params);
+      const prepared = await prepareRemote(kind, params);
+      try {
+        return await deps.compute.call<Record<string, JsonValue>>("source.test", { descriptor: prepared.descriptor });
+      } catch (error) {
+        throw mapComputeError(error, secretValues(prepared.descriptor));
+      }
     },
 
     // ── 数据源配置（密钥只进不出） ──────────────────────────────────────────

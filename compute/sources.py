@@ -125,6 +125,30 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
         cur = cur.__cause__ or cur.__context__
     text = "  ".join(f"{type(c).__name__}: {c}" for c in chain).lower()
 
+    if service == "数据库":
+        # 数据库的常见失败按原因分开说，并指出该检查哪一项；顺序要先于下面的通用网络/认证文案。
+        if any(k in text for k in (
+            "password authentication failed", "access denied for user", "login failed for user",
+            "authentication failed",
+        )):
+            return "数据库认证失败：用户名或密码不正确，或该用户没有权限访问这个数据库。"
+        if any(k in text for k in (
+            "unknown database", "cannot open database", "does not exist", "no such database",
+        )) and "database" in text:
+            return "数据库不存在：请检查数据库名是否正确。"
+        if "unable to open database file" in text:
+            return "无法打开数据库文件：请检查路径和读取权限。"
+        if "pg_hba.conf" in text:
+            return "服务器拒绝了这次连接（pg_hba.conf 没有放行此主机，或要求/不允许 SSL）：请检查服务器的访问规则和 SSL 开关。"
+        if any(k in text for k in (
+            "connection refused", "could not connect to server", "can't connect to mysql server",
+            "name or service not known", "nodename nor servname", "getaddrinfo failed",
+            "timeout expired", "timed out", "no route to host", "network is unreachable",
+        )):
+            return "无法连接到数据库服务器：请检查主机和端口是否正确，数据库服务是否已启动，防火墙是否放行。"
+        if "no module named" in text and "pyodbc" not in text:
+            return "缺少数据库驱动：这是应用打包的问题，请反馈给开发者，不是你的配置有误。"
+
     # — SQL Server 客户端依赖 —
     if "no module named 'pyodbc'" in text or "no module named \"pyodbc\"" in text:
         return (
@@ -298,6 +322,27 @@ def restore_source(info: dict) -> DataSource:
             raise FileNotFoundError(file_path or "PDF 文件不存在")
         return pdf_source(file_path, name or f"PDF {Path(file_path).name}")
     raise ValueError(f"不支持的数据源类型：{kind or 'unknown'}")
+
+
+def probe_source(info: dict) -> dict:
+    """按 descriptor 试连一次并立即关闭，不登记也不保留任何状态；供界面「测试连接」使用。
+
+    ``tables`` 是目录里的表数（远程 SQL 看完整目录，其余看 source 自己列出的表），
+    ``server`` 只有 SQL 来源才有（产品与版本）。
+    """
+    source = restore_source(info)
+    try:
+        if isinstance(source, SQLDataSource):
+            tables = source.list_catalog_tables()
+            server = source.describe_server()
+        else:
+            tables = source.list_tables()
+            server = ""
+        return {"name": getattr(source, "name", ""), "tables": len(tables), "server": server}
+    finally:
+        close = getattr(source, "close", None)
+        if close is not None:
+            close()
 
 
 class _Entry:

@@ -67,6 +67,12 @@ function fakeCompute(): FakeCompute {
       total_rows: 1,
     }),
     "source.setAnalysisTables": (params) => ({ source_id: params.source_id, tables: params.tables }),
+    "source.test": (params) => {
+      const connection = String((params.descriptor as SourceDescriptor).connection_string);
+      // 模拟驱动只回显密码本身（而不是整条连接串）。
+      if (connection.includes("leaky-pa55")) throw new ComputeError("认证失败：密码 leaky-pa55 不对", -32000, { kind: "open_failed" });
+      return { name: "fake", tables: 3, server: "PostgreSQL 16.0" };
+    },
     "workspace.sync": (params) => ({
       descriptor: {
         kind: "workspace_persistent",
@@ -503,6 +509,82 @@ describe("数据源配置：密钥只进不出", () => {
       bitable: "https://acme.feishu.cn/base/appToken123",
     });
     expect(reasonOf(missing)).toBe("missing_table");
+  });
+});
+
+describe("数据库表单字段", () => {
+  const form = { driver: "postgresql", host: "db.internal", port: "5433", database: "shop", username: "demo", ssl: "true" };
+
+  test("字段拼成连接串：特殊字符密码原样还原，配置里只有非密字段", async () => {
+    const password = "p@ss/w#rd%1";
+    const opened = await server.call<{ source: { id: string }; configId: string }>("source.open", {
+      conversationId: 1,
+      kind: "sql",
+      name: "shop",
+      fields: form,
+      secret: { password },
+    });
+    expect(opened.error).toBeUndefined();
+    const connection = String(compute.opened.get(opened.result!.source.id)?.connection_string);
+    const parsed = new URL(connection);
+    expect(parsed.protocol).toBe("postgresql+psycopg:");
+    expect(decodeURIComponent(parsed.username)).toBe("demo");
+    expect(decodeURIComponent(parsed.password)).toBe(password);
+    expect(parsed.host).toBe("db.internal:5433");
+    expect(parsed.pathname).toBe("/shop");
+    expect(parsed.searchParams.get("sslmode")).toBe("require");
+
+    const configs = await server.call<{ configs: { fields: Record<string, string>; secretFields: string[] }[] }>("source.config.list", {});
+    expect(configs.result!.configs[0]).toMatchObject({ fields: form, secretFields: ["password"] });
+    expect(readFileSync(join(dir, "datasource-configs.json"), "utf8")).not.toContain("w#rd");
+
+    // 关闭后重开：连接串由配置里的字段与凭据库里的密码重新拼出。
+    await server.call("source.close", { conversationId: 1, sourceId: opened.result!.source.id });
+    const reopened = await server.call("source.open", { conversationId: 1, sourceId: opened.result!.source.id });
+    expect(reopened.error).toBeUndefined();
+    expect(compute.opened.get(opened.result!.source.id)?.connection_string).toBe(connection);
+  });
+
+  test("无密码的 SQLite 也能重开", async () => {
+    const opened = await server.call<{ source: { id: string } }>("source.open", {
+      conversationId: 1,
+      kind: "sql",
+      fields: { driver: "sqlite", file: "/data/demo.db" },
+    });
+    expect(opened.error).toBeUndefined();
+    const id = opened.result!.source.id;
+    expect(compute.opened.get(id)?.connection_string).toBe("sqlite:////data/demo.db");
+    await server.call("source.close", { conversationId: 1, sourceId: id });
+    expect((await server.call("source.open", { conversationId: 1, sourceId: id })).error).toBeUndefined();
+    expect(compute.opened.get(id)?.connection_string).toBe("sqlite:////data/demo.db");
+  });
+
+  test("不合法的组合在连接前就被拒绝，并给出具体原因", async () => {
+    const attempt = (fields: Record<string, string>) =>
+      server.call("source.open", { conversationId: 1, kind: "sql", fields, secret: { connection_string: "", password: "" } });
+    expect(reasonOf(await attempt({}))).toBe("missing_driver");
+    expect(reasonOf(await attempt({ driver: "oracle", host: "h" }))).toBe("unsupported_driver");
+    expect(reasonOf(await attempt({ driver: "postgresql", host: "" }))).toBe("missing_host");
+    expect(reasonOf(await attempt({ driver: "mysql", host: "h", port: "70000" }))).toBe("invalid_port");
+    expect(reasonOf(await attempt({ driver: "sqlite", file: "" }))).toBe("missing_file");
+    expect(compute.calls.some((call) => call.method === "source.open")).toBe(false);
+  });
+
+  test("测试连接不保存配置也不登记来源，失败文案里没有密码", async () => {
+    const tested = await server.call<{ tables: number; server: string }>("source.test", {
+      kind: "sql",
+      fields: form,
+      secret: { password: "tester-pw" },
+    });
+    expect(tested.error).toBeUndefined();
+    expect(tested.result).toMatchObject({ tables: 3, server: "PostgreSQL 16.0" });
+    expect(store.peek(1).sources).toEqual([]);
+    expect((await server.call<{ configs: unknown[] }>("source.config.list", {})).result!.configs).toEqual([]);
+    expect(compute.opened.size).toBe(0);
+
+    const failed = await server.call("source.test", { kind: "sql", fields: form, secret: { password: "leaky-pa55" } });
+    expect(failed.error?.message).not.toContain("leaky-pa55");
+    expect(failed.error?.message).toContain("认证失败");
   });
 });
 

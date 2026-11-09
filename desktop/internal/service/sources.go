@@ -197,9 +197,9 @@ func (c *Client) OpenUpload(ctx context.Context, conversationID int, uploadID, n
 	return out, err
 }
 
-// OpenRemote 连接一个远程来源（sql / gsheets / feishu / http）。密钥随这次调用进入服务端，返回值里没有。
-func (c *Client) OpenRemote(ctx context.Context, conversationID int, req RemoteRequest) (SourceOpenResult, error) {
-	params := map[string]any{"conversationId": conversationID, "kind": req.Kind}
+// remoteParams 把一次远程连接请求变成 source.open / source.test 共用的参数。
+func remoteParams(req RemoteRequest) map[string]any {
+	params := map[string]any{"kind": req.Kind}
 	if req.ConfigID != "" {
 		params["configId"] = req.ConfigID
 	}
@@ -212,8 +212,29 @@ func (c *Client) OpenRemote(ctx context.Context, conversationID int, req RemoteR
 	if len(req.Secret) > 0 {
 		params["secret"] = req.Secret
 	}
+	return params
+}
+
+// OpenRemote 连接一个远程来源（sql / gsheets / feishu / http）。密钥随这次调用进入服务端，返回值里没有。
+func (c *Client) OpenRemote(ctx context.Context, conversationID int, req RemoteRequest) (SourceOpenResult, error) {
+	params := remoteParams(req)
+	params["conversationId"] = conversationID
 	var out SourceOpenResult
 	err := c.callInto(ctx, "source.open", params, &out)
+	return out, err
+}
+
+// SourceTest 是一次试连接的结果：来源名、目录里的表数，以及（数据库才有的）服务端产品与版本。
+type SourceTest struct {
+	Name   string `json:"name"`
+	Tables int    `json:"tables"`
+	Server string `json:"server"`
+}
+
+// TestRemote 试连一次远程来源并立即断开；不保存配置，也不加入会话。
+func (c *Client) TestRemote(ctx context.Context, req RemoteRequest) (SourceTest, error) {
+	var out SourceTest
+	err := c.callInto(ctx, "source.test", remoteParams(req), &out)
 	return out, err
 }
 

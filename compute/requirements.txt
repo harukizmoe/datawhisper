@@ -32,9 +32,10 @@ statsmodels>=0.15.0
 
 # SQL 解析与远端数据源
 sqlglot>=23.0.0
-sqlalchemy>=2.0.0
+sqlalchemy>=2.1.0
 pymysql>=1.0.0
-psycopg2-binary>=2.9
+# SQLAlchemy 2.1 起 postgresql:// 默认走 psycopg（v3），不再是 psycopg2
+psycopg[binary]>=3.2
 pyodbc>=5.0.0
 gspread>=6.0.0
 google-auth>=2.0.0

@@ -201,16 +201,21 @@ export function createMemorySourceStore(knownConversations: Iterable<number>): M
 
 export type SourceConfigKind = RemoteSourceKind;
 
-/** 可以出现在配置文件里的字段；其余字段一律进凭据库。 */
+/**
+ * 可以出现在配置文件里的字段；其余字段一律进凭据库。
+ *
+ * sql 有两种填法：表单字段（driver/host/port/database/username/ssl，sqlite 用 file，密码是密字段），
+ * 或高级模式下整串的 `connection_string`（密字段）。两者同时存在时以连接串为准。
+ */
 export const NON_SECRET_FIELDS: Readonly<Record<SourceConfigKind, readonly string[]>> = {
-  sql: [],
+  sql: ["driver", "host", "port", "database", "username", "ssl", "file"],
   gsheets: ["spreadsheet"],
   feishu: ["bitable", "table"],
   http: ["url", "auth_type"],
 };
 
-/** 只进凭据库的字段名：连接串里的密码、服务账号私钥、API 认证值。 */
-export const SECRET_FIELDS: readonly string[] = ["connection_string", "creds_json", "auth_value"];
+/** 只进凭据库的字段名：数据库密码与连接串、服务账号私钥、API 认证值。 */
+export const SECRET_FIELDS: readonly string[] = ["connection_string", "password", "creds_json", "auth_value"];
 
 /** 面向界面的配置视图：只有非密字段与「哪些密字段已保存」。 */
 export type SourceConfig = {

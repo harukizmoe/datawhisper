@@ -413,6 +413,10 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"configs": configs})
 
+		case "source.test":
+			f.record(req.Method, req.Params)
+			respond(req.ID, map[string]any{"name": "Remote sql", "tables": 3, "server": "PostgreSQL 16.0"})
+
 		case "source.config.remove":
 			f.record(req.Method, req.Params)
 			id, _ := params["id"].(string)
@@ -809,6 +813,11 @@ func TestDataPanelNeverShowsSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	// 默认是按字段填写；连接串在「改用连接字符串」之后才出现。
+	if err := tt.Click("Use a connection string instead"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
 	if err := tt.Click("Connection string"); err != nil {
 		t.Fatal(err)
 	}
@@ -841,6 +850,66 @@ func TestDataPanelNeverShowsSecrets(t *testing.T) {
 	}
 	if !strings.Contains(text, "Remote sql") {
 		t.Errorf("the connected source is not listed; texts %q", text)
+	}
+}
+
+func TestDataPanelSQLFormSendsFieldsAndKeepsThePasswordSecret(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openDataPanel(t, f, 1400, 1600)
+	const password = "p@ss/w#rd-ogvxmi3"
+
+	if err := tt.Click("Connect"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.ChooseMenuItem("SQL database"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	for _, step := range []struct{ label, text string }{
+		{"Host", "db.internal"}, {"Port", "5433"}, {"Database name", "shop"}, {"User", "analyst"}, {"Password", password},
+	} {
+		if err := tt.Click(step.label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Type(step.text)
+	}
+	if strings.Contains(strings.Join(tt.Texts(), "\n"), password) {
+		t.Fatal("the form showed the password")
+	}
+
+	if err := tt.Click("Test connection"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the test result", func() bool { return !a.src.testBusy && a.src.testNote != "" })
+	if a.src.testFail || !strings.Contains(a.src.testNote, "PostgreSQL 16.0") {
+		t.Errorf("test note %q (fail=%v)", a.src.testNote, a.src.testFail)
+	}
+	if f.call("source.open") != nil {
+		t.Error("testing the connection opened a source")
+	}
+
+	if err := tt.Click("Add source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connected source", func() bool { return !a.src.remoteBusy && !a.src.remoteOpen })
+	params := f.call("source.open")
+	fields, _ := params["fields"].(map[string]any)
+	secret, _ := params["secret"].(map[string]any)
+	for key, want := range map[string]string{"driver": "postgresql", "host": "db.internal", "port": "5433", "database": "shop", "username": "analyst", "ssl": "false"} {
+		if fields[key] != want {
+			t.Errorf("fields[%s] = %v, want %q", key, fields[key], want)
+		}
+	}
+	if secret["password"] != password {
+		t.Errorf("the password was not sent as a secret: %v", params)
+	}
+	// 新建连接要显式清掉连接串，否则服务端会沿用最近保存的那条旧配置里的连接串。
+	if cs, ok := secret["connection_string"]; !ok || cs != "" {
+		t.Errorf("a new form connection must clear connection_string explicitly: %v", secret)
+	}
+	if a.src.sql.password != "" {
+		t.Error("the password stayed in the form after connecting")
 	}
 }
 

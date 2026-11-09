@@ -44,13 +44,13 @@ class SQLDataSource(DataSource):
     """Connect to any SQLAlchemy-supported database with on-demand DuckDB caching."""
 
     def __init__(self, connection_string: str, display_name: str = ""):
+        """``connection_string`` 是 SQLAlchemy 连接串；表单字段拼串由 Node 服务端负责。"""
         from sqlalchemy import create_engine, text, inspect as sa_inspect
+        from sqlalchemy.engine import make_url
 
-        # SQL Server connections otherwise use the ODBC driver's long default
-        # login timeout.  Keep the UI responsive when the host/port is wrong.
-        # `timeout` is a pyodbc-specific connect argument, so never pass it to
-        # the other SQLAlchemy dialects.
-        is_sql_server = connection_string.lower().startswith("mssql")
+        # SQL Server 默认的 ODBC 登录超时很长，主机或端口填错时界面会卡住，所以显式设短。
+        # `timeout` 是 pyodbc 专有的连接参数，不能传给其他方言。
+        is_sql_server = make_url(connection_string).get_backend_name() == "mssql"
         engine_options = {"pool_pre_ping": True}
         if is_sql_server:
             engine_options["connect_args"] = {"timeout": 10}
@@ -63,7 +63,11 @@ class SQLDataSource(DataSource):
         else:
             try:
                 url = self._engine.url
-                self.name = f"{url.host}/{url.database or ''}"
+                if url.host:
+                    self.name = f"{url.host}/{url.database or ''}"
+                else:
+                    # SQLite 没有主机，用文件名作显示名。
+                    self.name = os.path.basename(url.database or "") or url.get_backend_name()
             except Exception:
                 self.name = "SQL Database"
 
@@ -139,6 +143,21 @@ class SQLDataSource(DataSource):
     def list_catalog_tables(self) -> List[str]:
         """Full remote catalog for preview/selection validation only."""
         return self._all_table_names()
+
+    def describe_server(self) -> str:
+        """服务端产品与版本，如 ``PostgreSQL 16.4``；供「测试连接」展示，取不到时只给产品名。"""
+        dialect = self._engine.dialect
+        product = {
+            "postgresql": "PostgreSQL",
+            "mysql": "MariaDB" if getattr(dialect, "is_mariadb", False) else "MySQL",
+            "mariadb": "MariaDB",
+            "mssql": "SQL Server",
+            "sqlite": "SQLite",
+        }.get(dialect.name, dialect.name)
+        version = getattr(dialect, "server_version_info", None)
+        if not version:
+            return product
+        return f"{product} {'.'.join(str(part) for part in version[:3])}"
 
     def get_analysis_tables(self) -> List[str]:
         """Remote tables currently authorized for agent analysis."""

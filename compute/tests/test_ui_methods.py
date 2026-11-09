@@ -247,7 +247,7 @@ class UploadTest(UiTestBase):
         self.assertIn("FileNotFoundError", error["data"]["error"])
         error = self.assert_error("source.open", {"source_id": "bad", "descriptor": {
             "kind": "sql", "connection_string": f"sqlite:///{self.tmp}/no/such/dir/x.db"}}, "open_failed")
-        self.assertTrue(error["message"].startswith("数据库 连接失败"), error)
+        self.assertIn("无法打开数据库文件", error["message"])
         self.assert_error("source.open", {"source_id": "bad", "descriptor": {
             "kind": "http", "url": "https://example.test/data", "auth_type": "cookie"}}, "open_failed")
 

@@ -333,14 +333,7 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 		})
 		switch kind.ID {
 		case "sql":
-			ui.Field(c, a.tr("data.fieldConnection"), func() {
-				input := ui.TextInput(c, &a.src.remoteConn).Password().Label(a.tr("data.connString"))
-				if a.src.remoteConfigID != "" {
-					input.Placeholder(a.tr("data.savedKeep"))
-				} else {
-					input.Placeholder("postgresql://user:pw@host/db")
-				}
-			})
+			a.sqlFields(c)
 		case "gsheets":
 			ui.Field(c, a.tr("data.fieldSpreadsheet"), func() {
 				ui.TextInput(c, &a.src.remoteSpread).Label(a.tr("data.spreadsheetLabel")).Placeholder("https://docs.google.com/spreadsheets/d/…")
@@ -398,6 +391,13 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 			if connect.Clicked() {
 				a.connectRemote()
 			}
+			test := ui.Button(c, a.tr("data.testConn")).Tooltip(a.tr("data.testConnTip"))
+			if a.src.testBusy {
+				test.Disabled(true)
+			}
+			if test.Clicked() {
+				a.testRemote()
+			}
 			if a.src.remoteConfigID != "" {
 				if ui.Button(c, a.tr("data.forget")).Tooltip(a.tr("data.forgetTip")).Clicked() {
 					for _, cfg := range a.src.configs {
@@ -409,7 +409,82 @@ func (a *app) remoteForm(c *ui.Context, t *ui.Theme) {
 				}
 			}
 		})
+		if a.src.testNote != "" {
+			note := ui.Text(c, a.src.testNote).FontSize(a.fs(textCaption))
+			if a.src.testFail {
+				note.TextColor(t.Danger)
+			} else {
+				note.TextColor(t.Success)
+			}
+		}
 	})
+}
+
+// sqlFields 是 SQL 来源的表单：按数据库类型给出主机、端口、库名、用户名与密码，
+// SQLite 只要一个文件；想直接粘贴连接串的人勾选底部的开关。
+func (a *app) sqlFields(c *ui.Context) {
+	f := &a.src.sql
+	saved := a.src.remoteConfigID != ""
+	if f.advanced {
+		ui.Field(c, a.tr("data.fieldConnection"), func() {
+			input := ui.TextInput(c, &a.src.remoteConn).Password().Label(a.tr("data.connString"))
+			if saved && f.savedConn {
+				input.Placeholder(a.tr("data.savedKeep"))
+			} else {
+				input.Placeholder("postgresql://user:pw@host/db")
+			}
+		})
+	} else {
+		labels := make([]string, len(sqlDrivers))
+		for i, d := range sqlDrivers {
+			labels[i] = d.Label
+		}
+		ui.Field(c, a.tr("data.sqlType"), func() {
+			choice := sqlDrivers[f.driver].Label
+			if ui.Select(c, &choice, labels).Label(a.tr("data.sqlType")).Changed() {
+				for i := range sqlDrivers {
+					if sqlDrivers[i].Label == choice {
+						f.driver = i
+						return
+					}
+				}
+			}
+		})
+		drv := sqlDrivers[f.driver]
+		if drv.File {
+			ui.Field(c, a.tr("data.sqlFile"), func() {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c, &f.file).Label(a.tr("data.sqlFile")).Placeholder("/path/to/data.db").Grow(1).MinWidth(0)
+					if ui.Button(c, a.tr("data.sqlBrowse")).Clicked() {
+						a.pickDatabaseFile()
+					}
+				})
+			})
+		} else {
+			ui.Field(c, a.tr("data.sqlHost"), func() {
+				ui.TextInput(c, &f.host).Label(a.tr("data.sqlHost")).Placeholder("127.0.0.1")
+			})
+			ui.Field(c, a.tr("data.sqlPort"), func() {
+				ui.TextInput(c, &f.port).Label(a.tr("data.sqlPort")).Placeholder(drv.Port)
+			})
+			ui.Field(c, a.tr("data.sqlDatabase"), func() {
+				ui.TextInput(c, &f.database).Label(a.tr("data.sqlDatabase"))
+			})
+			ui.Field(c, a.tr("data.sqlUser"), func() {
+				ui.TextInput(c, &f.user).Label(a.tr("data.sqlUser"))
+			})
+			ui.Field(c, a.tr("data.sqlPassword"), func() {
+				input := ui.TextInput(c, &f.password).Password().Label(a.tr("data.sqlPassword"))
+				if saved {
+					input.Placeholder(a.tr("data.savedKeep"))
+				}
+			})
+			if drv.SSL {
+				ui.Checkbox(c, &f.ssl, a.tr("data.sqlSSL"))
+			}
+		}
+	}
+	ui.Checkbox(c, &f.advanced, a.tr("data.sqlAdvanced"))
 }
 
 // configsForKind 返回某种类型的已保存配置。

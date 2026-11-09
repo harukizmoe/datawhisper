@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +119,10 @@ type sourcesState struct {
 	remoteConfigID string // 已保存配置的 id，空表示新建
 	remoteErr      string
 	remoteBusy     bool
+	sql            sqlForm // SQL 来源的表单字段
+	testBusy       bool    // 正在试连接
+	testNote       string  // 试连接的结果文案
+	testFail       bool    // testNote 是失败原因
 	configs        []service.SourceConfig
 	configsErr     string
 
@@ -642,6 +648,59 @@ func (a *app) removeAllSources() {
 	}()
 }
 
+// sqlDriver 是 SQL 表单里的一种数据库类型：id 与服务端一致；File 表示只需要一个文件（SQLite），
+// SSL 表示有「要求加密」开关。名字是产品名，不翻译。
+type sqlDriver struct {
+	ID    string
+	Label string
+	Port  string
+	SSL   bool
+	File  bool
+}
+
+var sqlDrivers = []sqlDriver{
+	{ID: "postgresql", Label: "PostgreSQL", Port: "5432", SSL: true},
+	{ID: "mysql", Label: "MySQL / MariaDB", Port: "3306"},
+	{ID: "mssql", Label: "SQL Server", Port: "1433", SSL: true},
+	{ID: "sqlite", Label: "SQLite", File: true},
+}
+
+// sqlForm 是 SQL 来源表单：默认按类型填字段（连接串由服务端拼，密码里的特殊字符不用转义），
+// advanced 时才直接填连接串。密码和连接串都只存在输入框里。
+type sqlForm struct {
+	driver    int // sqlDrivers 的下标
+	host      string
+	port      string
+	database  string
+	user      string
+	password  string
+	file      string
+	ssl       bool
+	advanced  bool
+	savedConn bool // 选中的已保存配置里有连接串（高级模式下留空即沿用）
+}
+
+// sqlFormFrom 把已保存配置的非密字段填回表单；密码与连接串不回填。
+func sqlFormFrom(cfg service.SourceConfig) sqlForm {
+	f := sqlForm{
+		host:     cfg.Fields["host"],
+		port:     cfg.Fields["port"],
+		database: cfg.Fields["database"],
+		user:     cfg.Fields["username"],
+		file:     cfg.Fields["file"],
+		ssl:      cfg.Fields["ssl"] == "true",
+	}
+	for i, d := range sqlDrivers {
+		if d.ID == cfg.Fields["driver"] {
+			f.driver = i
+		}
+	}
+	f.savedConn = slices.Contains(cfg.SecretFields, "connection_string")
+	// 旧配置只有连接串、没有 driver 字段：打开时直接进高级模式。
+	f.advanced = cfg.Fields["driver"] == "" && f.savedConn
+	return f
+}
+
 // startRemote 打开远程连接表单，serviceKind 是 remoteKinds 的下标。
 func (a *app) startRemote(index int) {
 	a.src.remoteOpen = true
@@ -651,6 +710,8 @@ func (a *app) startRemote(index int) {
 	a.src.remoteName, a.src.remoteSpread, a.src.remoteBitable = "", "", ""
 	a.src.remoteTable, a.src.remoteURL, a.src.remoteAuth = "", "", 0
 	a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
+	a.src.sql = sqlForm{}
+	a.src.testNote, a.src.testFail = "", false
 }
 
 // useConfig 把一条已保存配置的非密字段填进表单；密字段只提示已保存，绝不回填值。
@@ -668,29 +729,77 @@ func (a *app) useConfig(cfg service.SourceConfig) {
 	case "api_key":
 		a.src.remoteAuth = 2
 	}
+	a.src.sql = sqlForm{}
+	if cfg.Kind == "sql" {
+		a.src.sql = sqlFormFrom(cfg)
+	}
+	a.src.testNote, a.src.testFail = "", false
 	// 已保存的凭据不回到界面：输入框留空，占位符说明它已存在。
 	a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
 }
 
-// connectRemote 提交远程连接表单。密钥只随这一次请求离开界面。
-func (a *app) connectRemote() {
-	client, conv := a.client, a.src.conv
-	if client == nil || conv == 0 {
-		a.src.remoteErr = a.tr("data.connectNeedChat")
-		return
+// sqlRequest 把 SQL 表单变成请求的字段与密文；失败时返回要给用户看的原因。
+// 每个键都显式给出（空串表示清除），否则服务端会沿用「最近保存的同类配置」里的旧值：
+// 比如新建连接却带上了旧的连接串或密码。已保存配置里没改的密码才用省略来表示「保持」。
+func (a *app) sqlRequest() (fields, secret map[string]string, problem string) {
+	f := a.src.sql
+	saved := a.src.remoteConfigID != ""
+	fields = map[string]string{"driver": "", "host": "", "port": "", "database": "", "username": "", "ssl": "", "file": ""}
+	secret = map[string]string{}
+	if f.advanced {
+		if a.src.remoteConn == "" && !(saved && f.savedConn) {
+			return nil, nil, a.tr("data.enterConn")
+		}
+		if !saved {
+			secret["password"] = ""
+		}
+		if a.src.remoteConn != "" {
+			secret["connection_string"] = a.src.remoteConn
+		}
+		return fields, secret, ""
 	}
+	drv := sqlDrivers[f.driver]
+	fields["driver"] = drv.ID
+	secret["connection_string"] = ""
+	if drv.File {
+		fields["file"] = strings.TrimSpace(f.file)
+		if fields["file"] == "" {
+			return nil, nil, a.tr("data.errMissingFile")
+		}
+		secret["password"] = ""
+		return fields, secret, ""
+	}
+	fields["host"] = strings.TrimSpace(f.host)
+	if fields["host"] == "" {
+		return nil, nil, a.tr("data.errMissingHost")
+	}
+	fields["port"] = strings.TrimSpace(f.port)
+	fields["database"] = strings.TrimSpace(f.database)
+	fields["username"] = strings.TrimSpace(f.user)
+	if drv.SSL {
+		fields["ssl"] = strconv.FormatBool(f.ssl)
+	}
+	switch {
+	case f.password != "":
+		secret["password"] = f.password
+	case !saved:
+		secret["password"] = ""
+	}
+	return fields, secret, ""
+}
+
+// remoteRequest 把表单变成一次连接请求，「添加」和「测试连接」共用；校验失败时把原因写进 remoteErr。
+func (a *app) remoteRequest() (service.RemoteRequest, bool) {
 	kind := remoteKinds[a.src.remoteKind]
 	req := service.RemoteRequest{Kind: kind.ID, Name: strings.TrimSpace(a.src.remoteName), ConfigID: a.src.remoteConfigID}
 	switch kind.ID {
 	case "sql":
-		if a.src.remoteConn == "" && a.src.remoteConfigID == "" {
-			a.src.remoteErr = a.tr("data.enterConn")
-			return
+		fields, secret, problem := a.sqlRequest()
+		if problem != "" {
+			a.src.remoteErr = problem
+			return req, false
 		}
-		req.Secret = map[string]string{}
-		if a.src.remoteConn != "" {
-			req.Secret["connection_string"] = a.src.remoteConn
-		}
+		req.Fields, req.Secret = fields, secret
 	case "gsheets":
 		req.Fields = map[string]string{"spreadsheet": strings.TrimSpace(a.src.remoteSpread)}
 		req.Secret = map[string]string{}
@@ -699,7 +808,7 @@ func (a *app) connectRemote() {
 		}
 		if req.Fields["spreadsheet"] == "" && a.src.remoteConfigID == "" {
 			a.src.remoteErr = a.tr("data.enterSpread")
-			return
+			return req, false
 		}
 	case "feishu":
 		req.Fields = map[string]string{
@@ -708,7 +817,7 @@ func (a *app) connectRemote() {
 		}
 		if req.Fields["bitable"] == "" && a.src.remoteConfigID == "" {
 			a.src.remoteErr = a.tr("data.enterBitable")
-			return
+			return req, false
 		}
 	case "http":
 		authTypes := []string{"none", "bearer", "api_key"}
@@ -719,12 +828,28 @@ func (a *app) connectRemote() {
 		}
 		if req.Fields["url"] == "" && a.src.remoteConfigID == "" {
 			a.src.remoteErr = a.tr("data.enterURL")
-			return
+			return req, false
 		}
 	}
 	if len(req.Secret) == 0 {
 		req.Secret = nil
 	}
+	return req, true
+}
+
+// connectRemote 提交远程连接表单。密钥只随这一次请求离开界面。
+func (a *app) connectRemote() {
+	client, conv := a.client, a.src.conv
+	if client == nil || conv == 0 {
+		a.src.remoteErr = a.tr("data.connectNeedChat")
+		return
+	}
+	a.src.testNote, a.src.testFail = "", false
+	req, ok := a.remoteRequest()
+	if !ok {
+		return
+	}
+	kind := remoteKinds[a.src.remoteKind]
 	a.src.remoteBusy, a.src.remoteErr = true, ""
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -745,10 +870,65 @@ func (a *app) connectRemote() {
 			}
 			// 密钥只写不读：成功后立刻清空输入框。
 			a.src.remoteConn, a.src.remoteCreds, a.src.remoteAuthVal = "", "", ""
+			a.src.sql.password = ""
 			a.src.remoteOpen, a.src.remoteErr = false, ""
 			a.src.notice, a.src.noticeErr = a.tr("data.connected", "name", name), false
 			a.loadSources()
 		})
+	}()
+}
+
+// testRemote 试连一次当前表单：不保存配置，也不把来源加进会话。结果显示在表单底部。
+func (a *app) testRemote() {
+	client := a.client
+	if client == nil {
+		a.src.remoteErr = a.tr("data.connectNeedChat")
+		return
+	}
+	a.src.remoteErr = ""
+	req, ok := a.remoteRequest()
+	if !ok {
+		return
+	}
+	a.src.testBusy, a.src.testNote, a.src.testFail = true, "", false
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		res, err := client.TestRemote(ctx, req)
+		a.post(func() {
+			if client != a.client {
+				return
+			}
+			a.src.testBusy = false
+			if err != nil {
+				a.src.testNote, a.src.testFail = a.sourceErr(err), true
+				return
+			}
+			label := res.Server
+			if label == "" {
+				label = res.Name
+			}
+			a.src.testNote = a.tr("data.testOK", "server", label, "tables", strconv.Itoa(res.Tables))
+		})
+	}()
+}
+
+// pickDatabaseFile 打开系统的选文件对话框，把选中的 SQLite 文件路径填进表单。
+func (a *app) pickDatabaseFile() {
+	go func() {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Title:   a.tr("data.sqlFileDialogTitle"),
+			Filters: []mygo.FileFilter{{Name: a.tr("data.sqlFileFilter"), Extensions: []string{"db", "sqlite", "sqlite3", "db3"}}},
+		})
+		if err != nil {
+			a.post(func() { a.src.remoteErr = a.tr("data.dialogUnavailable", "error", err.Error()) })
+			return
+		}
+		if len(paths) == 0 {
+			return // 用户取消
+		}
+		path := paths[0]
+		a.post(func() { a.src.sql.file = path })
 	}()
 }
 
@@ -1059,8 +1239,16 @@ func sourceErrorIn(lang string, err error) string {
 			return tr("data.errNotSQL")
 		case "invalid_credentials":
 			return tr("data.errInvalidCreds")
-		case "missing_connection_string":
-			return tr("data.enterConn")
+		case "missing_driver", "unsupported_driver":
+			return tr("data.errMissingDriver")
+		case "missing_host":
+			return tr("data.errMissingHost")
+		case "invalid_port":
+			return tr("data.errInvalidPort")
+		case "missing_file":
+			return tr("data.errMissingFile")
+		case "invalid_database", "invalid_file":
+			return tr("data.errInvalidChar")
 		case "missing_spreadsheet":
 			return tr("data.enterSpread")
 		case "missing_bitable":

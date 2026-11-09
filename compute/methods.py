@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from . import host, knowledge, ui
 from .rpc import INVALID_PARAMS, MethodContext, RpcError, str_param
-from .sources import SourceRegistry
+from .sources import SourceRegistry, open_failed, probe_source
 from .tools.dispatch import BUSINESS_TOOLS
 
 _sources = SourceRegistry()
@@ -23,6 +23,17 @@ def source_open(ctx: MethodContext, params: dict) -> dict:
         raise RpcError("'descriptor' must be an object", INVALID_PARAMS)
     source = _sources.open(source_id, descriptor)
     return {"source_id": source_id, "name": source.name, "tables": source.list_tables()}
+
+
+def source_test(ctx: MethodContext, params: dict) -> dict:
+    """试连一次远程来源并立即关闭；不登记 source，失败时给出可读原因。"""
+    descriptor = params.get("descriptor")
+    if not isinstance(descriptor, dict):
+        raise RpcError("'descriptor' must be an object", INVALID_PARAMS)
+    try:
+        return probe_source(descriptor)
+    except Exception as exc:
+        raise open_failed(descriptor, exc) from exc
 
 
 def source_close(ctx: MethodContext, params: dict) -> dict:
@@ -89,6 +100,7 @@ def _with_sources(fn: Callable[[MethodContext, SourceRegistry, dict], Any]):
 METHODS: dict[str, Any] = {
     "ping": ping,
     "source.open": source_open,
+    "source.test": source_test,
     "source.close": source_close,
     "source.list": source_list,
     "source.tables": source_tables,
