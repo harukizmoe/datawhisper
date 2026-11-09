@@ -117,17 +117,23 @@ func (a *app) sidebar(c *ui.Context) {
 			case a.sideSearch != "" && len(groups) == 0 && len(hits) == 0:
 				ui.Text(c, a.tr("sidebar.noMatch")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(4, 8)
 			}
+		}).Grow(1).Background(tok.Sidebar).Label(a.tr("chat.navigation")).Changed() {
+			a.navigate()
+		}
+		if a.sess.err != "" {
+			ui.Text(c, a.sess.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
+		}
+		// 应用入口固定在底部：会话多起来时只有上面的会话列表滚动，入口不会被挤出去。两个 Sidebar 共用 a.nav，
+		// 选中项按 ID 对上，各管各的键盘导航。
+		if ui.Sidebar(c, &a.nav, func() {
 			ui.SidebarSection(c, a.tr("sidebar.app"), nil, func() {
 				ui.SidebarItem(c, navData, icons.Database, a.tr("sidebar.data"))
 				ui.SidebarItem(c, navKnowledge, icons.Knowledge, a.tr("sidebar.knowledge"))
 				ui.SidebarItem(c, navSkills, icons.Skill, a.tr("sidebar.skills"))
 				ui.SidebarItem(c, navSettings, icons.Settings, a.tr("sidebar.settings"))
 			})
-		}).Grow(1).Background(tok.Sidebar).Label(a.tr("chat.navigation")).Changed() {
+		}).Background(tok.Sidebar).Label(a.tr("sidebar.app")).Changed() {
 			a.navigate()
-		}
-		if a.sess.err != "" {
-			ui.Text(c, a.sess.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
 		}
 	})
 }
