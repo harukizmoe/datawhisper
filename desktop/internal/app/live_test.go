@@ -238,7 +238,7 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 	a.retry, a.logPath = sup.Retry, sup.LogPath()
 	tt := ui.NewTester(a.view, 1180, 760)
 	q.pump(t, tt, "the ready service", func() bool { return a.service.State == supervisor.StateReady && a.listLoaded })
-	expectTexts(t, tt, []string{"Ready"}, []string{"Starting the agent service"})
+	expectTexts(t, tt, nil, []string{"Starting the agent service", "Ready"})
 
 	sendAndWait := func(text string, rows int) {
 		t.Helper()
@@ -275,7 +275,7 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 	q.pump(t, tt, "the recovered conversation", func() bool {
 		return a.service.State == supervisor.StateReady && a.connected
 	})
-	expectTexts(t, tt, []string{"Reconnected", "Ready", "Summarize the data", "Hello"}, []string{"Restarting it…"})
+	expectTexts(t, tt, []string{"Reconnected", "Summarize the data", "Hello"}, []string{"Restarting it…", "Ready"})
 	if a.conv != conv || a.service.PID == pid || !reflect.DeepEqual(a.chat.Messages, before) {
 		t.Errorf("after the restart: conversation %d (was %d), pid %d (was %d), rows equal %t", a.conv, conv, a.service.PID, pid, reflect.DeepEqual(a.chat.Messages, before))
 	}

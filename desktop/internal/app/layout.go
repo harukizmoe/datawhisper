@@ -129,28 +129,22 @@ func (a *app) sidebar(c *ui.Context) {
 		if a.sess.err != "" {
 			ui.Text(c, a.sess.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
 		}
-		// 服务状态放在侧栏底部：正常时只是一个绿点和一个词，不占标题栏；出问题时横幅另有说明。
-		label, color := a.statusLabel(t)
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(2, 8).Children(func() {
-			ui.Text(c, "●").FontSize(a.fs(textCaption)).TextColor(color)
-			ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-		})
 	})
 }
 
-// statusLabel 给状态指示器返回服务状态的名称及其颜色。
-func (a *app) statusLabel(t *ui.Theme) (string, ui.Color) {
+// statusLabel 返回服务状态的名称，供「服务不可用」与诊断文字使用。
+func (a *app) statusLabel() string {
 	switch a.service.State {
 	case supervisor.StateReady:
-		return a.tr("status.ready"), t.Success
+		return a.tr("status.ready")
 	case supervisor.StateStarting:
-		return a.tr("status.starting"), t.Warning
+		return a.tr("status.starting")
 	case supervisor.StateRestarting:
-		return a.tr("status.restarting"), t.Warning
+		return a.tr("status.restarting")
 	case supervisor.StateFailed:
-		return a.tr("status.failed"), t.Danger
+		return a.tr("status.failed")
 	}
-	return a.tr("status.stopped"), t.TextMuted
+	return a.tr("status.stopped")
 }
 
 // banner 在有东西妨碍聊天时说明原因：服务正在启动、重启或已失败，或者会话的订阅断了；另外在重启之后的一小

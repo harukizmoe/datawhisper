@@ -21,9 +21,6 @@ func (a *app) settings(c *ui.Context) {
 	ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(10, 24).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 			ui.Text(c, a.tr("settings.title")).Bold().FontSize(20)
-			label, color := a.statusLabel(t)
-			ui.Text(c, "●").TextColor(color)
-			ui.Text(c, label).TextColor(t.TextMuted)
 			ui.Spacer(c)
 			if a.client != nil && ui.Button(c, a.tr("settings.refresh")).Clicked() {
 				a.loadSettings()
@@ -152,7 +149,7 @@ func (a *app) showNotice(c *ui.Context) {
 func (a *app) settingsUnavailable(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Padding(24, 32).Gap(8).Children(func() {
 		ui.Text(c, a.tr("settings.unavailable")).TextColor(t.TextMuted)
-		label, _ := a.statusLabel(t)
+		label := a.statusLabel()
 		if a.service.State == supervisor.StateReady {
 			ui.Text(c, a.tr("settings.process", "status", label, "pid", strconv.Itoa(a.service.PID)))
 		} else {
@@ -664,7 +661,7 @@ func formatCost(v float64) string {
 func (a *app) serviceSection(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(6).Children(func() {
 		ui.Text(c, "Agent service").Bold().FontSize(a.fs(textSection))
-		label, _ := a.statusLabel(t)
+		label := a.statusLabel()
 		if a.service.State == supervisor.StateReady {
 			ui.Textf(c, "%s: process %d", label, a.service.PID)
 		} else {

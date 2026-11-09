@@ -395,27 +395,28 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 	retried := 0
 	a.retry = func() { retried++ }
 	tt := ui.NewTester(a.view, 1180, 760)
-	expectTexts(t, tt, []string{"The agent service is not running.", "Stopped"}, nil)
+	expectTexts(t, tt, []string{"The agent service is not running."}, nil)
 
 	a.onService(supervisor.Status{State: supervisor.StateStarting})
 	tt.Frame()
-	expectTexts(t, tt, []string{"Starting the agent service…", "Starting"}, []string{"not running"})
+	expectTexts(t, tt, []string{"Starting the agent service…"}, []string{"not running"})
 
 	a.onService(fs.ready(41))
 	q.pump(t, tt, "the conversation list", func() bool { return a.listLoaded })
-	expectTexts(t, tt, []string{"Ready", "Greeting", "Getting started", "New chat", "Settings", "What would you like to analyze?"},
-		[]string{"Starting the agent service", "Reconnected"})
+	// 服务就绪时不显示任何状态字样：状态词只会重复界面本来就明显的事实，出问题时由横幅说明。
+	expectTexts(t, tt, []string{"Greeting", "Getting started", "New chat", "Settings", "What would you like to analyze?"},
+		[]string{"Ready", "Starting the agent service", "Reconnected"})
 
 	a.onService(supervisor.Status{State: supervisor.StateRestarting, Err: errors.New("service exited: signal: killed"), Crashes: 1})
 	tt.Frame()
-	expectTexts(t, tt, []string{"The agent service stopped (service exited: signal: killed). Restarting it…", "Restarting"}, nil)
+	expectTexts(t, tt, []string{"The agent service stopped (service exited: signal: killed). Restarting it…"}, nil)
 	if a.client != nil {
 		t.Error("a client of the stopped service")
 	}
 
 	a.onService(fs.ready(42))
 	tt.Frame()
-	expectTexts(t, tt, []string{"Reconnected: the agent service restarted", "Ready"}, []string{"Restarting it…"})
+	expectTexts(t, tt, []string{"Reconnected: the agent service restarted"}, []string{"Restarting it…"})
 	tt.Advance(reconnectedFor / 2)
 	expectTexts(t, tt, []string{"Reconnected"}, nil)
 	tt.Advance(reconnectedFor)
@@ -423,7 +424,7 @@ func TestBannerFollowsTheServiceState(t *testing.T) {
 
 	a.onService(supervisor.Status{State: supervisor.StateFailed, Err: errors.New("5 crashes within 2m0s; last: service exited: exit status 1"), Crashes: 5})
 	tt.Frame()
-	expectTexts(t, tt, []string{"could not be started: 5 crashes within 2m0s", "/data/logs/service.log", "Failed"}, nil)
+	expectTexts(t, tt, []string{"could not be started: 5 crashes within 2m0s", "/data/logs/service.log"}, nil)
 	if err := tt.Click("Retry"); err != nil || retried != 1 {
 		t.Errorf("retry: %v, %d retries", err, retried)
 	}
