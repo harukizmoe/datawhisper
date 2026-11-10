@@ -38,6 +38,9 @@ import {
   nodeMaxAttempts,
   planReadiness,
   predecessors,
+  reworkLimit,
+  reworkNodes,
+  reworkTargets,
 } from "./graph.ts";
 import {
   WORKFLOW_NODE_TASK_KIND,
@@ -60,7 +63,7 @@ export const WORKFLOW_RUN_INDEX = defineDocFamily<WorkflowRunIndex, null>({
   version: 1,
   scope: "session",
   family: true,
-  initial: () => ({ nodes: [], skipped: [] }),
+  initial: () => ({ nodes: [], skipped: [], iterations: {}, revisions: {} }),
   checkpointWhen: () => true,
 });
 
@@ -306,10 +309,41 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
           }
           const statuses = new Map<string, WorkflowNodeStatus>();
           const outputs = new Map<string, JsonValue>();
+          const iterations = new Map(Object.entries(index.iterations ?? {}));
+          const revisions = new Map(Object.entries(index.revisions ?? {}));
+          const requiredIteration = (nodeId: string): number => iterations.get(nodeId) ?? 1;
           for (const [nodeId, item] of latest) {
+            // 已经被打回、进入下一轮的节点：上一轮的状态与输出不再算数。
+            if (item.ref.iteration < requiredIteration(nodeId)) continue;
             statuses.set(nodeId, workflowNodeStatus(item.record));
             const payload = nodePayload(item.record);
             if (payload !== undefined) outputs.set(nodeId, payload.output);
+          }
+
+          // ── verifier 打回：decision=rework 时重开「打回目标 → verifier」这一段，修改意见交给目标节点 ──
+          // 没有 retry_loop 出边的 verifier 只是把 decision 交给下游（比如条件边），不会触发重做。
+          for (const node of graph.nodes) {
+            if (node.type !== "verifier" || statuses.get(node.node_id) !== "succeeded") continue;
+            const output = outputs.get(node.node_id);
+            if (typeof output !== "object" || output === null || Array.isArray(output) || output.decision !== "rework") continue;
+            const targets = reworkTargets(graph, node.node_id);
+            if (targets.length === 0) continue;
+            const current = requiredIteration(node.node_id);
+            const limit = reworkLimit(graph, node.node_id);
+            if (current >= limit) {
+              return terminalFailure(
+                "workflow_iteration_limit_reached",
+                `verifier ${node.node_id} still asked for rework after ${current} iteration(s); the limit is ${limit}`,
+              );
+            }
+            for (const id of reworkNodes(graph, node.node_id)) {
+              iterations.set(id, current + 1);
+              statuses.delete(id);
+              outputs.delete(id);
+              skipped.delete(id);
+            }
+            const feedback = reworkFeedback(output);
+            for (const target of targets) revisions.set(target, feedback);
           }
 
           // 配额要看到所有 run 的活节点，必须在任何写之前读完。
@@ -328,10 +362,12 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
           for (const [nodeId, item] of latest) {
             const node = nodesById.get(nodeId);
             if (node === undefined) continue;
+            // 已经被打回的节点：这是上一轮的记录，失败了也不再重试它。
+            if (item.ref.iteration < requiredIteration(nodeId)) continue;
             if (workflowNodeStatus(item.record) !== "failed") continue;
             if (item.ref.attempt >= nodeMaxAttempts(node)) continue;
             const ref = { nodeId, iteration: item.ref.iteration, attempt: item.ref.attempt + 1, taskId: 0 };
-            const previous = item.record.input as unknown as { inputs?: Record<string, JsonValue> };
+            const previous = (item.record.input as unknown as { args?: { inputs?: Record<string, JsonValue> } }).args ?? {};
             const taskId = await tx.createTask(
               options.nodeTask,
               nodeWorkInput({
@@ -381,7 +417,12 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
               predecessorOutputs,
               (predecessors(graph).get(nodeId) ?? []).length === 0,
             );
-            const iteration = 1;
+            // 打回后的目标节点拿到修改意见（图里要在 input_contract 里声明 revision_request）。
+            const revision = revisions.get(nodeId);
+            if (revision !== undefined && (node.input_contract ?? []).includes("revision_request")) {
+              inputs.revision_request = revision;
+            }
+            const iteration = requiredIteration(nodeId);
             const ref = { nodeId, iteration, attempt: 1, taskId: 0 };
             const taskId = await tx.createTask(
               options.nodeTask,
@@ -407,6 +448,8 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
 
           index.nodes = nextNodes;
           index.skipped = [...skipped];
+          index.iterations = Object.fromEntries(iterations);
+          index.revisions = Object.fromEntries(revisions);
           const checkpoint: WorkflowRunCheckpoint = { phase: "schedule" };
 
           // ── 还有活节点：等最老的一个结束，再重新调度 ─────────────────────────────────
@@ -495,7 +538,7 @@ export function nodeViews(
       const record = records.get(ref.taskId);
       if (record === undefined) continue;
       const payload = nodePayload(record);
-      const input = record.input as unknown as { inputs?: Record<string, JsonValue> };
+      const input = (record.input as unknown as { args?: { inputs?: Record<string, JsonValue> } }).args ?? {};
       views.push({
         nodeId: ref.nodeId,
         nodeRunId: ref.taskId,
@@ -518,5 +561,16 @@ export function nodeViews(
 /** 供 service 读取运行索引。 */
 export async function readRunIndex(harness: Harness, id: number, context: Context): Promise<WorkflowRunIndex> {
   const value = await harness.snapshot(WORKFLOW_RUN_INDEX, String(id), context);
-  return value === undefined ? { nodes: [], skipped: [] } : { nodes: [...value.nodes], skipped: [...value.skipped] };
+  return value === undefined
+    ? { nodes: [], skipped: [] }
+    : { nodes: [...value.nodes], skipped: [...value.skipped], iterations: { ...value.iterations }, revisions: { ...value.revisions } };
+}
+
+/** 打回时交给目标节点的修改意见：reviewer 的 issues 与 evidence 原文，让它知道要改什么。 */
+function reworkFeedback(output: Record<string, JsonValue>): string {
+  const text = (value: JsonValue | undefined): string => (value === undefined ? "" : typeof value === "string" ? value : JSON.stringify(value));
+  const lines = ["The independent reviewer asked for rework. Address these issues:", text(output.issues)];
+  const evidence = text(output.evidence);
+  if (evidence !== "") lines.push("Evidence:", evidence);
+  return lines.join("\n");
 }

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DATA_RULES } from "../src/agent/prompts.ts";
+import { verifierDecision } from "../src/workflows/agent-node.ts";
 import { loadConfig } from "../src/config.ts";
 import { createConversationSourceStore } from "../src/ipc/source-store.ts";
 import { type Service, startService } from "../src/service.ts";
@@ -150,5 +151,51 @@ describe("工作流节点执行器", () => {
       return typeof first?.content === "string" ? first.content : JSON.stringify(first?.content);
     };
     expect(system(forNode("NODE-LOOK"))).toContain(DATA_RULES.slice(0, 60));
+  });
+});
+
+describe("verifier 与 validation 节点", () => {
+  test("validation 节点不调模型：规则通过时给下游一句说明，缺输入或为空时节点失败", async () => {
+    const host = await service.conversations.create({});
+    const mark = stub.log.length;
+    const run = async (inputs: Record<string, string>, validation: Record<string, string[]>) => {
+      const started = await service.workflows.start({
+        workflowVersionId: "wf-validation",
+        graph: {
+          nodes: [{ node_id: "check", type: "validation", input_contract: ["goal"], output_contract: ["validated"], validation, max_attempts: 1 }],
+          edges: [],
+          entry_node_ids: ["check"],
+        },
+        inputs,
+        startedBy: "test",
+        workspaceId: "",
+        conversationId: host.id,
+      });
+      return service.workflows.wait(started.id);
+    };
+
+    const ok = await run({ goal: "Q3" }, { required: ["goal"], non_empty: ["goal"] });
+    expect(ok.status).toBe("succeeded");
+    expect(ok.outputs.validated).toBe("Validated inputs: goal");
+
+    const missing = await run({}, { required: ["goal"] });
+    expect(missing.status).toBe("failed");
+    expect(missing.nodes[0]?.error).toContain("required input is missing: goal");
+
+    const blank = await run({ goal: "   " }, { non_empty: ["goal"] });
+    expect(blank.status).toBe("failed");
+    expect(blank.nodes[0]?.error).toContain("input must not be empty: goal");
+
+    expect(stub.log.length).toBe(mark);
+  });
+
+  test("verifier 的 decision 忽略大小写；取值之外的一律让节点失败，不当成通过", () => {
+    const node = { node_id: "v", type: "verifier" };
+    expect(verifierDecision(node, " REWORK ")).toBe("rework");
+    expect(verifierDecision(node, "pass")).toBe("pass");
+    expect(verifierDecision(node, "escalate")).toBe("escalate");
+    for (const bad of ["approved", "", undefined, 1, ["pass"]]) {
+      expect(() => verifierDecision(node, bad as never)).toThrow("expected one of pass, rework, escalate");
+    }
   });
 });

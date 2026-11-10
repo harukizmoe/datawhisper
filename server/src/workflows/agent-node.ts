@@ -35,8 +35,56 @@ export function nodeAllowedTools(node: WorkflowNode): string[] {
   return declared.filter((name): name is string => typeof name === "string");
 }
 
-/** 支持由本执行器处理的节点类型；其余类型在运行前就明确失败，不静默跳过。 */
-const AGENT_NODE_TYPES = new Set(["agent", undefined]);
+/** 由 agent 会话执行的节点类型：verifier 是带固定输出（decision/issues/evidence）的 agent 节点。 */
+const AGENT_NODE_TYPES = new Set(["agent", "verifier", undefined]);
+
+/** verifier 的 decision 取值：pass 放行，rework 沿 retry_loop 打回，escalate 交给人。 */
+export const VERIFIER_DECISIONS = ["pass", "rework", "escalate"] as const;
+
+/** 规范化 verifier 的 decision（忽略大小写与空白）；不在取值内就让节点失败，而不是当成通过。 */
+export function verifierDecision(node: WorkflowNode, value: JsonValue | undefined): string {
+  const decision = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!(VERIFIER_DECISIONS as readonly string[]).includes(decision)) {
+    throw new WorkflowError(
+      "workflow_output_contract_violation",
+      `verifier ${node.node_id} returned decision ${JSON.stringify(value ?? null)}; expected one of ${VERIFIER_DECISIONS.join(", ")}`,
+    );
+  }
+  return decision;
+}
+
+function isBlank(value: JsonValue | undefined): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.keys(value).length === 0;
+  return false;
+}
+
+/**
+ * `validation` 节点：只检查上游交来的输入。`validation.required` 里的名字必须存在，`validation.non_empty` 里的
+ * 还不能是空；全部通过后把一句说明写进每个输出字段，下游据此知道输入已验过。
+ */
+export function validateInputs(node: WorkflowNode, inputs: Record<string, JsonValue>): Record<string, JsonValue> {
+  const spec = node.validation;
+  const rules = typeof spec === "object" && spec !== null && !Array.isArray(spec) ? spec : {};
+  const names = (key: string): string[] => {
+    const value = rules[key];
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  };
+  const required = names("required");
+  const nonEmpty = names("non_empty");
+  for (const name of required) {
+    if (!(name in inputs)) throw new WorkflowError("workflow_validation_failed", `node ${node.node_id}: required input is missing: ${name}`);
+  }
+  for (const name of nonEmpty) {
+    if (isBlank(inputs[name])) throw new WorkflowError("workflow_validation_failed", `node ${node.node_id}: input must not be empty: ${name}`);
+  }
+  const checked = [...new Set([...required, ...nonEmpty])];
+  const summary = `Validated inputs: ${checked.length === 0 ? "(no rules)" : checked.join(", ")}`;
+  const fields = contractFields(node);
+  return Object.fromEntries((fields.length === 0 ? ["result"] : fields).map((name) => [name, summary]));
+}
 
 /**
  * 拼节点提示。字段名沿用旧图定义：`prompt`/`goal` 二选一，`inputs` 由上游节点输出填充。
@@ -197,6 +245,8 @@ export function validateNodeOutputs(node: WorkflowNode, outputs: Record<string, 
 export function createAgentNodeExecutor(deps: AgentNodeDeps): WorkflowNodeExecute {
   return async (node, inputs, context): Promise<WorkflowNodeResult> => {
     const type = node.type;
+    // 确定性检查：不调模型，也不建会话。
+    if (type === "validation") return { output: validateInputs(node, inputs) };
     if (!AGENT_NODE_TYPES.has(type)) {
       throw new WorkflowError(
         "workflow_node_type_unsupported",
@@ -256,6 +306,7 @@ export function createAgentNodeExecutor(deps: AgentNodeDeps): WorkflowNodeExecut
     }
     const outputs = parseAgentOutputs(text, contractFields(node));
     validateNodeOutputs(node, outputs);
+    if (type === "verifier") outputs.decision = verifierDecision(node, outputs.decision);
     return { output: outputs, usage };
   };
 }

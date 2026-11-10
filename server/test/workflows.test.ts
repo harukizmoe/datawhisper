@@ -548,3 +548,160 @@ describe("workflows", () => {
     expect(canceled.result?.status).toBe("succeeded");
   });
 });
+
+describe("verifier 打回", () => {
+  const verifierGraph = (limit: number, extra: Partial<WorkflowGraph> = {}): WorkflowGraph =>
+    makeGraph(
+      [
+        { node_id: "propose", input_contract: ["revision_request"], output_contract: ["plan"] },
+        { node_id: "verify", type: "verifier", input_contract: ["plan"], output_contract: ["decision", "issues", "evidence"] },
+        { node_id: "apply", input_contract: ["plan"], output_contract: ["done"] },
+      ],
+      [
+        { from_node: "propose", to_node: "verify" },
+        { from_node: "propose", to_node: "apply" },
+        { from_node: "verify", to_node: "apply" },
+        { from_node: "verify", to_node: "propose", type: "retry_loop", max_iterations: limit },
+      ],
+      { entry_node_ids: ["propose"], ...extra },
+    );
+
+  test("rework 后重做目标与 verifier，修改意见交给目标；通过后下游才开始", async () => {
+    const bench = await createBench();
+    const proposeInputs: Record<string, JsonValue>[] = [];
+    const verifyIterations: number[] = [];
+    let applyRuns = 0;
+    bench.behaviors.set("propose", async (inputs) => {
+      proposeInputs.push(inputs);
+      return { output: { plan: `plan v${proposeInputs.length}` } };
+    });
+    bench.behaviors.set("verify", async (_inputs, context) => {
+      verifyIterations.push(context.iteration);
+      return {
+        output:
+          context.iteration === 1
+            ? { decision: "rework", issues: ["no rollback path"], evidence: ["step 3"] }
+            : { decision: "pass", issues: [], evidence: ["ok"] },
+      };
+    });
+    bench.behaviors.set("apply", async () => {
+      applyRuns += 1;
+      return { output: { done: "yes" } };
+    });
+
+    const { id } = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph: verifierGraph(3), inputs: {} });
+    const detail = await bench.workflows.wait(id);
+
+    expect(detail.status).toBe("succeeded");
+    expect(proposeInputs).toHaveLength(2);
+    expect(proposeInputs[0]?.revision_request).toBeUndefined();
+    expect(String(proposeInputs[1]?.revision_request)).toContain("no rollback path");
+    expect(String(proposeInputs[1]?.revision_request)).toContain("step 3");
+    expect(verifyIterations).toEqual([1, 2]);
+    // 下游只在通过之后跑一次，并且拿到的是第二版方案。
+    expect(applyRuns).toBe(1);
+    expect(detail.nodes.filter((node) => node.nodeId === "apply").map((node) => node.input)).toEqual([{ plan: "plan v2" }]);
+    expect(detail.nodes.filter((node) => node.nodeId === "propose").map((node) => node.iteration)).toEqual([1, 2]);
+  });
+
+  test("轮数用完仍要求 rework：运行失败，下游从未开始", async () => {
+    const bench = await createBench();
+    let applyRuns = 0;
+    bench.behaviors.set("propose", async () => ({ output: { plan: "p" } }));
+    bench.behaviors.set("verify", async () => ({ output: { decision: "rework", issues: ["still bad"], evidence: [] } }));
+    bench.behaviors.set("apply", async () => {
+      applyRuns += 1;
+      return { output: { done: "yes" } };
+    });
+    const { id } = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph: verifierGraph(2), inputs: {} });
+    const detail = await bench.workflows.wait(id);
+    expect(detail.status).toBe("failed");
+    expect(detail.failure?.code).toBe("workflow_iteration_limit_reached");
+    expect(applyRuns).toBe(0);
+    expect(detail.nodes.filter((node) => node.nodeId === "verify")).toHaveLength(2);
+  });
+
+  test("环里有多个节点时，中间节点一起重做", async () => {
+    const bench = await createBench();
+    const runs: string[] = [];
+    bench.behaviors.set("draft", async () => {
+      runs.push("draft");
+      return { output: { draft: "d" } };
+    });
+    bench.behaviors.set("polish", async () => {
+      runs.push("polish");
+      return { output: { polished: "p" } };
+    });
+    bench.behaviors.set("verify", async (_inputs, context) => {
+      runs.push("verify");
+      return { output: { decision: context.iteration === 1 ? "rework" : "pass", issues: ["x"], evidence: [] } };
+    });
+    const graph = makeGraph(
+      [
+        { node_id: "draft", output_contract: ["draft"] },
+        { node_id: "polish", input_contract: ["draft"], output_contract: ["polished"] },
+        { node_id: "verify", type: "verifier", input_contract: ["polished"], output_contract: ["decision", "issues", "evidence"] },
+      ],
+      [
+        { from_node: "draft", to_node: "polish" },
+        { from_node: "polish", to_node: "verify" },
+        { from_node: "verify", to_node: "draft", type: "retry_loop", max_iterations: 2 },
+      ],
+      { entry_node_ids: ["draft"] },
+    );
+    const { id } = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
+    expect((await bench.workflows.wait(id)).status).toBe("succeeded");
+    expect(runs).toEqual(["draft", "polish", "verify", "draft", "polish", "verify"]);
+  });
+
+  test("没有 retry_loop 的 verifier 只交出 decision，不触发重做", async () => {
+    const bench = await createBench();
+    let propose = 0;
+    bench.behaviors.set("propose", async () => {
+      propose += 1;
+      return { output: { plan: "p" } };
+    });
+    bench.behaviors.set("verify", async () => ({ output: { decision: "rework", issues: [], evidence: [] } }));
+    const graph = makeGraph(
+      [
+        { node_id: "propose", output_contract: ["plan"] },
+        { node_id: "verify", type: "verifier", input_contract: ["plan"], output_contract: ["decision", "issues", "evidence"] },
+      ],
+      [{ from_node: "propose", to_node: "verify" }],
+    );
+    const { id } = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
+    expect((await bench.workflows.wait(id)).status).toBe("succeeded");
+    expect(propose).toBe(1);
+  });
+
+  test("verifier 必须在 output_contract 里声明 decision", async () => {
+    const bench = await createBench();
+    const graph = makeGraph([{ node_id: "v", type: "verifier", output_contract: ["issues"] }], []);
+    await expect(bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} })).rejects.toMatchObject({
+      code: "workflow_graph_invalid",
+    });
+  });
+});
+
+describe("节点重试", () => {
+  test("重试的 attempt 拿到与第一次相同的上游输入", async () => {
+    const bench = await createBench();
+    const seen: Record<string, JsonValue>[] = [];
+    bench.behaviors.set("a", async () => ({ output: { a: "from-a" } }));
+    bench.behaviors.set("b", async (inputs) => {
+      seen.push(inputs);
+      if (seen.length === 1) throw new Error("flaky");
+      return { output: { b: "ok" } };
+    });
+    const graph = makeGraph(
+      [
+        { node_id: "a", output_contract: ["a"] },
+        { node_id: "b", input_contract: ["a"], output_contract: ["b"], max_attempts: 2 },
+      ],
+      [{ from_node: "a", to_node: "b" }],
+    );
+    const { id } = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
+    expect((await bench.workflows.wait(id)).status).toBe("succeeded");
+    expect(seen).toEqual([{ a: "from-a" }, { a: "from-a" }]);
+  });
+});

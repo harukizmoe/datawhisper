@@ -20,7 +20,9 @@ export type WorkflowErrorCode =
   | "workflow_node_canceled"
   | "workflow_node_empty_output"
   | "workflow_node_conversation_missing"
-  | "workflow_output_contract_violation";
+  | "workflow_output_contract_violation"
+  | "workflow_validation_failed"
+  | "workflow_iteration_limit_reached";
 
 /** 与旧 `WorkflowContractError` 对齐：`code` 是机器可读的稳定错误码。 */
 export class WorkflowError extends Error {
@@ -178,6 +180,10 @@ export type WorkflowRunIndex = {
   nodes: WorkflowNodeRef[];
   /** 被跳过的节点（条件边未选中，或前驱未全部成功）。 */
   skipped: string[];
+  /** 节点当前所在的轮次（verifier 打回会让一批节点进入下一轮）；没有记录的节点是第 1 轮。 */
+  iterations?: Record<string, number>;
+  /** 打回时交给目标节点的修改意见（`revision_request` 输入），按节点 id。 */
+  revisions?: Record<string, string>;
 };
 
 export type WorkflowRunSummary = {

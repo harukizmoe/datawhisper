@@ -128,6 +128,9 @@ export function validateWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
     if (node.replay !== undefined && node.replay !== "safe" && node.replay !== "unsafe") {
       throw graphError(`${id} replay must be safe or unsafe`);
     }
+    if (node.type === "verifier" && !(node.output_contract ?? []).includes("decision")) {
+      throw graphError(`verifier node ${id} must list "decision" in output_contract`);
+    }
   }
 
   const entries: string[] = [];
@@ -344,4 +347,63 @@ export function planReadiness(input: ReadinessInput): ReadinessPlan {
   }
 
   return { ready, skipped: newlySkipped };
+}
+
+/** 向前边（不含 `retry_loop`）的邻接表。 */
+function forwardAdjacency(graph: WorkflowGraph, reverse = false): Map<string, string[]> {
+  const adjacency = new Map<string, string[]>(graph.nodes.map((node) => [node.node_id, []]));
+  for (const edge of graph.edges) {
+    if (edge.type === "retry_loop") continue;
+    const [from, to] = reverse ? [edge.to_node, edge.from_node] : [edge.from_node, edge.to_node];
+    adjacency.get(from)?.push(to);
+  }
+  return adjacency;
+}
+
+function reachableFrom(adjacency: Map<string, string[]>, start: string): Set<string> {
+  const seen = new Set<string>();
+  const pending = [...(adjacency.get(start) ?? [])];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    pending.push(...(adjacency.get(current) ?? []));
+  }
+  return seen;
+}
+
+/** 节点的 `retry_loop` 出边指向的节点：打回时要重做的起点。 */
+export function reworkTargets(graph: WorkflowGraph, nodeId: string): string[] {
+  const targets: string[] = [];
+  for (const edge of graph.edges) {
+    if (edge.type === "retry_loop" && edge.from_node === nodeId && !targets.includes(edge.to_node)) targets.push(edge.to_node);
+  }
+  return targets;
+}
+
+/** 一次打回最多允许的总轮数：取该节点各条 `retry_loop` 边的最小 `max_iterations`，没有写时与旧实现一样是 2。 */
+export function reworkLimit(graph: WorkflowGraph, nodeId: string): number {
+  const limits = graph.edges
+    .filter((edge) => edge.type === "retry_loop" && edge.from_node === nodeId && typeof edge.max_iterations === "number")
+    .map((edge) => edge.max_iterations as number);
+  if (limits.length > 0) return Math.min(...limits);
+  const own = graph.nodes.find((node) => node.node_id === nodeId)?.max_iterations;
+  return typeof own === "number" && own > 0 ? own : 2;
+}
+
+/**
+ * 一次打回要重做的节点：每个打回目标、打回节点本身，以及两者之间的向前路径上的节点
+ * （目标的后代 ∩ 打回节点的祖先）。旧实现只重开目标与自己，目标与自己不相邻时中间节点会带着旧输出继续。
+ */
+export function reworkNodes(graph: WorkflowGraph, nodeId: string): string[] {
+  const ancestors = reachableFrom(forwardAdjacency(graph, true), nodeId);
+  const forward = forwardAdjacency(graph);
+  const loop = new Set<string>([nodeId]);
+  for (const target of reworkTargets(graph, nodeId)) {
+    loop.add(target);
+    for (const between of reachableFrom(forward, target)) {
+      if (ancestors.has(between)) loop.add(between);
+    }
+  }
+  return graph.nodes.map((node) => node.node_id).filter((id) => loop.has(id));
 }
