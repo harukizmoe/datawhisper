@@ -25,6 +25,8 @@ import { createWorkflows, workflowsExtension, type Workflows } from "./workflows
 import { createAgentNodeExecutor } from "./workflows/agent-node.ts";
 import { createTeamDelegateService, teamDelegationGuard } from "./teams/delegate.ts";
 import { teamMethods } from "./ipc/teams.ts";
+import { workflowMethods } from "./ipc/workflows.ts";
+import { createWorkflowCatalog, type WorkflowCatalog } from "./workflows/catalog.ts";
 import { ModelService } from "./models/service.ts";
 import type { SubmitResponse } from "./protocol.ts";
 import type { RpcMethod } from "./ipc/rpc.ts";
@@ -54,6 +56,10 @@ export type Service = {
   readonly sourceMethods: Record<string, RpcMethod>;
   /** 团队的只读视图与委托取消（`teams.*`）。 */
   readonly teamMethods: Record<string, RpcMethod>;
+  /** 工作流定义与启动（`workflow.definitions.*`、`workflow.start`）的 IPC 方法表。 */
+  readonly workflowMethods: Record<string, RpcMethod>;
+  /** 工作流目录：保存的定义与从定义启动运行。 */
+  readonly workflowCatalog: WorkflowCatalog;
   /** `conversations.submitTurn` 的便捷入口（测试里常用）。 */
   submitTurn(id: string | number, body: unknown): Promise<SubmitResponse>;
   /** Harness 关闭时落定：`stop()` 之后，或存储失败之后（`kind: "failed"`）。 */
@@ -99,6 +105,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
   // 生产工具集：A 类纯 TS + B 类 compute 外壳。测试可以用 `options.tools` 覆盖（桩工具）。
   // 团队委托端口：工具集先装配、委托服务后建（它需要会话服务），这里留一个迟绑定转发器。
   const delegationPort: { current?: TeamDelegationPort } = {};
+  const workflowPort: { current?: WorkflowCatalog } = {};
   // `harness` 在下面才创建；工具只在执行期用到它（那时一定就绪）。
   let harness!: Harness;
   const assembled =
@@ -107,6 +114,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
           harness: () => harness,
           context,
           teamDelegation: delegationPort,
+          workflowCatalog: workflowPort,
           // 来源文档同样是执行期才需要（会话服务建好之后）。
           sources: () => sourceState,
         })
@@ -161,6 +169,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     // 暴露层在这一份全量工具上做过滤；`turnState` 决定数据源/工作区/团队相关的门是否打开。
     tools,
     turnState: options.turnState ?? ((conversationId) => readTurnState(sourceState, conversationId)),
+    workflowsAvailable: true,
   });
 
   // 工作流：节点跑在独立会话里；扩展装进同一个 registry，下一次调度即可见（必须在 `resume()` 之后装，
@@ -170,6 +179,9 @@ export async function startService(config: Config, options: ServiceOptions = {})
     context,
     executeNode: createAgentNodeExecutor({ harness, context, conversations }),
   });
+  const catalog = createWorkflowCatalog({ dir: join(config.dataDir, "workflows"), workflows });
+  workflowPort.current = catalog;
+  const workflowApi = workflowMethods(catalog);
   // 团队委托：工具在子会话里真正跑一轮；守卫拦下子会话越权使用分配外的工具。
   const delegation = createTeamDelegateService({ harness, context, conversations });
   delegationPort.current = delegation;
@@ -193,6 +205,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
     workflows,
     sourceMethods: sourceApis,
     teamMethods: teams,
+    workflowMethods: workflowApi,
+    workflowCatalog: catalog,
     conversations,
     submitTurn: (id, body) => conversations.submitTurn(id, body),
     closed,

@@ -26,6 +26,7 @@ import type { CanvasStore } from "./diagram/canvas.ts";
 import type { ToolResultArtifactSource } from "./artifacts.ts";
 import type { McpCatalogReader } from "./mcp.ts";
 import type { FeishuService } from "../../feishu/service.ts";
+import type { WorkflowCatalog } from "../../workflows/catalog.ts";
 
 /** 工具失败时抛出的错误；`message` 一律沿用旧 Python 实现的原话。 */
 export class AppToolError extends Error {}
@@ -80,6 +81,8 @@ export type AppToolDeps = {
    * 的默认数据目录取单例），测试可注入临时目录的实例。
    */
   readonly feishu?: FeishuService;
+  /** 工作流目录的迟绑定端口：工具先于会话服务装配，目录在服务就绪后再填 `current`。 */
+  readonly workflows?: { current?: WorkflowCatalog };
 };
 
 /** 一次成员委托的请求；由工具层填好团队成员与提示，执行层只负责跑子会话。 */

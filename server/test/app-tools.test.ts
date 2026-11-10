@@ -266,7 +266,7 @@ describe("app tool registry", () => {
       "propose_ppt_outline", "propose_dashboard_outline",
       "ask_user", "browse_webpage", "read_tool_result", "search_mcp_tools",
       "plan_complete", "get_diagram", "memory_read", "load_analysis_skill",
-      "list_feishu_bitable_tables",
+      "list_feishu_bitable_tables", "workflow_list", "workflow_status",
     ]);
     for (const tool of tools) {
       expect({ name: tool.name, replay: tool.replay }).toEqual({

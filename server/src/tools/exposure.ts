@@ -221,6 +221,8 @@ export interface FilterToolsOptions {
   discoveredTools?: Iterable<string> | null;
   hasDataSource?: boolean;
   hasWorkspace?: boolean;
+  /** 宿主有自己的工作流目录（桌面应用）：工作流工具不再要求挂载工作区。 */
+  workflowsAvailable?: boolean;
   teamsEnabled?: boolean;
   includeMcp?: boolean;
   allowedMcpTools?: Iterable<string> | null;
@@ -243,6 +245,18 @@ export function filterToolsForTurn(tools: readonly ToolSchema[], options: Filter
     skill: trustedSkill,
     discoveredTools: discovered,
   });
+  // 工作流定义存在应用数据目录，不依赖挂载的工作区目录：宿主声明可用时，工作流工具按「有工作区」重新判定
+  // 一次（发现词与技能规则不变）。golden 用例不传这个选项，旧行为原样保留。
+  if (options.workflowsAvailable === true && options.hasWorkspace !== true) {
+    const withWorkspace = BUILTIN_TOOL_REGISTRY.exposedNames({
+      command: policyCommand,
+      hasDataSource: options.hasDataSource === true,
+      hasWorkspace: true,
+      skill: trustedSkill,
+      discoveredTools: discovered,
+    });
+    for (const name of WORKFLOW_TOOLS) if (withWorkspace.has(name)) allowed.add(name);
+  }
   if (options.teamsEnabled !== true) {
     for (const name of TEAM_TOOLS) allowed.delete(name);
   } else if (options.hasWorkspace === true) {

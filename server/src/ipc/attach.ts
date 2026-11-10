@@ -50,6 +50,7 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
       dataDir: options.dataDir ?? loadConfig().dataDir,
       sourceMethods: service.sourceMethods,
       teamMethods: service.teamMethods,
+      workflowMethods: service.workflowMethods,
     }),
     send: (record) => writer.send(record),
     mapError: mapSettingsError,

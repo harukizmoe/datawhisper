@@ -18,8 +18,9 @@ import { createWebTools } from "./web.ts";
 import { createDiagramTools } from "./diagram/tools.ts";
 import { createFeishuTools } from "../../feishu/tools.ts";
 import { defaultFeishuService } from "../../feishu/service.ts";
+import { createWorkflowTools } from "./workflows.ts";
 
-/** 41 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
+/** 46 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
 export const APP_TOOL_NAMES = [
   "workspace_status",
   "workspace_glob",
@@ -62,6 +63,11 @@ export const APP_TOOL_NAMES = [
   "create_feishu_bitable",
   "append_feishu_bitable_records",
   "update_feishu_bitable_record",
+  "workflow_create",
+  "workflow_create_custom",
+  "workflow_list",
+  "workflow_start",
+  "workflow_status",
 ] as const satisfies readonly string[];
 
 export type AppToolName = (typeof APP_TOOL_NAMES)[number];
@@ -90,6 +96,7 @@ export function createAppTools(deps: AppToolDeps): AppTool[] {
     ...createWebTools(effective),
     ...(effective.canvas === undefined ? [] : createDiagramTools(effective)),
     ...createFeishuTools({ connections: () => feishu.connections() }),
+    ...createWorkflowTools(effective),
   ];
   const order = new Map<string, number>(APP_TOOL_NAMES.map((name, index) => [name, index]));
   return tools.sort((left, right) => (order.get(left.name) ?? 999) - (order.get(right.name) ?? 999));

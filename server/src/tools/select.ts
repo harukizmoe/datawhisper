@@ -43,6 +43,8 @@ export type TurnToolInput = {
   requiredTools?: ReadonlySet<string> | null;
   includeMcp?: boolean;
   allowedMcpTools?: Iterable<string> | null;
+  /** 宿主有工作流目录：工作流工具不要求挂载工作区（见 `FilterToolsOptions.workflowsAvailable`）。 */
+  workflowsAvailable?: boolean;
   maxTools?: number | null;
 };
 
@@ -60,6 +62,7 @@ export function toolsForTurn(allTools: readonly ToolRegistration[], input: TurnT
     discoveredTools: input.discoveredTools ?? null,
     hasDataSource: input.hasDataSource,
     hasWorkspace: input.hasWorkspace,
+    workflowsAvailable: input.workflowsAvailable,
     teamsEnabled: input.teamsEnabled,
     includeMcp: input.includeMcp,
     allowedMcpTools: input.allowedMcpTools ?? null,

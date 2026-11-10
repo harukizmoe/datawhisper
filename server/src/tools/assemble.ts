@@ -11,6 +11,7 @@ import type { SourceDocStore } from "../ipc/source-store.ts";
 import { createToolResultStore, type ToolResultStore } from "../tools/guard/spill.ts";
 import { createConversationDocs } from "../tools/app/docs.ts";
 import type { AppDocHosts, TeamDelegationPort } from "../tools/app/types.ts";
+import type { WorkflowCatalog } from "../workflows/catalog.ts";
 import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, Harness, ToolExecutionApi } from "@earendil-works/pi-durable";
 
@@ -38,6 +39,8 @@ export type AssembleOptions = {
    * 所以这里用一个迟绑定的转发器：装配时给对象，会话服务就绪后再填 `current`。
    */
   readonly teamDelegation?: { current?: TeamDelegationPort };
+  /** 工作流目录的迟绑定端口（目录依赖会话服务，工具先装配）。 */
+  readonly workflowCatalog?: { current?: WorkflowCatalog };
   /**
    * 会话的来源文档：B 类工具每次调用都要知道本会话在用哪些来源（compute worker 是跨会话共享的）。
    * 省略时 B 类工具不带数据上下文，只会得到 compute 原文的「no data source」。
@@ -74,6 +77,7 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
   const appTools = createAppTools({
     workspace,
     sessionId,
+    ...(options.workflowCatalog === undefined ? {} : { workflows: options.workflowCatalog }),
     docs: docsFor,
     ...(teamDelegate === undefined ? {} : { teamDelegate }),
     // 外溢器与 `read_tool_result` 必须共用同一个 store：否则模型拿不到自己刚外溢的结果

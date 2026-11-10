@@ -64,6 +64,8 @@ export type ConversationsDeps = {
    * 全局单一状态会让 A 会话的数据源决定 B 会话的工具暴露。
    */
   turnState?: (conversationId: number) => TurnState | Promise<TurnState>;
+  /** 宿主有自己的工作流目录：每轮的工具暴露里，工作流工具不要求挂载工作区。 */
+  workflowsAvailable?: boolean;
 };
 
 /** 一条订阅通知：与旧 SSE 的 `snapshot`/`ops`/`end` 一一对应，加上订阅号。 */
@@ -178,6 +180,7 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     command,
     hasDataSource: current.hasDataSource,
     hasWorkspace: current.hasWorkspace,
+    workflowsAvailable: deps.workflowsAvailable,
     teamsEnabled: current.teamsEnabled,
     discoveredTools: next.discoveredTools,
     maxTools: MAX_VISIBLE_TOOLS,

@@ -39,6 +39,8 @@ export type MethodDeps = {
   sourceMethods?: Record<string, RpcMethod>;
   /** 团队方法表（`teams.*`）；省略时不注册。 */
   teamMethods?: Record<string, RpcMethod>;
+  /** 工作流定义与启动方法表（`workflow.definitions.*`、`workflow.start`）；省略时不注册。 */
+  workflowMethods?: Record<string, RpcMethod>;
 };
 
 function idParam(params: MethodParams, key = "id"): string | number {
@@ -159,6 +161,7 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
     ...(feishu === undefined ? {} : feishuMethods(feishu, harness, context)),
     ...(deps.sourceMethods ?? {}),
     ...(deps.teamMethods ?? {}),
+    ...(deps.workflowMethods ?? {}),
     // 会话库/知识库/记忆/技能/hooks/仪表盘：compute 侧的数据根必须与这里一致，
     // 因此共用 `dataDir`（service.ts 给 compute 子进程设的 `BAA_DATA_DIR` 也是它）。
     ...libraryMethods({ harness, context, conversations, compute, dataDir: deps.dataDir }),
