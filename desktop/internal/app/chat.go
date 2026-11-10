@@ -67,6 +67,8 @@ type chatView struct {
 	composerSeen bool
 	wantFocus    bool
 	blurSince    time.Time
+	// dockRef 绑在悬浮的输入区整体上；消息列最后一行据它上一帧的高度留白。
+	dockRef ui.Handle
 	// fullChart 与 fullOpen 是全屏查看的图表（richcontent.go）。
 	fullChart conversation.Chart
 	fullOpen  bool

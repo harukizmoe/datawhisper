@@ -51,6 +51,10 @@ func (a *app) chatPage(c *ui.Context) {
 		} else {
 			turns := turnEnds(messages, a.chat.Busy)
 			a.cv.rows, a.cv.rowOf = chatRows(messages, a.appearance())
+			dock := a.cv.dockRef.Bounds(c).H
+			if dock == 0 {
+				dock = 105 // 第一帧还没量过输入区：按单行输入区的常见高度留白，下一帧按实际高度修正；估得接近才不会在首次点击时挪动布局
+			}
 			rows := a.cv.rows
 			ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 				a.list.Key = func(i int) any { return rows[i].key }
@@ -73,12 +77,17 @@ func (a *app) chatPage(c *ui.Context) {
 						if meta, ok := turns[row.from]; ok {
 							a.turnMeta(c, meta)
 						}
+						if i == len(rows)-1 {
+							ui.Box(c).Height(dock)
+						}
 					})
-				}).Grow(1).MinWidth(0).Padding(20, 24).Gap(14).Justify(ui.End)
+				}).Grow(1).MinWidth(0).Padding(20, 24, 0, 24).Gap(14).Justify(ui.End)
 				a.navRail(c, messages)
 			})
 		}
-		ui.Column(c).Children(func() {
+		// 输入区浮在消息列之上（参考 Tern）：贴底的绝对定位，不再占消息列的高度；消息列最后一行底下留一块
+		// 等高的空白（用上一帧量到的高度），滚到底时最后一条不会被盖住。
+		ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Background(t.Background).Bind(&a.cv.dockRef).Children(func() {
 			// 消息列在输入区上方渐隐（参考 Tern 输入区边缘的虚化）：一条贴在输入区顶边、向上伸出的渐变，
 			// 把滚到那里的内容淡成背景色。
 			ui.Box(c).Absolute().Left(0).Right(0).Top(-28).Height(28).Gradient(t.Background.Alpha(0), t.Background, 180)
