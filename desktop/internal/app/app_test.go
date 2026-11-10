@@ -94,6 +94,8 @@ type fakeService struct {
 	mu      sync.Mutex
 	closers []func()
 	calls   []fakeCall
+	// workflows 不为空时，假服务实现 workflow.* 方法；为空时它们是 method not found（界面隐藏那一节）。
+	workflows *fakeWorkflows
 }
 
 // fakeCall 是一次假服务收到的请求，测试据此断言界面发出的参数。
@@ -264,6 +266,16 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 		f.calls = append(f.calls, fakeCall{Method: req.Method, Params: params})
 		f.mu.Unlock()
 		conv := fmt.Sprint(params["id"])
+		if f.workflows != nil {
+			if result, errMessage, handled := f.workflows.serve(req.Method, params); handled {
+				if errMessage != "" {
+					write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32602, "message": errMessage, "data": map[string]any{"kind": "invalid_input"}}})
+				} else {
+					respond(req.ID, result)
+				}
+				continue
+			}
+		}
 		switch req.Method {
 		case "conversation.list":
 			respond(req.ID, map[string]any{"conversations": []any{

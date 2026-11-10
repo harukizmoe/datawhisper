@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -39,6 +40,11 @@ type WorkflowRun struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"failure"`
+	// RetryOf 是手动重试产生的运行：来自哪个失败的运行、从哪个节点重来。
+	RetryOf *struct {
+		RunID  int    `json:"runId"`
+		NodeID string `json:"nodeId"`
+	} `json:"retryOf"`
 }
 
 // Active 报告运行是否还没结束。
@@ -117,4 +123,102 @@ func (c *Client) CancelDelegation(ctx context.Context, team, member string) (int
 	}
 	err := c.callInto(ctx, "teams.cancelDelegate", params, &out)
 	return out.Canceled, err
+}
+
+// WorkflowDefinition 是保存下来的工作流定义（`workflow.definitions.list`）；图本身界面不编辑，不解析。
+type WorkflowDefinition struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Template    string `json:"template"` // analysis、insight、report、cleaning_approval 或 custom
+	CreatedAt   string `json:"createdAt"`
+}
+
+// WorkflowDefinitions 列出保存的工作流定义。
+func (c *Client) WorkflowDefinitions(ctx context.Context) ([]WorkflowDefinition, error) {
+	var out struct {
+		Workflows []WorkflowDefinition `json:"workflows"`
+	}
+	err := c.callInto(ctx, "workflow.definitions.list", nil, &out)
+	return out.Workflows, err
+}
+
+// RemoveWorkflowDefinition 删除一份定义；历史运行带着图的快照，不受影响。
+func (c *Client) RemoveWorkflowDefinition(ctx context.Context, id string) error {
+	return c.callInto(ctx, "workflow.definitions.remove", map[string]any{"id": id}, nil)
+}
+
+// StartWorkflow 在会话 conv 里从定义 id 启动一次运行，返回运行 id。节点复用该会话打开的数据源。
+func (c *Client) StartWorkflow(ctx context.Context, id string, conv int) (int, error) {
+	var out struct {
+		ID int `json:"id"`
+	}
+	err := c.callInto(ctx, "workflow.start", map[string]any{"workflowId": id, "conversationId": conv}, &out)
+	return out.ID, err
+}
+
+// WorkflowNode 是运行详情里的一个节点（服务端的 WorkflowNodeView，只取界面用到的字段）。
+type WorkflowNode struct {
+	NodeID    string          `json:"nodeId"`
+	NodeRunID *int            `json:"nodeRunId"` // 没派发过（或重试时沿用旧输出）的节点没有
+	Status    string          `json:"status"`
+	Iteration int             `json:"iteration"`
+	Attempt   int             `json:"attempt"`
+	Output    json.RawMessage `json:"output"`
+	Error     string          `json:"error"`
+	Reused    bool            `json:"reused"`
+}
+
+// WorkflowApproval 是一条审批记录。Decision 为空表示待批。
+type WorkflowApproval struct {
+	ID       string          `json:"id"`
+	NodeID   string          `json:"nodeId"`
+	Kind     string          `json:"kind"` // key_approval、exception_review、escalation
+	Reason   string          `json:"reason"`
+	Output   json.RawMessage `json:"output"`
+	Decision string          `json:"decision"`
+	Comment  string          `json:"comment"`
+}
+
+// Pending 报告审批是否还在等人决定。
+func (a WorkflowApproval) Pending() bool { return a.Decision == "" }
+
+// WorkflowRunDetail 是一次运行的详情：摘要加节点与审批。
+type WorkflowRunDetail struct {
+	WorkflowRun
+	Nodes     []WorkflowNode     `json:"nodes"`
+	Approvals []WorkflowApproval `json:"approvals"`
+}
+
+// WorkflowRunDetail 读一次运行的详情。
+func (c *Client) WorkflowRunDetail(ctx context.Context, id int) (WorkflowRunDetail, error) {
+	var out WorkflowRunDetail
+	err := c.callInto(ctx, "workflow.runs.get", map[string]any{"id": id}, &out)
+	return out, err
+}
+
+// 审批的四种决定。
+const (
+	DecisionApprove     = "approve"
+	DecisionWithChanges = "approve_with_changes"
+	DecisionRetry       = "reject_and_retry"
+	DecisionStop        = "reject_and_stop"
+)
+
+// DecideWorkflowApproval 对运行 runID 的一条待批审批做决定。changes 只在 DecisionWithChanges 时有意义。
+func (c *Client) DecideWorkflowApproval(ctx context.Context, runID int, approvalID, decision, comment string, changes map[string]any) error {
+	params := map[string]any{"id": runID, "approvalId": approvalID, "decision": decision, "comment": comment}
+	if changes != nil {
+		params["changes"] = changes
+	}
+	return c.callInto(ctx, "workflow.runs.approve", params, nil)
+}
+
+// RetryWorkflowRun 从失败的节点任务 nodeRunID 重试：另起一个运行，返回新运行的 id。
+func (c *Client) RetryWorkflowRun(ctx context.Context, runID, nodeRunID int) (int, error) {
+	var out struct {
+		ID int `json:"id"`
+	}
+	err := c.callInto(ctx, "workflow.runs.retry", map[string]any{"id": runID, "nodeRunId": nodeRunID}, &out)
+	return out.ID, err
 }

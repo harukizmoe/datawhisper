@@ -28,6 +28,11 @@ type runsState struct {
 	// noJobs、noWorkflows、noTeams：服务没有这类功能（method not found），界面不画那一节。
 	noJobs, noWorkflows, noTeams bool
 
+	// wf 是工作流的定义、展开的详情与审批输入。
+	wf workflowState
+	// again：拉取期间又有人要求刷新，结束后补一次。
+	again bool
+
 	// canceling 记住正在取消的条目（"job:12"、"run:3"、"team:分析组"），按钮显示转圈并禁用。
 	canceling map[string]bool
 }
@@ -51,20 +56,31 @@ func (r *runsState) anyActive() bool {
 func (a *app) loadRuns() {
 	client, conv := a.client, a.conv
 	r := &a.src.runs
-	if client == nil || conv == 0 || r.loading {
+	if client == nil || conv == 0 {
+		return
+	}
+	if r.loading {
+		// 正在拉取：结束后再拉一次，免得刚展开的详情要等下一次轮询。
+		r.again = true
 		return
 	}
 	if r.conv != conv {
 		*r = runsState{conv: conv, gen: r.gen + 1}
 	}
 	r.loading = true
-	gen := r.gen
+	gen, open := r.gen, r.wf.open
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		jobs, jobsErr := client.Jobs(ctx, conv)
 		runs, runsErr := client.WorkflowRuns(ctx, conv)
+		defs, defsErr := client.WorkflowDefinitions(ctx)
 		delegations, teamsErr := client.ActiveDelegations(ctx)
+		var detail service.WorkflowRunDetail
+		var detailErr error
+		if open != 0 {
+			detail, detailErr = client.WorkflowRunDetail(ctx, open)
+		}
 		a.post(func() {
 			r := &a.src.runs
 			if r.gen != gen || r.conv != a.conv {
@@ -72,7 +88,8 @@ func (a *app) loadRuns() {
 			}
 			r.loading, r.loaded, r.loadedAt, r.err = false, true, time.Now(), ""
 			r.noJobs, r.noWorkflows, r.noTeams = service.IsUnavailable(jobsErr), service.IsUnavailable(runsErr), service.IsUnavailable(teamsErr)
-			for _, err := range []error{jobsErr, runsErr, teamsErr} {
+			r.wf.noDefinitions = service.IsUnavailable(defsErr)
+			for _, err := range []error{jobsErr, runsErr, defsErr, teamsErr, detailErr} {
 				if err != nil && !service.IsUnavailable(err) && r.err == "" {
 					r.err = a.sourceErr(err)
 				}
@@ -81,10 +98,22 @@ func (a *app) loadRuns() {
 				r.jobs = jobs
 			}
 			if runsErr == nil {
+				sortWorkflowRuns(runs)
 				r.workflows = runs
+			}
+			if defsErr == nil {
+				r.wf.definitions = defs
 			}
 			if teamsErr == nil {
 				r.delegations = delegations
+			}
+			// 详情只在用户还开着同一个运行时采用，期间收起或换了一个就丢弃。
+			if open != 0 && r.wf.open == open && detailErr == nil {
+				r.wf.detail = &detail
+			}
+			if r.again {
+				r.again = false
+				a.loadRuns()
 			}
 		})
 	}()

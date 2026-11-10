@@ -22,7 +22,7 @@ func TestRunsTabListsAndCancels(t *testing.T) {
 	q.pump(t, tt, "the runs", func() bool { return a.src.runs.loaded })
 
 	expectTexts(t, tt, []string{"Long tasks", "Quarterly report", "Running", "rendering charts", "profile_data", "Succeeded",
-		"Team delegations", "analysts / sql", "Check the joins", "Sub-chat 9"}, []string{"Workflow runs"})
+		"Team delegations", "analysts / sql", "Check the joins", "Sub-chat 9"}, []string{"Workflow runs", "Saved workflows"})
 	if got := fs.callsTo("jobs.list"); len(got) == 0 || got[0]["conversationId"] != float64(4) {
 		t.Errorf("jobs.list params %v", got)
 	}

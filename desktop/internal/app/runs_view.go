@@ -47,6 +47,9 @@ func (a *app) runsTab(c *ui.Context, t *ui.Theme) {
 			}
 		})
 	}
+	if !r.wf.noDefinitions {
+		a.workflowDefinitions(c, t)
+	}
 	if !r.noWorkflows {
 		a.runSection(c, t, a.tr("runs.workflows"), len(r.workflows), func() {
 			for _, w := range r.workflows {
@@ -119,11 +122,8 @@ func (a *app) jobRow(c *ui.Context, t *ui.Theme, j service.Job) {
 }
 
 func (a *app) workflowRow(c *ui.Context, t *ui.Theme, w service.WorkflowRun) {
-	a.runCard(c, t, w.WorkflowVersionID, w.Status, w.Active(), "run:"+strconv.Itoa(w.ID), func() { a.cancelWorkflowRun(w.ID) }, func() {
-		if w.Failure != nil {
-			ui.Text(c, w.Failure.Message).FontSize(a.fs(textCaption)).TextColor(t.Danger).Selectable()
-		}
-		a.buffer(ui.Text(c, "#"+strconv.Itoa(w.ID)+" · "+formatWhen(w.CreatedAt))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+	a.runCard(c, t, a.src.runs.workflowName(w.WorkflowVersionID), w.Status, w.Active(), "run:"+strconv.Itoa(w.ID), func() { a.cancelWorkflowRun(w.ID) }, func() {
+		a.workflowDetails(c, t, w)
 	})
 }
 

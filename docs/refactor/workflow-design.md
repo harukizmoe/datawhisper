@@ -59,8 +59,11 @@ verifier 节点输出 `decision=rework` 时：自己记成功，沿 `retry_loop`
 - 失败的运行显示 Retry from failed node。
 - 工作流定义只读列表放在 Runs 页顶部（名称、模式、节点数），不做编辑界面（创建走聊天）。
 
-## IPC 增量
-`workflow.list`、`workflow.get`、`workflow.start`、`workflow.runs.approve`（`{runId, approvalId, decision, comment}`）、`workflow.runs.retry`（`{runId, nodeRunId}`）。
+## IPC 增量（实现后的实际名字）
+- `workflow.definitions.list|get|remove`、`workflow.start {workflowId, conversationId, businessContext?}`。
+- `workflow.runs.approve {id, approvalId, decision, comment?, changes?}`：`changes` 只在 `approve_with_changes` 时有，键必须是节点 `output_contract` 的子集。
+- `workflow.runs.retry {id, nodeRunId}`：返回新运行的 `{id}`；失败节点及其下游重跑，其余成功节点沿用旧输出（运行详情里标 `reused`）。
+- 运行摘要新增 `retryOf`，详情新增 `approvals`，节点新增 `reused`。
 
 ## 里程碑
 1. 保存 + 5 个工具 + `workflow.start`/`list`（无审批的全自动流程能跑通）。
