@@ -81,8 +81,8 @@ func (a *app) chatPage(c *ui.Context) {
 							ui.Box(c).Height(dock)
 						}
 					})
-				}).Grow(1).MinWidth(0).Padding(20, 24, 0, 24).Gap(14).Justify(ui.End)
-				a.navRail(c, messages)
+				}).Grow(1).MinWidth(0).Padding(20, 24, 0, 24).Gap(14).Justify(ui.End).Scrollbars(false)
+				a.navRail(c, messages, dock)
 			})
 		}
 		// 输入区浮在消息列之上（参考 Tern）：贴底的绝对定位，不再占消息列的高度；消息列最后一行底下留一块
@@ -605,32 +605,55 @@ func (a *app) turnMeta(c *ui.Context, info turnInfo) {
 	})
 }
 
-// navRail 是对话列右侧的导航轨（参考 Tern）：每条用户消息一道短横，按它在对话中的位置排布；视口所在的那条
-// 用强调色。点一道横线跳到那条提问，悬停时显示提问的第一行。少于两条提问时不画。
-func (a *app) navRail(c *ui.Context, messages []conversation.Message) {
+// navRail 是对话列右侧的导航轨（参考 Tern），同时当滚动条用：它占满对话列的整个高度（到输入区上沿为止），
+// 每条用户消息一道短横，按它在对话中的位置排布，视口所在的那条用强调色，点一道横线跳到那条提问，悬停时显示
+// 提问的第一行；列表自己的滚动条关掉了，改由这条轨上的滑块表示视口位置，滑块只在刚滚动过的一小会儿显示。
+func (a *app) navRail(c *ui.Context, messages []conversation.Message, bottom float32) {
 	var users []int
 	for i, m := range messages {
 		if m.Role == "user" {
 			users = append(users, i)
 		}
 	}
-	if len(users) < 2 {
-		return
-	}
 	t := c.Theme()
-	// 列表按行渲染，视口里第一行换算回它的第一条消息。
+	// 列表按行渲染；视口的首尾两行换算回消息。
+	row, lastRow := a.list.Visible()
 	first := 0
-	if row, _ := a.list.Visible(); row >= 0 && row < len(a.cv.rows) {
+	if row >= 0 && row < len(a.cv.rows) {
 		first = a.cv.rows[row].from
 	}
-	current := users[0]
+	current := -1
+	if len(users) > 0 {
+		current = users[0]
+	}
 	for _, i := range users {
 		if i <= first {
 			current = i
 		}
 	}
+	// 视口变了就是在滚动（用户滚轮、拖动，或跟随新内容）：记下时间，滑块显示 scrollbarLinger。
+	if row != a.cv.railFirst || lastRow != a.cv.railLast {
+		a.cv.railFirst, a.cv.railLast, a.cv.scrolledAt = row, lastRow, c.Now()
+	}
+	shown := false
+	if left := scrollbarLinger - c.Now().Sub(a.cv.scrolledAt); !a.cv.scrolledAt.IsZero() && left > 0 {
+		shown = true
+		c.After(left)
+	}
 	n := float32(len(messages))
-	ui.Column(c).Width(18).Shrink(0).Margin(20, 6, 20, 0).Padding(10, 0).Radius(9).Background(a.tokens().Tok.Card).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).Width(14).Shrink(0).Margin(0, 0, bottom, 0).AlignItems(ui.Center).Children(func() {
+		// 滑块：按行下标估位置与长度（各行高度不同，是近似值）；到底时贴底。
+		if rows := float32(len(a.cv.rows)); shown && rows > 0 && lastRow >= row {
+			height := max(float32(lastRow-row+1)/rows*100, 6)
+			top := min(float32(row)/rows*100, 100-height)
+			if a.list.AtEnd() {
+				top = 100 - height
+			}
+			ui.Box(c).Absolute().Left(4).Right(4).TopPercent(top).HeightPercent(height).Radius(3).Background(t.TextMuted.Alpha(0.45))
+		}
+		if len(users) < 2 {
+			return
+		}
 		prev := float32(0)
 		for _, i := range users {
 			// 横线之间的空白按消息下标的比例分配：开头几条连续的提问就叠成紧挨的几道。

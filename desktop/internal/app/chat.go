@@ -15,6 +15,9 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// scrollbarLinger 是滚动停下之后滚动滑块还留多久。
+const scrollbarLinger = 1200 * time.Millisecond
+
 // chatView 是聊天页自己的界面状态。它只由 UI 线程读写；切换会话时 resetConversation 清掉与会话
 // 相关的部分，模型目录与命令目录保留（它们与具体会话无关）。
 type chatView struct {
@@ -67,6 +70,10 @@ type chatView struct {
 	composerSeen bool
 	wantFocus    bool
 	blurSince    time.Time
+	// railFirst、railLast 是上一帧消息列表显示的首尾行；它们一变就是在滚动，scrolledAt 记下那一刻，
+	// 导航轨上的滚动滑块据此只在刚滚动过的一小会儿显示（navRail）。
+	railFirst, railLast int
+	scrolledAt          time.Time
 	// dockRef 绑在悬浮的输入区整体上；消息列最后一行据它上一帧的高度留白。
 	dockRef ui.Handle
 	// fullChart 与 fullOpen 是全屏查看的图表（richcontent.go）。
