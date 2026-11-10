@@ -118,8 +118,13 @@ export function buildNodePrompt(node: WorkflowNode, inputs: Record<string, JsonV
 export function readTurnResult(entries: readonly { kind: string; model?: unknown }[]): {
   text: string;
   usage: WorkflowUsage;
+  /** 最后一条助手消息的结束原因与错误信息（`stop`、`toolUse`、`error`、`aborted`…）。 */
+  stopReason: string | undefined;
+  errorMessage: string | undefined;
 } {
   let text = "";
+  let stopReason: string | undefined;
+  let errorMessage: string | undefined;
   let input = 0;
   let output = 0;
   let cached = 0;
@@ -129,15 +134,18 @@ export function readTurnResult(entries: readonly { kind: string; model?: unknown
     if (entry.kind === "pi.tool-call") toolCalls += 1;
     if (entry.kind !== "pi.assistant" || !Array.isArray(entry.model)) continue;
     for (const message of entry.model) {
-      const record = message as { content?: unknown; usage?: Record<string, unknown> };
+      const record = message as { content?: unknown; usage?: Record<string, unknown>; stopReason?: unknown; errorMessage?: unknown };
       if (Array.isArray(record.content)) {
         const pieces: string[] = [];
         for (const block of record.content) {
           const value = block as { type?: string; text?: string };
           if (value.type === "text" && typeof value.text === "string") pieces.push(value.text);
         }
-        if (pieces.length > 0) text = pieces.join("");
+        // 只认最后一条助手消息：它没有正文（比如出错中断）时，不能拿更早一条工具调用前的评论顶替成节点输出。
+        text = pieces.join("");
       }
+      stopReason = typeof record.stopReason === "string" ? record.stopReason : undefined;
+      errorMessage = typeof record.errorMessage === "string" ? record.errorMessage : undefined;
       const counted = record.usage;
       if (counted === undefined) continue;
       sawUsage = true;
@@ -152,7 +160,7 @@ export function readTurnResult(entries: readonly { kind: string; model?: unknown
     usage.output_tokens = output;
     usage.cached_input_tokens = cached;
   }
-  return { text, usage };
+  return { text, usage, stopReason, errorMessage };
 }
 
 
@@ -300,9 +308,11 @@ export function createAgentNodeExecutor(deps: AgentNodeDeps): WorkflowNodeExecut
 
     context.progress(90, "collecting output");
     const view = (await conversation.watch(deps.context)).value;
-    const { text, usage } = readTurnResult(view.entries as never);
+    const { text, usage, stopReason, errorMessage } = readTurnResult(view.entries as never);
     if (text.trim() === "") {
-      throw new WorkflowError("workflow_node_empty_output", `node ${node.node_id} produced no assistant text`);
+      // 空输出多半是模型或网关出了错（超时、限流）：把原因带进失败信息，运行记录里才看得出是哪一种。
+      const why = stopReason === undefined || stopReason === "stop" ? "" : ` (stopReason=${stopReason}${errorMessage === undefined ? "" : `: ${errorMessage}`})`;
+      throw new WorkflowError("workflow_node_empty_output", `node ${node.node_id} produced no assistant text${why}`);
     }
     const outputs = parseAgentOutputs(text, contractFields(node));
     validateNodeOutputs(node, outputs);

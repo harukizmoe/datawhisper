@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DATA_RULES } from "../src/agent/prompts.ts";
-import { verifierDecision } from "../src/workflows/agent-node.ts";
+import { readTurnResult, verifierDecision } from "../src/workflows/agent-node.ts";
 import { loadConfig } from "../src/config.ts";
 import { createConversationSourceStore } from "../src/ipc/source-store.ts";
 import { type Service, startService } from "../src/service.ts";
@@ -197,5 +197,26 @@ describe("verifier 与 validation 节点", () => {
     for (const bad of ["approved", "", undefined, 1, ["pass"]]) {
       expect(() => verifierDecision(node, bad as never)).toThrow("expected one of pass, rework, escalate");
     }
+  });
+});
+
+describe("readTurnResult", () => {
+  const assistant = (content: unknown[], extra: Record<string, unknown> = {}) => ({ kind: "pi.assistant", model: [{ content, ...extra }] });
+
+  test("只认最后一条助手消息：它出错没有正文时，不拿工具调用前的评论顶替，并带出结束原因", () => {
+    const result = readTurnResult([
+      assistant([{ type: "text", text: "Let me check the schema." }, { type: "toolCall" }], { stopReason: "toolUse" }),
+      { kind: "pi.tool-call" },
+      assistant([], { stopReason: "error", errorMessage: "upstream timeout" }),
+    ]);
+    expect(result).toMatchObject({ text: "", stopReason: "error", errorMessage: "upstream timeout", usage: { tool_calls: 1 } });
+  });
+
+  test("正常结束时取最后一条的正文", () => {
+    const result = readTurnResult([
+      assistant([{ type: "text", text: "draft" }], { stopReason: "toolUse" }),
+      assistant([{ type: "text", text: "final" }], { stopReason: "stop" }),
+    ]);
+    expect(result).toMatchObject({ text: "final", stopReason: "stop" });
   });
 });

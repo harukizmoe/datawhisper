@@ -49,6 +49,8 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
       feishu,
       dataDir: options.dataDir ?? loadConfig().dataDir,
       sourceMethods: service.sourceMethods,
+      jobs: service.jobs,
+      workflows: service.workflows,
       teamMethods: service.teamMethods,
       workflowMethods: service.workflowMethods,
     }),
