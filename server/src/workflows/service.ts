@@ -206,11 +206,14 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
         inputs: Record<string, JsonValue>;
         iteration: number;
         attempt: number;
+        conversationId: number;
       };
       const result = await options.executeNode(args.node, args.inputs, {
         signal: work.signal,
         nodeId: args.node.node_id,
         iteration: args.iteration,
+        conversationId: args.conversationId,
+        taskId: work.taskId,
         attempt: args.attempt,
         idempotencyKey: work.idempotencyKey,
         now: work.now,

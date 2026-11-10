@@ -177,7 +177,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
   const workflows = createWorkflows({
     harness,
     context,
-    executeNode: createAgentNodeExecutor({ harness, context, conversations }),
+    executeNode: createAgentNodeExecutor({ harness, context, conversations, sources: sourceState }),
   });
   const catalog = createWorkflowCatalog({ dir: join(config.dataDir, "workflows"), workflows });
   workflowPort.current = catalog;

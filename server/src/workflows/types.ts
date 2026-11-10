@@ -138,6 +138,10 @@ export type WorkflowNodeExecute = (
     readonly signal: AbortSignal;
     readonly nodeId: string;
     readonly iteration: number;
+    /** 发起运行的会话：节点复用它已打开的数据源、继承它的模型。 */
+    readonly conversationId: number;
+    /** 节点自己的任务 id：节点会话归它所有（不出现在会话列表里，取消时一并停下）。 */
+    readonly taskId: number;
     readonly attempt: number;
     readonly idempotencyKey: string;
     readonly now: () => number;

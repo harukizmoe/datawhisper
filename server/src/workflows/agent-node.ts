@@ -8,20 +8,32 @@
 
 import type { JsonValue } from "@earendil-works/chord";
 import type { Context } from "@earendil-works/chord/context";
-import type { Conversation, Harness } from "@earendil-works/pi-durable";
+import type { Conversation, ConversationId, Harness } from "@earendil-works/pi-durable";
 import type { Conversations } from "../conversations/service.ts";
+import type { SourceDocStore } from "../ipc/source-store.ts";
 import { WorkflowError, type WorkflowNode, type WorkflowNodeExecute, type WorkflowNodeResult, type WorkflowUsage } from "./types.ts";
 
-/** 执行器需要的宿主能力；只用到「建会话 + 提交一轮 + 读最终答复」。 */
+/** 执行器需要的宿主能力：建会话、复制数据源、提交一轮、读最终答复。 */
 export type AgentNodeDeps = {
   readonly harness: Harness;
   readonly context: Context;
   readonly conversations: Pick<Conversations, "create" | "submitTurn" | "abort">;
-  /** 节点默认模型；省略时走服务默认模型（与用户手动新建会话一致）。 */
-  readonly model?: () => Promise<{ provider: string; modelId: string } | undefined>;
-  /** 节点级工具收敛：节点会话不该看用户的全部工具。省略时沿用 `conversations` 的默认收敛。 */
-  readonly prepareConversation?: (conversationId: number, node: WorkflowNode) => Promise<void>;
+  /** 会话级来源文档；省略时节点不带数据源。 */
+  readonly sources?: SourceDocStore;
 };
+
+/**
+ * 节点没写 `allowed_tools` 时的默认工具：只读的数据查询。无人值守的节点不该默认拿到写文件、导出、
+ * 发消息之类的工具，需要的节点必须在图里显式列出。
+ */
+export const DEFAULT_NODE_TOOLS: readonly string[] = ["get_schema", "get_table_detail", "query_data", "query_knowledge", "profile_data"];
+
+/** 节点本轮可见的工具：图里的 `allowed_tools`（可以是空表，表示纯文字节点），缺省为只读默认集。 */
+export function nodeAllowedTools(node: WorkflowNode): string[] {
+  const declared = node.allowed_tools;
+  if (!Array.isArray(declared)) return [...DEFAULT_NODE_TOOLS];
+  return declared.filter((name): name is string => typeof name === "string");
+}
 
 /** 支持由本执行器处理的节点类型；其余类型在运行前就明确失败，不静默跳过。 */
 const AGENT_NODE_TYPES = new Set(["agent", undefined]);
@@ -195,16 +207,25 @@ export function createAgentNodeExecutor(deps: AgentNodeDeps): WorkflowNodeExecut
     const prompt = buildNodePrompt(node, inputs);
     context.progress(10, "creating node conversation");
 
-    const created = await deps.conversations.create({ title: `workflow:${context.nodeId}` });
+    // 模型沿用发起会话的，节点不另选；会话归节点任务所有，所以不出现在会话列表里，节点取消时一并停下。
+    const origin = await deps.harness.conversation(context.conversationId as ConversationId, deps.context);
+    const originAgent = origin === undefined ? undefined : await origin.agent(deps.context);
+    const created = await deps.conversations.create(
+      originAgent?.model === undefined ? {} : { model: originAgent.model, thinkingLevel: originAgent.thinkingLevel },
+      { ownerTaskId: context.taskId },
+    );
     const conversationId = created.id;
-    const model = await deps.model?.();
-    if (model !== undefined) {
-      // 只设置默认模型；思考强度沿用会话默认，节点不额外覆盖。
-      await deps.harness.conversation(conversationId as never, deps.context).then((conversation) =>
-        conversation?.configure({ model }, deps.context),
-      );
+    // 数据源：复制发起会话里参与分析的来源（compute 里是同一批已打开的 source，节点只读使用）。
+    // 没有来源的会话照常跑：这时模型只剩上游文字可用，由节点提示自己决定怎么处理。
+    if (deps.sources !== undefined) {
+      const originSources = await deps.sources.read(context.conversationId).catch(() => undefined);
+      const active = originSources?.sources.filter((item) => item.active) ?? [];
+      if (active.length > 0) {
+        await deps.sources.update(conversationId, (draft) => {
+          draft.sources = active;
+        });
+      }
     }
-    await deps.prepareConversation?.(conversationId, node);
     if (context.signal.aborted) throw new WorkflowError("workflow_node_canceled", `node ${node.node_id} was canceled before submit`);
 
     context.progress(25, "running");
@@ -216,7 +237,11 @@ export function createAgentNodeExecutor(deps: AgentNodeDeps): WorkflowNodeExecut
     };
     context.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      await deps.conversations.submitTurn(conversationId, { requestId: context.idempotencyKey, text: prompt });
+      await deps.conversations.submitTurn(conversationId, {
+        requestId: context.idempotencyKey,
+        text: prompt,
+        allowedTools: nodeAllowedTools(node),
+      });
       await conversation.waitForIdle(deps.context);
     } finally {
       context.signal.removeEventListener("abort", onAbort);

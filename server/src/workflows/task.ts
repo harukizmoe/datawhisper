@@ -227,6 +227,8 @@ function nodeWorkInput(options: {
   inputs: Record<string, JsonValue>;
   iteration: number;
   attempt: number;
+  /** 发起运行的会话（运行任务所属的会话）。 */
+  conversationId: number;
   now: number;
 }): WorkInput {
   // 节点定义来自持久化的工作流版本，输入是纯 JSON；pi-durable 只负责序列化。
@@ -238,6 +240,7 @@ function nodeWorkInput(options: {
     inputs: options.inputs,
     iteration: options.iteration,
     attempt: options.attempt,
+    conversationId: options.conversationId,
   } as unknown as JsonValue;
   return {
     kind: options.node.node_id,
@@ -339,6 +342,7 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
                 inputs: previous.inputs ?? {},
                 iteration: ref.iteration,
                 attempt: ref.attempt,
+                conversationId: task.conversationId as unknown as number,
                 now: runtime.now(),
               }),
               { ownership: { kind: "task", taskId: task.id } },
@@ -389,6 +393,7 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
                 inputs,
                 iteration,
                 attempt: 1,
+                conversationId: task.conversationId as unknown as number,
                 now: runtime.now(),
               }),
               { ownership: { kind: "task", taskId: task.id } },

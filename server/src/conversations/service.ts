@@ -15,6 +15,7 @@ import {
   type ConversationWatch,
   type Harness,
   ROOT_CONVERSATION_ID,
+  type TaskId,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import { EMPTY_TURN_CONTEXT, type TurnContext, TurnDoc } from "../agent/turn.ts";
@@ -76,7 +77,8 @@ export type EventSink = (event: ConversationEvent) => void | Promise<void>;
 
 export type Conversations = {
   list(): Promise<ConversationListResponse>;
-  create(body: unknown): Promise<{ id: number }>;
+  /** `options.ownerTaskId`：会话归这个任务所有（不出现在会话列表里，随任务一起取消）；IPC 方法不传。 */
+  create(body: unknown, options?: { ownerTaskId?: number }): Promise<{ id: number }>;
   setModel(id: string | number, body: unknown): Promise<AgentModelResponse>;
   /** 提交一轮：模型兜底 → 写本轮上下文 → 收敛工具集 → submit。 */
   submitTurn(id: string | number, body: unknown): Promise<SubmitResponse>;
@@ -140,6 +142,16 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
   const command = optionalString(params.command, "command");
   const whenBusy = params.whenBusy;
   if (whenBusy !== undefined && whenBusy !== "steer" && whenBusy !== "followUp") throw invalidParams("whenBusy must be steer or followUp");
+  let allowedTools: ReadonlySet<string> | undefined;
+  if (params.allowedTools !== undefined) {
+    if (!Array.isArray(params.allowedTools)) throw invalidParams("'allowedTools' must be an array of tool names");
+    const names = new Set<string>();
+    for (const name of params.allowedTools) {
+      if (typeof name !== "string") throw invalidParams("'allowedTools' must be an array of tool names");
+      names.add(name);
+    }
+    allowedTools = names;
+  }
 
   const { harness, modelService, context } = deps;
   const conversation = await requireConversation(deps, id);
@@ -175,7 +187,7 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     Object.assign(doc, next);
   }, context);
 
-  const selected = toolsForTurn(deps.tools ?? [], {
+  const bySelection = toolsForTurn(deps.tools ?? [], {
     userMessage: text,
     command,
     hasDataSource: current.hasDataSource,
@@ -185,6 +197,9 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     discoveredTools: next.discoveredTools,
     maxTools: MAX_VISIBLE_TOOLS,
   });
+  // 调用方（工作流节点）给了工具名单时它说了算：名单之外的工具这一轮不可见，名单里的不受关键词发现限制。
+  const selected =
+    allowedTools === undefined ? bySelection : (deps.tools ?? []).filter((tool) => allowedTools.has(tool.name));
   await conversation.configure({ modelTools: selected }, context);
 
   const submission = await conversation.submit(
@@ -228,7 +243,7 @@ export function createConversations(deps: ConversationsDeps): Conversations {
       return { conversations };
     },
 
-    async create(body) {
+    async create(body, options) {
       const params = body === undefined ? {} : asObject(body);
       const thinkingLevel = parseThinkingLevel(params.thinkingLevel);
       let agent;
@@ -239,7 +254,10 @@ export function createConversations(deps: ConversationsDeps): Conversations {
       } else {
         agent = await modelService.defaultAgent();
       }
-      const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent }, context);
+      const ownership = options?.ownerTaskId === undefined
+        ? ({ kind: "ownerless" } as const)
+        : ({ kind: "task", taskId: options.ownerTaskId as unknown as TaskId } as const);
+      const conversation = await harness.createConversation({ ownership, agent }, context);
       return { id: conversation.id };
     },
 
