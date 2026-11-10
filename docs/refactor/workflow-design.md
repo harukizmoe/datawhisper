@@ -1,6 +1,6 @@
 # 工作流：让它能用起来（方案 B）
 
-状态：待确认。基线：引擎已有（`server/src/workflows/`），入口、保存、节点类型、审批都没有。
+状态：已确认（审批含 approve_with_changes；手动重试另起新运行；4 个模板；节点复用发起会话的数据源）。基线：引擎已有（`server/src/workflows/`），入口、保存、节点类型、审批都没有。
 
 ## 目标
 
@@ -43,7 +43,7 @@
 - 运行索引文档里加一份审批记录：`{id, nodeId, nodeRunId, reason, status, comment}`。
 - `key_approval`：有 `approval` 出边的节点，成功后不直接算成功，进入 `waiting_approval`，下游等着。
 - `exception_review`：节点用完重试仍失败时进入 `waiting_approval`，由人决定重来或终止。
-- 决定三种：`approve`、`reject_and_retry`（附意见，打回重做，不超过 `max_iterations`）、`reject_and_stop`。`approve_with_changes`（人改输出）这一轮不做。
+- 决定四种：`approve`、`approve_with_changes`、`reject_and_retry`、`reject_and_stop`。其中：`approve`、`reject_and_retry`（附意见，打回重做，不超过 `max_iterations`）、`reject_and_stop`。`approve_with_changes`：人在界面里改节点输出（JSON 对象，键必须是该节点 `output_contract` 的子集），改后的值作为该节点的输出传给下游；原输出保留在审批记录里。
 - 运行等待人时：调度 phase 在没有活节点、有待批审批时进入"等待"。用一个"门任务"当唤醒句柄，决定写入索引后由门任务落定，运行重新调度；决定与唤醒在同一次提交里，崩溃不会卡死。
 - 运行状态 `waiting_approval`，节点状态新增 `waiting_approval`。
 
@@ -55,7 +55,7 @@ verifier 节点输出 `decision=rework` 时：自己记成功，沿 `retry_loop`
 
 ### 8. 界面（数据面板 Runs 页）
 - 运行行显示状态；`waiting_approval` 的运行置顶并标出。
-- 运行详情里待批节点显示意见框与三个按钮：Approve、Rework、Stop。
+- 运行详情里待批节点显示意见框、可编辑的输出框和四个按钮：Approve、Approve with changes、Rework、Stop。
 - 失败的运行显示 Retry from failed node。
 - 工作流定义只读列表放在 Runs 页顶部（名称、模式、节点数），不做编辑界面（创建走聊天）。
 
