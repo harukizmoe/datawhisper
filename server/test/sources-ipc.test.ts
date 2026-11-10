@@ -346,6 +346,21 @@ describe("来源生命周期与透传", () => {
     await server.call("source.open", { conversationId: 1, sourceId });
     expect(compute.opened.get(sourceId)?.analysis_tables).toEqual(["t1"]);
   });
+
+  test("选完分析表后来源视图里的表清单同步更新，卡片不再说「还没选数据表」", async () => {
+    const { sourceId } = await openUpload("a.csv", "a\n1\n");
+    await server.call("source.setAnalysisTables", { conversationId: 1, sourceId, tables: ["t1"] });
+    expect(store.peek(1).sources.find((record) => record.id === sourceId)?.tables).toEqual(["t1"]);
+    await server.call("source.setAnalysisTables", { conversationId: 1, sourceId, tables: [] });
+    expect(store.peek(1).sources.find((record) => record.id === sourceId)?.tables).toEqual([]);
+  });
+
+  test("重命名后预览标题用新名字，而不是 compute 报告的旧名", async () => {
+    const { sourceId } = await openUpload("a.csv", "a\n1\n");
+    await server.call("source.rename", { conversationId: 1, sourceId, name: "Shop" });
+    const preview = await server.call<{ source_name: string }>("source.preview", { conversationId: 1, sourceId });
+    expect(preview.result?.source_name).toBe("Shop");
+  });
 });
 
 describe("数据源配置：密钥只进不出", () => {

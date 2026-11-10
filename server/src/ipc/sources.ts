@@ -1087,7 +1087,8 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
           requires_table_selection?: boolean;
           tables?: JsonValue[];
         }>("source.preview", { source_id: record.id });
-        if (sourceName === "") sourceName = preview.source_name ?? record.name;
+        // 显示名以本会话里存的为准：重命名只改存储记录，compute 那边报告的仍是打开时的旧名。
+        if (sourceName === "") sourceName = record.name;
         requiresTableSelection = requiresTableSelection || preview.requires_table_selection === true;
         for (const table of preview.tables ?? []) tables.push(table);
       }
@@ -1129,6 +1130,8 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         const target = requireStoredSource(draft, sourceId);
         target.analysisTables = selected;
         target.descriptor = { ...target.descriptor, analysis_tables: selected };
+        // 来源视图里的表清单就是 agent 看得到的表：不同步的话选完表卡片仍写「还没选数据表」。
+        target.tables = selected;
         target.updatedAt = iso();
       });
       return { source_id: sourceId, tables: selected };

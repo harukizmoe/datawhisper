@@ -606,6 +606,22 @@ func Resolve(scheme *Scheme, dark bool, accent string, fonts Fonts) *Resolved {
 	if bodySize := fonts.bodySize(); bodySize > 0 && fonts.BufferSize > 0 {
 		md.CodeSize = fonts.BufferSize / bodySize
 	}
+	// 正文里的层次：标题用强调色、行内代码用配色里「关键字」的颜色（没有就用 danger）托在代码底色上，
+	// 引用与表头偏弱一档，粗体加粗一点。默认主题里这些都是正文色，整页回答一个颜色，层次靠字号撑着。
+	md.Headings = markdown.DefaultTheme(&t).Headings
+	for i := range md.Headings {
+		md.Headings[i].Color = ensureContrast(t.Accent, t.Background, minTextContrast)
+	}
+	md.StrongWeight = 700
+	code := t.Danger
+	if ref, ok := scheme.Syntax["keyword"]; ok {
+		if c, ok := scheme.color(ref); ok {
+			code = c
+		}
+	}
+	md.Code = ensureContrast(code, tok.CodeBackground.Over(t.Background), minTextContrast)
+	md.QuoteText = t.TextMuted
+	md.TableStripe = t.Text.Alpha(0.03)
 
 	grid := t.Border
 	chart := ChartTheme{

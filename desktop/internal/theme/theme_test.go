@@ -57,6 +57,14 @@ func TestResolvedThemesAreReadable(t *testing.T) {
 			if r := contrast(rt.Tok.Link, th.Background); r < minTextContrast {
 				t.Errorf("%s accent %q: link contrast %.2f", id, accent, r)
 			}
+			// 回答正文的层次色（标题、行内代码）在每个配色与强调色下都要读得清。
+			codeBg := rt.Tok.CodeBackground.Over(th.Background)
+			if r := contrast(rt.MD.Code.Over(codeBg), codeBg); r < minTextContrast {
+				t.Errorf("%s accent %q: inline code contrast %.2f", id, accent, r)
+			}
+			if h := rt.MD.Headings[0].Color; contrast(h.Over(th.Background), th.Background) < minTextContrast {
+				t.Errorf("%s accent %q: heading contrast", id, accent)
+			}
 			if len(rt.Chart.Colorway) == 0 || rt.MD.CodeColors == nil {
 				t.Errorf("%s: no chart colors or code colors", id)
 			}
