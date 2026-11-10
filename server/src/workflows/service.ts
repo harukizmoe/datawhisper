@@ -25,8 +25,8 @@
  *   created_at / started_at / finished_at → 索引顺序 / task.startedAt / task.endedAt
  *   *_tokens、model_name…           → 节点执行器返回的 usage
  *
- * 未迁移：审批（approval 边、`run_policy.mode`）、artifact manifest/consumption、运行模板、
- * 知识候选、checkpoint 分支（`fork_from_checkpoint`）。审批图在启动时明确拒绝。
+ * 审批：运行索引里的 `approvals` 是记录，`decide` 写入人的决定，调度器按决定落地（见 `task.ts`）。
+ * 未迁移：artifact manifest/consumption、运行模板、知识候选、checkpoint 分支（`fork_from_checkpoint`）。
  */
 
 import type { Context } from "@earendil-works/chord/context";
@@ -48,13 +48,18 @@ import {
   type WorkInput,
   type WorkResult,
 } from "../jobs/work-task.ts";
-import { validateWorkflowGraph } from "./graph.ts";
+import { reworkLimit, validateWorkflowGraph } from "./graph.ts";
 import { createWorkflowRunTask, nodeViews, readRunIndex, WORKFLOW_RUN_INDEX } from "./task.ts";
 import {
   DEFAULT_WORKFLOW_QUOTAS,
+  WORKFLOW_GATE_TASK_KIND,
   WORKFLOW_NODE_TASK_KIND,
   WORKFLOW_RUN_TASK_KIND,
+  WorkflowError,
+  type WorkflowApproval,
+  type WorkflowDecideRequest,
   type WorkflowFailure,
+  type WorkflowGraph,
   type WorkflowListQuery,
   type WorkflowNode,
   type WorkflowNodeExecute,
@@ -85,11 +90,14 @@ export type WorkflowsOptions = {
 export type Workflows = {
   readonly runTask: Task<WorkflowRunInput, WorkflowRunCheckpoint, WorkflowRunResult, object>;
   readonly nodeTask: Task<WorkInput, WorkCheckpoint, WorkResult, object>;
+  readonly gateTask: Task<WorkInput, WorkCheckpoint, WorkResult, object>;
   start(request: WorkflowStartRequest): Promise<{ id: number }>;
   cancel(id: number): Promise<WorkflowRunDetail>;
   list(query?: WorkflowListQuery): Promise<{ runs: WorkflowRunSummary[] }>;
   get(id: number): Promise<WorkflowRunDetail>;
   wait(id: number): Promise<WorkflowRunDetail>;
+  /** 对待批的审批做决定；运行随后继续（或按决定终止）。 */
+  decide(request: WorkflowDecideRequest): Promise<WorkflowRunDetail>;
 };
 
 const SCAN_PAGE = 256;
@@ -110,6 +118,47 @@ function asRunInput(record: AnyTaskRecord): WorkflowRunInput {
   return record.input as unknown as WorkflowRunInput;
 }
 
+const ALL_DECISIONS: readonly string[] = ["approve", "approve_with_changes", "reject_and_retry", "reject_and_stop"];
+
+/**
+ * 决定在提交前必须站得住：不认识的决定、对失败节点说「通过」、重做超过轮数、改了合同之外的键，
+ * 都在这里拒绝，而不是写进去再让调度器卡住。返回要落地的改动（只有 `approve_with_changes` 有）。
+ */
+function validateDecision(
+  graph: WorkflowGraph,
+  approval: WorkflowApproval,
+  request: WorkflowDecideRequest,
+): Record<string, JsonValue> | undefined {
+  const invalid = (message: string) => new WorkflowError("workflow_approval_invalid", message);
+  if (!ALL_DECISIONS.includes(request.decision)) {
+    throw invalid("decision must be approve, approve_with_changes, reject_and_retry, or reject_and_stop");
+  }
+  const approving = request.decision === "approve" || request.decision === "approve_with_changes";
+  if (approving && approval.kind !== "key_approval") {
+    throw invalid(`approval ${approval.id} (${approval.kind}) cannot be approved; choose reject_and_retry or reject_and_stop`);
+  }
+  if (request.decision === "reject_and_retry") {
+    const limit = reworkLimit(graph, approval.nodeId);
+    if (approval.iteration >= limit) {
+      throw new WorkflowError(
+        "workflow_iteration_limit_reached",
+        `node ${approval.nodeId} reached max_iterations=${limit}; choose reject_and_stop`,
+      );
+    }
+  }
+  if (request.decision !== "approve_with_changes") return undefined;
+  const changes = request.changes;
+  if (typeof changes !== "object" || changes === null || Array.isArray(changes) || Object.keys(changes).length === 0) {
+    throw invalid("approve_with_changes requires a non-empty changes object");
+  }
+  const contract = graph.nodes.find((node) => node.node_id === approval.nodeId)?.output_contract ?? [];
+  const outside = Object.keys(changes).filter((key) => !contract.includes(key));
+  if (outside.length > 0) {
+    throw invalid(`changes may only set keys from the node's output_contract (${contract.join(", ") || "none declared"}); not allowed: ${outside.join(", ")}`);
+  }
+  return changes;
+}
+
 /** 运行状态：`completing` 已经有 outcome，但子任务还没排空，按 outcome 展示。 */
 export function runStatus(record: AnyTaskRecord): WorkflowRunStatus {
   if (record.state.status !== "terminal" && record.abortRequested) return "canceling";
@@ -126,6 +175,9 @@ export function runStatus(record: AnyTaskRecord): WorkflowRunStatus {
         return "failed";
     }
   }
+  // 调度器每次落定检查点时记下待批审批数；列表不必逐个读索引就能显示 waiting_approval。
+  const checkpoint = record.state.status === "terminal" || record.state.status === "completing" ? undefined : record.state.checkpoint;
+  if (checkpoint !== undefined && (checkpoint as unknown as WorkflowRunCheckpoint).pendingApprovals) return "waiting_approval";
   return "running";
 }
 
@@ -187,7 +239,7 @@ function matchesQuery(record: AnyTaskRecord, query: WorkflowListQuery): boolean 
 
 /** 安装到注册表的扩展：运行与节点两个 task 定义都按名字可见。 */
 export function workflowsExtension(workflows: Workflows): Extension {
-  return defineExtension({ name: "datawhisper-workflows", tasks: [workflows.runTask, workflows.nodeTask] });
+  return defineExtension({ name: "datawhisper-workflows", tasks: [workflows.runTask, workflows.nodeTask, workflows.gateTask] });
 }
 
 export function createWorkflows(options: WorkflowsOptions): Workflows {
@@ -229,7 +281,34 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
     progressIntervalMs: options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS,
   });
 
-  const runTask = createWorkflowRunTask({ quotas, nodeTask });
+  // 人的决定要有一个任务来承载：运行只剩待批审批时等这个门任务，决定提交后它落定、唤醒运行。
+  // 进程内的等待者只负责「立刻醒」；重启后门任务重跑，先读索引里的决定数，不依赖进程内状态。
+  const waiters = new Map<number, Set<() => void>>();
+  const gateTask = createWorkTask({
+    name: WORKFLOW_GATE_TASK_KIND,
+    execute: async (input, work) => {
+      const args = input.args as unknown as { runId: number; since: number };
+      for (;;) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        const set = waiters.get(args.runId) ?? new Set<() => void>();
+        set.add(resolve);
+        waiters.set(args.runId, set);
+        work.signal.addEventListener("abort", () => resolve(), { once: true });
+        try {
+          // 先登记等待者再读决定数，两者之间提交的决定不会丢。
+          const index = await readRunIndex(harness, args.runId, context);
+          if ((index.decisions ?? 0) > args.since || work.signal.aborted) return null;
+          await promise;
+        } finally {
+          set.delete(resolve);
+          if (set.size === 0) waiters.delete(args.runId);
+        }
+      }
+    },
+    progressIntervalMs: options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS,
+  });
+
+  const runTask = createWorkflowRunTask({ quotas, nodeTask, gateTask });
 
   async function readRun(id: number): Promise<AnyTaskRecord> {
     const record = await harness.getTask(taskId(id), context);
@@ -255,13 +334,15 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
       graph: input.graph,
       inputs: input.inputs,
       outputs: runOutputs(record),
-      nodes: nodeViews(input.graph, index.nodes, records, new Set(index.skipped)),
+      nodes: nodeViews(input.graph, index.nodes, records, new Set(index.skipped), index.approvals ?? []),
+      approvals: [...(index.approvals ?? [])].sort((a, b) => Number(a.decision !== undefined) - Number(b.decision !== undefined)),
     };
   }
 
   return {
     runTask,
     nodeTask,
+    gateTask,
 
     async start(request) {
       const graph = validateWorkflowGraph(request.graph);
@@ -322,6 +403,38 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
       await readRun(id);
       await harness.waitForTask(taskId(id), context);
       return detail(id);
+    },
+
+    async decide(request) {
+      const run = await readRun(request.runId);
+      if (run.state.status === "terminal" || run.state.status === "completing") {
+        throw new WorkflowError("workflow_approval_invalid", `workflow run ${request.runId} has already finished`);
+      }
+      const graph = asRunInput(run).graph;
+      await harness.commit(async (tx) => {
+        const index = await tx.doc(WORKFLOW_RUN_INDEX, String(request.runId), null);
+        const approvals = index.approvals ?? [];
+        const found = approvals.find((item) => item.id === request.approvalId);
+        if (found === undefined) {
+          throw new WorkflowError("workflow_resource_not_found", `workflow approval not found: ${request.approvalId}`);
+        }
+        if (found.decision !== undefined) {
+          throw new WorkflowError("workflow_approval_already_decided", `approval ${found.id} was already decided: ${found.decision}`);
+        }
+        const changes = validateDecision(graph, found, request);
+        const decided: WorkflowApproval = {
+          ...found,
+          decision: request.decision,
+          comment: request.comment ?? "",
+          ...(changes === undefined ? {} : { changes }),
+          decidedAt: new Date(now()).toISOString(),
+        };
+        index.approvals = approvals.map((item) => (item.id === found.id ? decided : item));
+        index.decisions = (index.decisions ?? 0) + 1;
+      }, context);
+      // 决定先提交，再叫醒门任务；中间崩溃时门任务重启后读到决定，同样会落定。
+      for (const wake of waiters.get(request.runId) ?? []) wake();
+      return detail(request.runId);
     },
   };
 }

@@ -34,6 +34,7 @@ import {
 import type { WorkCheckpoint, WorkInput, WorkResult } from "../jobs/work-task.ts";
 import {
   collectOutputs,
+  hasApprovalEdge,
   isTerminalNodeStatus,
   nodeMaxAttempts,
   planReadiness,
@@ -41,10 +42,14 @@ import {
   reworkLimit,
   reworkNodes,
   reworkTargets,
+  runMode,
 } from "./graph.ts";
 import {
   WORKFLOW_NODE_TASK_KIND,
+  type ApprovalKind,
+  type WorkflowApproval,
   type WorkflowFailure,
+  type WorkflowGraph,
   type WorkflowNode,
   type WorkflowNodeRef,
   type WorkflowNodeStatus,
@@ -63,7 +68,7 @@ export const WORKFLOW_RUN_INDEX = defineDocFamily<WorkflowRunIndex, null>({
   version: 1,
   scope: "session",
   family: true,
-  initial: () => ({ nodes: [], skipped: [], iterations: {}, revisions: {} }),
+  initial: () => ({ nodes: [], skipped: [], iterations: {}, revisions: {}, approvals: [], decisions: 0 }),
   checkpointWhen: () => true,
 });
 
@@ -259,6 +264,8 @@ export type WorkflowRunTaskOptions = {
   quotas: WorkflowQuotas;
   /** 节点任务定义；run task 用它创建子任务，并按它的名字读记录。 */
   nodeTask: Task<WorkInput, WorkCheckpoint, WorkResult, object>;
+  /** 门任务定义：运行只有待批审批时等它，人做出决定后它落定、唤醒运行。 */
+  gateTask: Task<WorkInput, WorkCheckpoint, WorkResult, object>;
 };
 
 export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<WorkflowRunInput, WorkflowRunCheckpoint, WorkflowRunResult, object> {
@@ -346,8 +353,68 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
             for (const target of targets) revisions.set(target, feedback);
           }
 
+          // ── 审批：待批的节点对下游表现为 waiting_approval；已有决定的按决定落地 ─────────────────
+          const mode = runMode(graph);
+          const approvals: WorkflowApproval[] = (index.approvals ?? []).map((item) => ({ ...item }));
+          let pendingApprovals = 0;
+          for (const node of graph.nodes) {
+            const item = latest.get(node.node_id);
+            if (item === undefined || item.ref.iteration < requiredIteration(node.node_id)) continue;
+            const output = outputs.get(node.node_id);
+            const kind = approvalKind(graph, node, mode, statuses.get(node.node_id), item, output);
+            if (kind === undefined) continue;
+            if (kind === "stop") {
+              return terminalFailure(
+                "workflow_escalation_required",
+                `verifier ${node.node_id} escalated, and a full_auto run has nobody to escalate to`,
+              );
+            }
+            let approval = approvals.find((existing) => existing.nodeRunId === item.ref.taskId);
+            if (approval === undefined) {
+              approval = {
+                id: `ap_${approvals.length + 1}`,
+                nodeId: node.node_id,
+                nodeRunId: item.ref.taskId,
+                iteration: item.ref.iteration,
+                kind,
+                reason: approvalReason(kind, node.node_id),
+                output: kind === "exception_review" ? nodeError(item.record) : (output ?? null),
+                comment: "",
+              };
+              approvals.push(approval);
+            }
+            if (approval.decision === undefined) {
+              statuses.set(node.node_id, "waiting_approval");
+              pendingApprovals += 1;
+              continue;
+            }
+            if (approval.decision === "reject_and_stop") {
+              const why = approval.comment === "" ? "" : `: ${approval.comment}`;
+              return terminalFailure("workflow_approval_rejected", `approval for node ${node.node_id} was rejected${why}`);
+            }
+            if (approval.decision === "approve_with_changes" && typeof output === "object" && output !== null && !Array.isArray(output)) {
+              outputs.set(node.node_id, { ...output, ...approval.changes });
+            }
+            if (approval.decision === "reject_and_retry") {
+              // 人要求重做：和 verifier 打回同一套机制。escalation 重开整段环，其余只重做这个节点。
+              const current = requiredIteration(node.node_id);
+              const restart = approval.kind === "escalation" ? reworkNodes(graph, node.node_id) : [node.node_id];
+              for (const id of restart) {
+                iterations.set(id, current + 1);
+                statuses.delete(id);
+                outputs.delete(id);
+                skipped.delete(id);
+              }
+              const targets = approval.kind === "escalation" ? reworkTargets(graph, node.node_id) : [];
+              const feedback = approval.comment === "" ? "A reviewer asked for a redo without further comments." : approval.comment;
+              for (const target of targets.length > 0 ? targets : [node.node_id]) revisions.set(target, feedback);
+            }
+          }
+
           // 配额要看到所有 run 的活节点，必须在任何写之前读完。
           const liveKeys = await scanLiveNodeKeys(tx);
+          // 门任务记录同样要在任何写之前读。
+          const gateRecord = index.gate === undefined ? undefined : await tx.task(index.gate as TaskId);
 
           // ── 运行级限制：超时、token 预算（旧 `_expire_timed_out_run` / `_expire_token_budget`） ──
           const failure = runFailure(input, task.startedAt, runtime.now(), records);
@@ -450,7 +517,8 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
           index.skipped = [...skipped];
           index.iterations = Object.fromEntries(iterations);
           index.revisions = Object.fromEntries(revisions);
-          const checkpoint: WorkflowRunCheckpoint = { phase: "schedule" };
+          index.approvals = approvals;
+          const checkpoint: WorkflowRunCheckpoint = { phase: "schedule", pendingApprovals };
 
           // ── 还有活节点：等最老的一个结束，再重新调度 ─────────────────────────────────
           if (liveIds.length > 0) {
@@ -461,6 +529,24 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
               on: [liveIds[0] as TaskId],
               policy: "allSettled",
             };
+          }
+
+          // ── 只剩待批审批：等门任务；人做出决定后它落定，运行重新调度 ─────────────────────
+          // `waiting` 只能等任务，所以人的决定要有一个任务来承载。门任务活着就复用，否则按当前的决定数新建。
+          if (pendingApprovals > 0) {
+            const reusable =
+              gateRecord !== undefined &&
+              gateRecord.kind === options.gateTask.definition.name &&
+              gateRecord.owner === task.id &&
+              isLive(gateRecord);
+            const gateId =
+              reusable && index.gate !== undefined
+                ? index.gate
+                : await tx.createTask(options.gateTask, gateWorkInput(task.id, index.decisions ?? 0, runtime.now()), {
+                    ownership: { kind: "task", taskId: task.id },
+                  });
+            index.gate = gateId;
+            return { status: "waiting", checkpoint, on: [gateId as TaskId], policy: "allSettled" };
           }
 
           // ── 结算（旧 `_settle_run`） ─────────────────────────────────────────────────
@@ -507,6 +593,7 @@ export function nodeViews(
   refs: readonly WorkflowNodeRef[],
   records: ReadonlyMap<number, AnyTaskRecord>,
   skipped: ReadonlySet<string>,
+  approvals: readonly WorkflowApproval[],
 ): WorkflowNodeView[] {
   const byNode = new Map<string, WorkflowNodeRef[]>();
   for (const ref of refs) {
@@ -539,15 +626,22 @@ export function nodeViews(
       if (record === undefined) continue;
       const payload = nodePayload(record);
       const input = (record.input as unknown as { args?: { inputs?: Record<string, JsonValue> } }).args ?? {};
+      const approval = approvals.find((item) => item.nodeRunId === ref.taskId);
+      // 人改过的键盖在原输出上；待批的节点对外显示 waiting_approval。
+      const original = payload?.output ?? null;
+      const output =
+        approval?.decision === "approve_with_changes" && typeof original === "object" && original !== null && !Array.isArray(original)
+          ? { ...original, ...approval.changes }
+          : original;
       views.push({
         nodeId: ref.nodeId,
         nodeRunId: ref.taskId,
-        status: workflowNodeStatus(record),
+        status: approval !== undefined && approval.decision === undefined ? "waiting_approval" : workflowNodeStatus(record),
         iteration: ref.iteration,
         attempt: ref.attempt,
         agentProfileId: profileKey(node),
         input: input.inputs ?? {},
-        output: payload?.output ?? null,
+        output,
         error: nodeError(record),
         usage: payload?.usage ?? null,
         startedAt: record.startedAt === undefined ? null : new Date(record.startedAt).toISOString(),
@@ -561,9 +655,16 @@ export function nodeViews(
 /** 供 service 读取运行索引。 */
 export async function readRunIndex(harness: Harness, id: number, context: Context): Promise<WorkflowRunIndex> {
   const value = await harness.snapshot(WORKFLOW_RUN_INDEX, String(id), context);
-  return value === undefined
-    ? { nodes: [], skipped: [] }
-    : { nodes: [...value.nodes], skipped: [...value.skipped], iterations: { ...value.iterations }, revisions: { ...value.revisions } };
+  if (value === undefined) return { nodes: [], skipped: [], approvals: [], decisions: 0 };
+  return {
+    nodes: [...value.nodes],
+    skipped: [...value.skipped],
+    iterations: { ...value.iterations },
+    revisions: { ...value.revisions },
+    approvals: (value.approvals ?? []).map((approval) => ({ ...approval })),
+    decisions: value.decisions ?? 0,
+    ...(value.gate === undefined ? {} : { gate: value.gate }),
+  };
 }
 
 /** 打回时交给目标节点的修改意见：reviewer 的 issues 与 evidence 原文，让它知道要改什么。 */
@@ -573,4 +674,53 @@ function reworkFeedback(output: Record<string, JsonValue>): string {
   const evidence = text(output.evidence);
   if (evidence !== "") lines.push("Evidence:", evidence);
   return lines.join("\n");
+}
+
+
+/**
+ * 节点这一轮结果要不要人来决定。返回 `"stop"` 表示 verifier 要求升级给人，但运行是 full_auto，没有人可升级。
+ * - `exception_review` 模式：节点用完重试仍失败；
+ * - verifier 判了 `escalate`：交给人；
+ * - `key_approval` 模式：带 `approval` 出边的节点成功后放行前要人确认。verifier 没判 pass 时不能放行，也升级给人。
+ */
+function approvalKind(
+  graph: WorkflowGraph,
+  node: WorkflowNode,
+  mode: "full_auto" | "key_approval" | "exception_review",
+  status: WorkflowNodeStatus | undefined,
+  item: NodeRecord,
+  output: JsonValue | undefined,
+): ApprovalKind | "stop" | undefined {
+  if (status === "failed") {
+    return mode === "exception_review" && item.ref.attempt >= nodeMaxAttempts(node) ? "exception_review" : undefined;
+  }
+  if (status !== "succeeded") return undefined;
+  const decision =
+    node.type === "verifier" && typeof output === "object" && output !== null && !Array.isArray(output) ? output.decision : undefined;
+  if (decision === "escalate") return mode === "full_auto" ? "stop" : "escalation";
+  if (mode !== "key_approval" || !hasApprovalEdge(graph, node.node_id)) return undefined;
+  return node.type === "verifier" && decision !== "pass" ? "escalation" : "key_approval";
+}
+
+function approvalReason(kind: ApprovalKind, nodeId: string): string {
+  switch (kind) {
+    case "key_approval":
+      return `Node ${nodeId} finished; its output needs approval before downstream nodes run.`;
+    case "exception_review":
+      return `Node ${nodeId} failed after all attempts; decide whether to redo it or stop the run.`;
+    case "escalation":
+      return `The reviewer at node ${nodeId} could not clear the output; decide whether to redo it with your comments or stop the run.`;
+  }
+}
+
+/** 门任务的 WorkInput：只带运行 id 与「在第几个决定之后创建」，等到有更新的决定就落定。 */
+function gateWorkInput(runId: number, since: number, now: number): WorkInput {
+  return {
+    kind: "workflow_gate",
+    label: `approval wait for run ${runId}`,
+    createdAt: now,
+    replay: "safe",
+    idempotencyKey: `workflow-gate:${runId}:${since}`,
+    args: { runId, since },
+  };
 }

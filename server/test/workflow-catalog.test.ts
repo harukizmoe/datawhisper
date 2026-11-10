@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { setLanguage } from "../src/i18n.ts";
 import { workflowMethods } from "../src/ipc/workflows.ts";
 import { createWorkflowCatalog } from "../src/workflows/catalog.ts";
+import { validateWorkflowGraph } from "../src/workflows/graph.ts";
+import { buildTemplateGraph, WORKFLOW_MODES, WORKFLOW_TEMPLATES } from "../src/workflows/templates.ts";
 import type { WorkflowGraph, WorkflowRunDetail, WorkflowStartRequest } from "../src/workflows/types.ts";
 import { filterToolsForTurn } from "../src/tools/exposure.ts";
 import { createWorkflowTools } from "../src/tools/app/workflows.ts";
@@ -30,7 +32,7 @@ function bench() {
         started.push(request);
         return { id: 40 + started.length };
       },
-      get: async (id) => ({ id, status: "running", nodes: [], outputs: {}, failure: null }) as unknown as WorkflowRunDetail,
+      get: async (id) => ({ id, status: "running", nodes: [], approvals: [], outputs: {}, failure: null }) as unknown as WorkflowRunDetail,
     },
     now: () => new Date("2026-11-10T00:00:00Z"),
     newId: () => `wf_${(++nextId).toString(16).padStart(8, "0")}`,
@@ -173,5 +175,15 @@ describe("工作流 IPC", () => {
     expect(startedRun.result).toEqual({ id: 41 });
     expect(started[0]?.conversationId).toBe(5);
     expect((await server.call("workflow.definitions.remove", { id: definition.id })).result).toEqual({ removed: true });
+  });
+});
+
+describe("模板图", () => {
+  test("四个模板在三种模式下都是能启动的合法图（含审批边）", () => {
+    for (const template of WORKFLOW_TEMPLATES) {
+      for (const mode of WORKFLOW_MODES) {
+        expect(() => validateWorkflowGraph(buildTemplateGraph(template, mode)), `${template}/${mode}`).not.toThrow();
+      }
+    }
   });
 });

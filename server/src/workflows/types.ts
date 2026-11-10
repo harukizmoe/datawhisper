@@ -3,7 +3,7 @@
  *
  * 图结构沿用旧 `agent/workflows/models.py` 的字段名（`node_id`、`entry_node_ids`、
  * `input_contract`、`join_policy`、`max_attempts` 等），这样已发布的工作流版本可以原样导入；
- * 审批（`approval` 边、`run_policy.mode` 非 full_auto）本轮不实现，启动时明确拒绝而不是静默改变语义。
+ * 审批（`approval` 边、`run_policy.mode`）见 `task.ts` 的调度与 `service.ts` 的 `decide`。
  */
 
 import type { JsonValue } from "@earendil-works/chord";
@@ -12,7 +12,10 @@ export type WorkflowErrorCode =
   | "workflow_graph_invalid"
   | "workflow_resource_not_found"
   | "workflow_run_not_recoverable"
-  | "workflow_approval_not_supported"
+  | "workflow_approval_invalid"
+  | "workflow_approval_already_decided"
+  | "workflow_approval_rejected"
+  | "workflow_escalation_required"
   // 节点执行器：越界类型、缺提示、取消、空输出、会话丢失。旧实现抛普通异常后由调度器记节点失败，
   // 这里给稳定错误码，运行记录里能直接看出是节点的哪一种失败。
   | "workflow_node_type_unsupported"
@@ -91,7 +94,7 @@ export type WorkflowGraph = {
   input_schema?: JsonValue;
 };
 
-/** 旧 `RunStatus`；`waiting_approval`/`paused` 目前不会出现（审批未实现），保留取值以便 UI 类型稳定。 */
+/** 旧 `RunStatus`；`paused` 目前不会出现，保留取值以便 UI 类型稳定。 */
 export type WorkflowRunStatus =
   | "running"
   | "waiting_approval"
@@ -108,6 +111,7 @@ export type WorkflowNodeStatus =
   | "running"
   | "output_ready"
   | "succeeded"
+  | "waiting_approval"
   | "rejected"
   | "skipped"
   | "failed"
@@ -161,7 +165,7 @@ export type WorkflowRunInput = {
   workspaceId: string;
 };
 
-export type WorkflowRunCheckpoint = { phase: "schedule" };
+export type WorkflowRunCheckpoint = { phase: "schedule"; pendingApprovals?: number };
 
 export type WorkflowRunResult = {
   outputs: Record<string, JsonValue>;
@@ -176,6 +180,36 @@ export type WorkflowNodeRef = {
   taskId: number;
 };
 
+/** 人对审批的四种决定。 */
+export type ApprovalDecision = "approve" | "approve_with_changes" | "reject_and_retry" | "reject_and_stop";
+
+/**
+ * 审批的来由：
+ * - `key_approval`：带 `approval` 出边的节点成功后，下游等人放行；
+ * - `exception_review`：节点用完重试仍失败，人决定重来或终止；
+ * - `escalation`：verifier 判了 escalate（或需要放行却没判 pass），人决定带意见重做或终止。
+ */
+export type ApprovalKind = "key_approval" | "exception_review" | "escalation";
+
+export type WorkflowApproval = {
+  id: string;
+  nodeId: string;
+  /** 被审批的节点任务 id；节点打回重做后会出现新的任务与新的审批。 */
+  nodeRunId: number;
+  iteration: number;
+  kind: ApprovalKind;
+  /** 给人看的说明：为什么需要决定。 */
+  reason: string;
+  /** 打开审批时节点的输出（失败节点为错误信息），界面据此显示与编辑。 */
+  output: JsonValue;
+  /** 未决定时没有。 */
+  decision?: ApprovalDecision;
+  comment: string;
+  /** `approve_with_changes` 时人改过的键；原输出仍在 `output` 里。 */
+  changes?: Record<string, JsonValue>;
+  decidedAt?: string;
+};
+
 export type WorkflowRunIndex = {
   nodes: WorkflowNodeRef[];
   /** 被跳过的节点（条件边未选中，或前驱未全部成功）。 */
@@ -184,6 +218,12 @@ export type WorkflowRunIndex = {
   iterations?: Record<string, number>;
   /** 打回时交给目标节点的修改意见（`revision_request` 输入），按节点 id。 */
   revisions?: Record<string, string>;
+  /** 审批记录；按创建顺序，id 为 `ap_<序号>`。 */
+  approvals?: WorkflowApproval[];
+  /** 已落定的审批决定数；门任务据此判断「自己创建之后有没有新决定」。 */
+  decisions?: number;
+  /** 当前的门任务 id：运行只有待批审批、没有活节点时等它。 */
+  gate?: number;
 };
 
 export type WorkflowRunSummary = {
@@ -220,6 +260,8 @@ export type WorkflowRunDetail = WorkflowRunSummary & {
   inputs: Record<string, JsonValue>;
   outputs: Record<string, JsonValue>;
   nodes: WorkflowNodeView[];
+  /** 全部审批记录（待批的在前）。 */
+  approvals: WorkflowApproval[];
 };
 
 /** 旧 `WorkflowConcurrencyLimiter` 的四个配额；计数从活的节点任务记录推导，进程重启后依然有效。 */
@@ -239,6 +281,7 @@ export const DEFAULT_WORKFLOW_QUOTAS: WorkflowQuotas = {
 
 export const WORKFLOW_RUN_TASK_KIND = "datawhisper.workflow_run";
 export const WORKFLOW_NODE_TASK_KIND = "datawhisper.workflow_node";
+export const WORKFLOW_GATE_TASK_KIND = "datawhisper.workflow_gate";
 
 export type WorkflowStartRequest = {
   conversationId: number;
@@ -253,4 +296,14 @@ export type WorkflowListQuery = {
   conversationId?: number;
   status?: WorkflowRunStatus;
   limit?: number;
+};
+
+export type WorkflowDecideRequest = {
+  runId: number;
+  approvalId: string;
+  decision: ApprovalDecision;
+  comment?: string;
+  /** `approve_with_changes` 的改动：键必须是该节点 `output_contract` 的子集。 */
+  changes?: Record<string, JsonValue>;
+  decidedBy?: string;
 };

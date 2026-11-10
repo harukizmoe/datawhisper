@@ -15,7 +15,8 @@ import { appError, INVALID_PARAMS, invalidParams, RpcError } from "./errors.ts";
 import type { MethodParams, RpcMethod } from "./rpc.ts";
 import type { JobStatus, Jobs } from "../jobs/service.ts";
 import { WorkflowError } from "../workflows/types.ts";
-import type { WorkflowListQuery, WorkflowRunStatus } from "../workflows/types.ts";
+import type { JsonValue } from "@earendil-works/chord";
+import type { ApprovalDecision, WorkflowListQuery, WorkflowRunStatus } from "../workflows/types.ts";
 import type { Workflows } from "../workflows/service.ts";
 
 const JOB_STATUSES: Readonly<Record<string, true>> = {
@@ -69,6 +70,13 @@ function optionalLimit(params: MethodParams): number | undefined {
   }
   return value;
 }
+
+const APPROVAL_DECISIONS: Readonly<Record<string, true>> = {
+  approve: true,
+  approve_with_changes: true,
+  reject_and_retry: true,
+  reject_and_stop: true,
+};
 
 function optionalStatus<T extends string>(params: MethodParams, key: string, allowed: Readonly<Record<string, true>>): T | undefined {
   const value = params[key];
@@ -128,6 +136,25 @@ export function orchestrationMethods({ jobs, workflows }: OrchestrationDeps): Re
     };
     methods["workflow.runs.get"] = (params) => translate(() => workflows.get(positiveId(params)));
     methods["workflow.runs.cancel"] = (params) => translate(() => workflows.cancel(positiveId(params)));
+    methods["workflow.runs.approve"] = (params) => {
+      const approvalId = params.approvalId;
+      if (typeof approvalId !== "string" || approvalId === "") throw invalidParams("'approvalId' must be a non-empty string");
+      const decision = optionalStatus<ApprovalDecision>(params, "decision", APPROVAL_DECISIONS);
+      if (decision === undefined) throw invalidParams(`'decision' must be one of ${Object.keys(APPROVAL_DECISIONS).join(", ")}`);
+      const changes = params.changes;
+      if (changes !== undefined && (typeof changes !== "object" || changes === null || Array.isArray(changes))) {
+        throw invalidParams("'changes' must be an object");
+      }
+      return translate(() =>
+        workflows.decide({
+          runId: positiveId(params),
+          approvalId,
+          decision,
+          comment: optionalText(params, "comment") ?? "",
+          ...(changes === undefined ? {} : { changes: changes as Record<string, JsonValue> }),
+        }),
+      );
+    };
   }
   return methods;
 }

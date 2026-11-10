@@ -39,6 +39,18 @@ function runView(run: WorkflowRunDetail): Record<string, JsonValue> {
       attempt: node.attempt,
       ...(node.error === "" ? {} : { error: node.error }),
     })),
+    // 审批只能由人在界面里决定；模型只负责告诉用户哪里在等。
+    ...(run.approvals.some((approval) => approval.decision === undefined)
+      ? {
+          pending_approvals: run.approvals
+            .filter((approval) => approval.decision === undefined)
+            .map((approval) => ({ approval_id: approval.id, node_id: approval.nodeId, kind: approval.kind, reason: approval.reason })),
+          note: say(
+            "A person has to decide these in the Runs page of the Data panel; do not try to answer them yourself.",
+            "这些审批需要用户在数据面板的 Runs 页里决定，不要自己代答。",
+          ),
+        }
+      : {}),
     ...(finished ? { outputs: run.outputs } : {}),
   };
 }

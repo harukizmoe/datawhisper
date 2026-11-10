@@ -188,14 +188,13 @@ export function validateWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
   positiveInt(limits.max_total_tokens, "limits.max_total_tokens");
   positiveInt(limits.max_run_minutes, "limits.max_run_minutes");
 
-  const mode = runMode(graph);
-  if (mode !== "full_auto") {
-    throw new WorkflowError(
-      "workflow_approval_not_supported",
-      `workflow run mode ${mode} needs human approvals, which are not implemented yet; publish the version with run_policy.mode=full_auto`,
-    );
-  }
+  runMode(graph); // 声明了不认识的模式时在这里抛错
   return graph;
+}
+
+/** 节点是否有 `approval` 出边：`key_approval` 模式下它成功后要等人放行下游。 */
+export function hasApprovalEdge(graph: WorkflowGraph, nodeId: string): boolean {
+  return graph.edges.some((edge) => edge.type === "approval" && edge.from_node === nodeId);
 }
 
 /** 节点的最新一次尝试：iteration、attempt 都更大者胜；同号用任务 id（创建顺序）决胜。 */
@@ -213,6 +212,7 @@ export const TERMINAL_NODE_STATUSES: Readonly<Record<WorkflowNodeStatus, true | 
   queued: undefined,
   running: undefined,
   output_ready: undefined,
+  waiting_approval: undefined,
   succeeded: true,
   rejected: true,
   skipped: true,

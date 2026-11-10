@@ -17,6 +17,7 @@ import type {
   WorkflowNode,
   WorkflowNodeExecute,
   WorkflowNodeResult,
+  WorkflowRunDetail,
   WorkflowQuotas,
 } from "../src/workflows/types.ts";
 import { whenAborted } from "./support/gates.ts";
@@ -467,15 +468,12 @@ describe("workflows", () => {
     expect(byId.get("c")?.status).toBe("succeeded");
   });
 
-  test("审批图与非法图在启动时明确拒绝", async () => {
+  test("非法图在启动时明确拒绝", async () => {
     const bench = await createBench();
-    const approval = makeGraph(
-      [{ node_id: "a" }, { node_id: "b" }],
-      [{ from_node: "a", to_node: "b", type: "approval" }],
-    );
+    const unknownMode = makeGraph([{ node_id: "a" }], [], { run_policy: { mode: "whenever" as never } });
     await expect(
-      bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf-approval", graph: approval }),
-    ).rejects.toMatchObject({ code: "workflow_approval_not_supported" });
+      bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf-mode", graph: unknownMode }),
+    ).rejects.toMatchObject({ code: "workflow_graph_invalid" });
 
     const cyclic = makeGraph(
       [{ node_id: "a" }, { node_id: "b" }],
@@ -703,5 +701,291 @@ describe("节点重试", () => {
     const { id } = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
     expect((await bench.workflows.wait(id)).status).toBe("succeeded");
     expect(seen).toEqual([{ a: "from-a" }, { a: "from-a" }]);
+  });
+});
+
+
+/** 让出一个宏任务，调度器与存储的回调才有机会推进。 */
+const yieldToScheduler = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/** 轮询到运行有一条待批审批；每轮让出一个宏任务，不依赖定时器。 */
+async function pendingApproval(bench: Bench, runId: number): Promise<WorkflowRunDetail> {
+  for (let attempt = 0; attempt < 2000; attempt++) {
+    const detail = await bench.workflows.get(runId);
+    if (detail.approvals.some((approval) => approval.decision === undefined)) return detail;
+    if (detail.status !== "running") throw new Error(`run ended as ${detail.status} without an approval`);
+    await yieldToScheduler();
+  }
+  throw new Error("approval never opened");
+}
+
+describe("审批", () => {
+  const approvalGraph = (extra: Partial<WorkflowGraph> = {}, planNode: Partial<WorkflowNode> = {}): WorkflowGraph =>
+    makeGraph(
+      [
+        { node_id: "plan", input_contract: ["revision_request"], output_contract: ["plan", "note"], ...planNode },
+        { node_id: "apply", input_contract: ["plan"], output_contract: ["done"] },
+      ],
+      [{ from_node: "plan", to_node: "apply", type: "approval" }],
+      extra,
+    );
+
+  function setup(bench: Bench) {
+    const planRuns: Record<string, JsonValue>[] = [];
+    const applyInputs: Record<string, JsonValue>[] = [];
+    bench.behaviors.set("plan", async (inputs) => {
+      planRuns.push(inputs);
+      return { output: { plan: `plan v${planRuns.length}`, note: "n" } };
+    });
+    bench.behaviors.set("apply", async (inputs) => {
+      applyInputs.push(inputs);
+      return { output: { done: "yes" } };
+    });
+    return { planRuns, applyInputs };
+  }
+
+  const start = async (bench: Bench, graph: WorkflowGraph) => {
+    const started = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
+    bench.harness.resume();
+    return started;
+  };
+
+  test("approval 边：节点成功后停在 waiting_approval，下游不开始；approve 之后继续", async () => {
+    const bench = await createBench();
+    const { applyInputs } = setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    const waiting = await pendingApproval(bench, id);
+
+    expect(waiting.status).toBe("waiting_approval");
+    expect(waiting.nodes.find((node) => node.nodeId === "plan")?.status).toBe("waiting_approval");
+    expect(waiting.nodes.find((node) => node.nodeId === "apply")?.status).toBe("pending");
+    expect(waiting.approvals).toHaveLength(1);
+    expect(waiting.approvals[0]).toMatchObject({ id: "ap_1", nodeId: "plan", kind: "key_approval", output: { plan: "plan v1", note: "n" } });
+    expect(applyInputs).toHaveLength(0);
+
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" });
+    const done = await bench.workflows.wait(id);
+    expect(done.status).toBe("succeeded");
+    expect(applyInputs).toEqual([{ plan: "plan v1" }]);
+    expect(done.approvals[0]).toMatchObject({ decision: "approve" });
+  });
+
+  test("approve_with_changes：改后的值传给下游，原输出留在审批记录里；越出 output_contract 的键被拒绝", async () => {
+    const bench = await createBench();
+    const { applyInputs } = setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+
+    await expect(
+      bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve_with_changes", changes: { secret: "x" } }),
+    ).rejects.toMatchObject({ code: "workflow_approval_invalid" });
+    await expect(
+      bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve_with_changes", changes: {} }),
+    ).rejects.toMatchObject({ code: "workflow_approval_invalid" });
+    // 被拒绝的决定不留痕：审批仍待批。
+    expect((await bench.workflows.get(id)).approvals[0]?.decision).toBeUndefined();
+
+    await bench.workflows.decide({
+      runId: id,
+      approvalId: "ap_1",
+      decision: "approve_with_changes",
+      changes: { plan: "edited by a human" },
+      comment: "tightened",
+    });
+    const done = await bench.workflows.wait(id);
+    expect(done.status).toBe("succeeded");
+    expect(applyInputs).toEqual([{ plan: "edited by a human" }]);
+    expect(done.approvals[0]).toMatchObject({ output: { plan: "plan v1", note: "n" }, changes: { plan: "edited by a human" }, comment: "tightened" });
+    expect(done.nodes.find((node) => node.nodeId === "plan")?.output).toEqual({ plan: "edited by a human", note: "n" });
+  });
+
+  test("reject_and_retry：意见交给节点重做，新一轮产生新的审批；轮数用完后不能再重做", async () => {
+    const bench = await createBench();
+    const { planRuns, applyInputs } = setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "reject_and_retry", comment: "add a rollback step" });
+
+    // 等第二轮的审批打开。
+    let second: WorkflowRunDetail | undefined;
+    for (let attempt = 0; attempt < 2000 && second === undefined; attempt++) {
+      const detail = await bench.workflows.get(id);
+      if (detail.approvals.some((approval) => approval.id === "ap_2" && approval.decision === undefined)) second = detail;
+      else await yieldToScheduler();
+    }
+    expect(second?.approvals.map((approval) => [approval.id, approval.iteration])).toEqual([["ap_2", 2], ["ap_1", 1]]);
+    expect(planRuns[1]?.revision_request).toBe("add a rollback step");
+    expect(applyInputs).toHaveLength(0);
+
+    // 默认最多两轮：第二轮已经是上限，再要求重做会被拒绝，只能放行或终止。
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_2", decision: "reject_and_retry" })).rejects.toMatchObject({
+      code: "workflow_iteration_limit_reached",
+    });
+    await bench.workflows.decide({ runId: id, approvalId: "ap_2", decision: "approve" });
+    const done = await bench.workflows.wait(id);
+    expect(done.status).toBe("succeeded");
+    expect(applyInputs).toEqual([{ plan: "plan v2" }]);
+  });
+
+  test("reject_and_stop：运行失败，下游从未开始；已决定的审批不能再改", async () => {
+    const bench = await createBench();
+    const { applyInputs } = setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "reject_and_stop", comment: "wrong table" });
+    const done = await bench.workflows.wait(id);
+    expect(done.status).toBe("failed");
+    expect(done.failure).toMatchObject({ code: "workflow_approval_rejected" });
+    expect(done.failure?.message).toContain("wrong table");
+    expect(applyInputs).toHaveLength(0);
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" })).rejects.toMatchObject({
+      code: "workflow_approval_invalid",
+    });
+  });
+
+  test("决定一个已经决定过的审批、不存在的审批、不认识的决定都被拒绝", async () => {
+    const bench = await createBench();
+    setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_9", decision: "approve" })).rejects.toMatchObject({
+      code: "workflow_resource_not_found",
+    });
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "maybe" as never })).rejects.toMatchObject({
+      code: "workflow_approval_invalid",
+    });
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" });
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" })).rejects.toMatchObject({
+      code: "workflow_approval_already_decided",
+    });
+  });
+
+  test("等待审批的运行可以取消；full_auto 模式忽略 approval 边", async () => {
+    const bench = await createBench();
+    const { applyInputs } = setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+    expect((await bench.workflows.cancel(id)).status).toBe("canceled");
+
+    const auto = await start(bench, approvalGraph({ run_policy: { mode: "full_auto" } }));
+    const done = await bench.workflows.wait(auto.id);
+    expect(done.status).toBe("succeeded");
+    expect(done.approvals).toEqual([]);
+    expect(applyInputs).toEqual([{ plan: "plan v2" }]);
+  });
+
+  test("等待审批时进程重启：审批还在，重启后做的决定照样让运行继续", async () => {
+    const bench = await createBench();
+    const { applyInputs } = setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+
+    await reopen(bench);
+    bench.harness.resume();
+    const waiting = await pendingApproval(bench, id);
+    expect(waiting.status).toBe("waiting_approval");
+    expect(applyInputs).toHaveLength(0);
+
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" });
+    expect((await bench.workflows.wait(id)).status).toBe("succeeded");
+    expect(applyInputs).toEqual([{ plan: "plan v1" }]);
+  });
+
+  test("exception_review：节点用完重试仍失败时由人决定；不能「通过」一个失败的节点", async () => {
+    const bench = await createBench();
+    let attempts = 0;
+    bench.behaviors.set("flaky", async () => {
+      attempts += 1;
+      if (attempts <= 2) throw new Error("db timeout");
+      return { output: { rows: 3 } };
+    });
+    const graph = makeGraph([{ node_id: "flaky", output_contract: ["rows"], max_attempts: 2 }], [], {
+      run_policy: { mode: "exception_review" },
+    });
+    const { id } = await start(bench, graph);
+    const waiting = await pendingApproval(bench, id);
+    expect(waiting.approvals[0]).toMatchObject({ kind: "exception_review", iteration: 1 });
+    expect(String(waiting.approvals[0]?.output)).toContain("db timeout");
+    expect(attempts).toBe(2);
+
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" })).rejects.toMatchObject({
+      code: "workflow_approval_invalid",
+    });
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "reject_and_retry", comment: "retry now" });
+    const done = await bench.workflows.wait(id);
+    expect(done.status).toBe("succeeded");
+    expect(done.outputs).toEqual({ rows: 3 });
+  });
+
+  test("verifier 判 escalate：升级给人；full_auto 没人可升级则运行失败", async () => {
+    const bench = await createBench();
+    let propose = 0;
+    bench.behaviors.set("propose", async (inputs) => {
+      propose += 1;
+      return { output: { plan: `v${propose}:${String(inputs.revision_request ?? "")}` } };
+    });
+    bench.behaviors.set("verify", async () => ({ output: { decision: "escalate", issues: ["unsure"], evidence: [] } }));
+    const graph = (mode: "key_approval" | "full_auto") =>
+      makeGraph(
+        [
+          { node_id: "propose", input_contract: ["revision_request"], output_contract: ["plan"] },
+          { node_id: "verify", type: "verifier", input_contract: ["plan"], output_contract: ["decision", "issues", "evidence"] },
+        ],
+        [
+          { from_node: "propose", to_node: "verify" },
+          { from_node: "verify", to_node: "propose", type: "retry_loop", max_iterations: 3 },
+        ],
+        { entry_node_ids: ["propose"], run_policy: { mode } },
+      );
+
+    const auto = await start(bench, graph("full_auto"));
+    const failed = await bench.workflows.wait(auto.id);
+    expect(failed.failure).toMatchObject({ code: "workflow_escalation_required" });
+
+    const { id } = await start(bench, graph("key_approval"));
+    const waiting = await pendingApproval(bench, id);
+    expect(waiting.approvals[0]).toMatchObject({ kind: "escalation", nodeId: "verify" });
+    await expect(bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "approve" })).rejects.toMatchObject({
+      code: "workflow_approval_invalid",
+    });
+    await bench.workflows.decide({ runId: id, approvalId: "ap_1", decision: "reject_and_stop" });
+    expect((await bench.workflows.wait(id)).status).toBe("failed");
+  });
+
+  test("IPC：workflow.runs.approve 校验参数并落地决定", async () => {
+    const bench = await createBench();
+    setup(bench);
+    const { id } = await start(bench, approvalGraph());
+    await pendingApproval(bench, id);
+    const server = memoryServer(orchestrationMethods({ workflows: bench.workflows }), mapSettingsError);
+
+    const listed = await server.call<{ runs: { status: string }[] }>("workflow.runs.list", { status: "waiting_approval" });
+    expect(listed.result?.runs).toHaveLength(1);
+
+    expect((await server.call("workflow.runs.approve", { id, decision: "approve" })).error?.code).toBe(INVALID_PARAMS);
+    expect((await server.call("workflow.runs.approve", { id, approvalId: "ap_1", decision: "maybe" })).error?.code).toBe(INVALID_PARAMS);
+    expect((await server.call("workflow.runs.approve", { id, approvalId: "ap_1", decision: "approve_with_changes", changes: [] })).error?.code).toBe(
+      INVALID_PARAMS,
+    );
+    const outside = await server.call("workflow.runs.approve", {
+      id,
+      approvalId: "ap_1",
+      decision: "approve_with_changes",
+      changes: { secret: 1 },
+    });
+    expect(outside.error).toMatchObject({ code: INVALID_PARAMS, data: { workflow_code: "workflow_approval_invalid" } });
+    expect((await server.call("workflow.runs.approve", { id, approvalId: "ap_9", decision: "approve" })).error).toMatchObject({
+      code: APP_ERROR,
+      data: { kind: "not_found" },
+    });
+
+    const approved = await server.call<{ approvals: { decision: string }[] }>("workflow.runs.approve", {
+      id,
+      approvalId: "ap_1",
+      decision: "approve",
+      comment: "ok",
+    });
+    expect(approved.result?.approvals[0]).toMatchObject({ decision: "approve", comment: "ok" });
+    expect((await bench.workflows.wait(id)).status).toBe("succeeded");
   });
 });
