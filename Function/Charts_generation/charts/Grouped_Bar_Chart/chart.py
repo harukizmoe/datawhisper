@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,19 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(类别) + 分组列 + y列(数值) 或 宽格式(行标签 + 多个数值列)"
-_DESC = "同一类别的多个分组并排显示，适合直接对比各组差异。支持宽格式数据自动转换。横坐标按行标签分组，每组内按周期并排显示。"
+def _data_fmt() -> str:
+    return say("x column (category) + group column + y column (value), or wide format (row label + multiple numeric columns)", "x列(类别) + 分组列 + y列(数值) 或 宽格式(行标签 + 多个数值列)")
+
+
+def _desc() -> str:
+    return say(
+        "Shows multiple groups of the same category side by side for direct comparison. Wide-format data is converted automatically. The x axis is grouped by row label, with periods side by side within each group.",
+        "同一类别的多个分组并排显示，适合直接对比各组差异。支持宽格式数据自动转换。横坐标按行标签分组，每组内按周期并排显示。",
+    )
+
+
+def _metric_name() -> str:
+    return say("Metric", "指标")
 
 # 配色：蓝系 + 中性色 + 强调色
 _MCKINSEY_COLORS = [
@@ -179,7 +191,7 @@ def _convert_wide_to_long(df: pd.DataFrame, id_col: str, value_cols: list = None
     # 动态选取不与现有列名冲突的 value_name
     existing = set(df.columns)
     val_name = "_value_"
-    for candidate in ("数值", "value", "_value_", "_val_", "__val__"):
+    for candidate in (say("Value", "数值"), "value", "_value_", "_val_", "__val__"):
         if candidate not in existing:
             val_name = candidate
             break
@@ -188,7 +200,7 @@ def _convert_wide_to_long(df: pd.DataFrame, id_col: str, value_cols: list = None
     df_long = df.melt(
         id_vars=id_vars,
         value_vars=value_cols,
-        var_name="指标",
+        var_name=_metric_name(),
         value_name=val_name,
     )
     return df_long, val_name
@@ -224,7 +236,7 @@ def generate(
     x: str = "x",
     y: str = "y",
     color: str = "color",
-    title: str = "分组柱状图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -237,9 +249,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
@@ -248,7 +260,7 @@ def generate(
     # Accept "series" as alias for "color" (Agent commonly uses "series" for grouped bar)
     color_col = mapping.get("color")
     color_col = color_col if color_col is not None else (mapping.get("series") if mapping.get("series") is not None else color)
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Grouped Bar Chart", "分组柱状图"))
 
     # ── 检测并转换宽格式数据 ──────────────────────────────
     if _detect_wide_format(df, mapping):
@@ -281,14 +293,14 @@ def generate(
         _x = id_col
         _y = val_name
         if source_color and len(value_cols or []) > 1:
-            _color = "分组 · 指标"
-            df[_color] = df[source_color].astype(str) + " · " + df["指标"].astype(str)
+            _color = say("Group · Metric", "分组 · 指标")
+            df[_color] = df[source_color].astype(str) + " · " + df[_metric_name()].astype(str)
         elif source_color:
             _color = source_color
         else:
-            _color = "指标"   # melt 后的分组列名
+            _color = _metric_name()   # melt 后的分组列名
 
-        warnings.append(f"自动转换宽格式数据：{id_col} (x) × 指标 (color) × {val_name} (y)")
+        warnings.append(say(f"Wide-format data converted automatically: {id_col} (x) × Metric (color) × {val_name} (y)", f"自动转换宽格式数据：{id_col} (x) × 指标 (color) × {val_name} (y)"))
     else:
         # 长格式数据：正常处理
         _x = _auto_col(df, x_col, "x", "季度", "时间", "类别", "行标签")
@@ -317,18 +329,18 @@ def generate(
                 # 将所有数值列（含 _y）一起 melt
                 df, val_name = _convert_wide_to_long(df, _x, other_nums)
                 _y = val_name
-                _color = "指标"
-                warnings.append(f"检测到多数值列，自动转换为分组柱图：{_x} × 指标 × {val_name}")
+                _color = _metric_name()
+                warnings.append(say(f"Multiple numeric columns detected; converted to a grouped bar chart automatically: {_x} × Metric × {val_name}", f"检测到多数值列，自动转换为分组柱图：{_x} × 指标 × {val_name}"))
 
     for role, col_ in [("x", _x), ("y", _y)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _x is None or _x not in df.columns:
-        warnings.append("找不到必填字段 [x]")
+        warnings.append(say("Required field [x] not found", "找不到必填字段 [x]"))
         return ChartResult(warnings=warnings)
     if _y is None or _y not in df.columns:
-        warnings.append("找不到必填字段 [y]")
+        warnings.append(say("Required field [y] not found", "找不到必填字段 [y]"))
         return ChartResult(warnings=warnings)
 
     if _color and _color not in df.columns:
@@ -389,7 +401,7 @@ def generate(
         fig.update_yaxes(tickformat=None)
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "grouped_bar", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "grouped_bar", "plotly", _data_fmt(), _desc(), chart_html)
 
 
     meta = {

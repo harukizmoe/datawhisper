@@ -19,6 +19,9 @@ log = logging.getLogger(__name__)
 
 from typing import List, Dict, Any, Optional
 
+from .chart_registry_en import CHARTS_EN, localize
+from .i18n import language, say
+
 
 # ── Embedded registry snapshot ────────────────────────────────────────────────
 # Every chart_id must match a charts/<chart_id>/chart.py module directory exactly
@@ -568,12 +571,16 @@ def _score_chart(chart: Dict[str, Any], intent_lower: str, col_lower: List[str])
             score += boost
 
     # 2. Full-text match against desc + data_format + constraints
-    haystack = " ".join([
+    parts = [
         chart["name"],
         chart["desc"],
         chart["data_format"],
         chart["constraints"],
-    ]).lower()
+    ]
+    if language() != "zh":
+        # 英文界面下，英文意图只能命中英文文案
+        parts += list(CHARTS_EN.get(cid, {}).values())
+    haystack = " ".join(parts).lower()
     for token in intent_lower.split():
         if len(token) >= 2 and token in haystack:
             score += 4
@@ -622,6 +629,8 @@ def select_charts(
 
     results = []
     for chart, sc in scored[:top_n]:
+        if language() != "zh":
+            chart = localize(chart)
         # Flatten nested required_roles for display
         rr = chart["required_roles"]
         if rr and isinstance(rr[0], list):
@@ -660,29 +669,36 @@ def format_selection_result(candidates: List[Dict[str, Any]]) -> str:
         )
 
     lines: List[str] = [
-        "根据用户需求，从图表注册表中匹配到以下候选图表（按相关度排序）。",
-        "请选择最合适的一个，并**严格使用 `required_roles` 中列出的 key 构造 `field_mapping`**。",
+        say("Based on the user's request, the following candidate charts were matched from the chart registry (ranked by relevance).",
+            "根据用户需求，从图表注册表中匹配到以下候选图表（按相关度排序）。"),
+        say("Pick the most suitable one and **build `field_mapping` strictly from the keys listed in `required_roles`**.",
+            "请选择最合适的一个，并**严格使用 `required_roles` 中列出的 key 构造 `field_mapping`**。"),
         "",
     ]
 
     for i, c in enumerate(candidates, 1):
         score_hint = f"  *(score={c['_score']})*" if c.get("_score", 0) > 0 else ""
-        lines.append(f"### 选项 {i}：{c['name']}  (`{c['chart_id']}`){score_hint}")
-        lines.append(f"- **分类**：{c['category']}")
-        lines.append(f"- **用途**：{c['desc']}")
-        lines.append(f"- **required_roles → field_mapping keys**：`{c['required_roles']}`")
+        lines.append(say(f"### Option {i}: {c['name']}  (`{c['chart_id']}`){score_hint}",
+                         f"### 选项 {i}：{c['name']}  (`{c['chart_id']}`){score_hint}"))
+        lines.append(say(f"- **Category**: {c['category']}", f"- **分类**：{c['category']}"))
+        lines.append(say(f"- **Purpose**: {c['desc']}", f"- **用途**：{c['desc']}"))
+        lines.append(say(f"- **required_roles → field_mapping keys**: `{c['required_roles']}`",
+                         f"- **required_roles → field_mapping keys**：`{c['required_roles']}`"))
         if c["optional_roles"]:
-            lines.append(f"- **optional_roles**：`{c['optional_roles']}`")
-        lines.append(f"- **数据格式**：{c['data_format']}")
+            lines.append(say(f"- **optional_roles**: `{c['optional_roles']}`",
+                             f"- **optional_roles**：`{c['optional_roles']}`"))
+        lines.append(say(f"- **Data format**: {c['data_format']}", f"- **数据格式**：{c['data_format']}"))
         if c["constraints"]:
-            lines.append(f"- **约束**：{c['constraints']}")
+            lines.append(say(f"- **Constraints**: {c['constraints']}", f"- **约束**：{c['constraints']}"))
         lines.append("")
 
     lines += [
         "---",
-        "**下一步操作**：",
-        "1. 选定 `chart_id`",
-        "2. 用 `query_data` 确认 SQL 结果列名与 `required_roles` 一一对应",
-        "3. 调用 `generate_chart`，`field_mapping` 的 key 必须完全来自上面的 `required_roles`",
+        say("**Next steps**:", "**下一步操作**："),
+        say("1. Pick a `chart_id`", "1. 选定 `chart_id`"),
+        say("2. Use `query_data` to confirm the SQL result column names map one-to-one to `required_roles`",
+            "2. 用 `query_data` 确认 SQL 结果列名与 `required_roles` 一一对应"),
+        say("3. Call `generate_chart`; the `field_mapping` keys must come exactly from the `required_roles` above",
+            "3. 调用 `generate_chart`，`field_mapping` 的 key 必须完全来自上面的 `required_roles`"),
     ]
     return "\n".join(lines)

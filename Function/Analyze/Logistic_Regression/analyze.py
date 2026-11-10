@@ -22,16 +22,25 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
 
+from compute.i18n import say
+
 
 # ── 模块元数据（供 registry 读取）─────────────────────────────────────────
 
 ANALYSIS_ID   = "Logistic_Regression"
-ANALYSIS_NAME = "逻辑回归分析（Logistic Regression）"
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("Logistic Regression Analysis", "逻辑回归分析（Logistic Regression）")
 ANALYSIS_DESC = (
-    "使用逻辑回归对数据进行二分类或多分类分析（OvR 策略）。"
-    "输出特征系数与重要性、训练/测试准确率、混淆矩阵及 ROC 曲线（含 AUC）。"
-    "通过 groupby_column 参数传入正则化强度（lambda，默认 0.01）；"
-    "通过 n_deciles 参数传入最大迭代次数（默认 1000）。"
+    say(
+        "Performs binary or multiclass (OvR) classification analysis with logistic regression. "
+        "Outputs feature coefficients and importance, train/test accuracy, confusion matrix and ROC curves (with AUC). "
+        "The groupby_column parameter sets the regularization strength (lambda, default 0.01); "
+        "the n_deciles parameter sets the maximum number of iterations (default 1000).",
+        "使用逻辑回归对数据进行二分类或多分类分析（OvR 策略）。"
+        "输出特征系数与重要性、训练/测试准确率、混淆矩阵及 ROC 曲线（含 AUC）。"
+        "通过 groupby_column 参数传入正则化强度（lambda，默认 0.01）；"
+        "通过 n_deciles 参数传入最大迭代次数（默认 1000）。",
+    )
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
@@ -120,7 +129,8 @@ def _encode_features(
                 feat_names.append(name)
 
     if not feat_names:
-        raise ValueError("预处理后无有效特征列，请检查输入数据。")
+        raise ValueError(say("No valid feature columns after preprocessing; please check the input data.",
+                             "预处理后无有效特征列，请检查输入数据。"))
 
     X_tr = pd.concat(encoded_train_parts, axis=1).values.astype(np.float64)
     X_te = pd.concat(encoded_test_parts,  axis=1).values.astype(np.float64)
@@ -388,27 +398,28 @@ def _build_md(
     coef_df:     pd.DataFrame,
     roc_df:      pd.DataFrame,
 ) -> str:
-    mode_str = "二分类（Binary）" if binary else f"多分类 OvR（{len(classes)} 类）"
-    cls_str  = "、".join(str(c) for c in classes[:8])
+    mode_str = (say("Binary", "二分类（Binary）") if binary
+                else say(f"Multiclass OvR ({len(classes)} classes)", f"多分类 OvR（{len(classes)} 类）"))
+    cls_str  = say(", ", "、").join(str(c) for c in classes[:8])
     if len(classes) > 8:
         cls_str += "..."
 
     L = [
-        f"## 逻辑回归分析 - `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 分类模式 | {mode_str} |",
-        f"| 目标类别 | {cls_str} |",
-        f"| 训练样本 | {n_train} |",
-        f"| 测试样本 | {n_test} |",
-        f"| 特征数量 | {n_features} |",
-        f"| L2 正则化 λ | {lam} |",
-        f"| 最大迭代次数 | {max_iter} |",
+        say(f"## Logistic Regression Analysis - `{target_col}`\n", f"## 逻辑回归分析 - `{target_col}`\n"),
+        say("### Model Overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Classification mode | {mode_str} |", f"| 分类模式 | {mode_str} |"),
+        say(f"| Target classes | {cls_str} |", f"| 目标类别 | {cls_str} |"),
+        say(f"| Training samples | {n_train} |", f"| 训练样本 | {n_train} |"),
+        say(f"| Test samples | {n_test} |", f"| 测试样本 | {n_test} |"),
+        say(f"| Number of features | {n_features} |", f"| 特征数量 | {n_features} |"),
+        say(f"| L2 regularization λ | {lam} |", f"| L2 正则化 λ | {lam} |"),
+        say(f"| Max iterations | {max_iter} |", f"| 最大迭代次数 | {max_iter} |"),
         "",
-        "### 准确率",
-        "| 集合 | 准确率 |", "|------|--------|",
-        f"| 训练集 | **{train_acc:.2%}** |",
-        f"| 测试集 | **{test_acc:.2%}** |",
+        say("### Accuracy", "### 准确率"),
+        say("| Set | Accuracy |", "| 集合 | 准确率 |"), "|------|--------|",
+        say(f"| Training set | **{train_acc:.2%}** |", f"| 训练集 | **{train_acc:.2%}** |"),
+        say(f"| Test set | **{test_acc:.2%}** |", f"| 测试集 | **{test_acc:.2%}** |"),
         "",
     ]
 
@@ -420,24 +431,29 @@ def _build_md(
         )
         L += [
             "### ROC / AUC",
-            "| 类别 | AUC | 评级 |",
+            say("| Class | AUC | Rating |", "| 类别 | AUC | 评级 |"),
             "|------|-----|------|",
         ]
         for _, row in auc_rows.iterrows():
-            rating = "优秀" if row["auc"] >= 0.9 else ("良好" if row["auc"] >= 0.75 else "一般")
+            rating = (say("Excellent", "优秀") if row["auc"] >= 0.9
+                      else (say("Good", "良好") if row["auc"] >= 0.75 else say("Fair", "一般")))
             L.append(f"| {row['class']} | **{row['auc']:.4f}** | {rating} |")
         L += [
             "",
-            "> ROC 曲线数据存储于 `analysis_roc` 表（class / fpr / tpr / auc）。",
-            "> 绘图方法：Line_Chart，x=fpr，y=tpr，按 class 分组着色。",
+            say("> ROC curve data is stored in the `analysis_roc` table (class / fpr / tpr / auc).",
+                "> ROC 曲线数据存储于 `analysis_roc` 表（class / fpr / tpr / auc）。"),
+            say("> Plotting: Line_Chart, x=fpr, y=tpr, colored by class.",
+                "> 绘图方法：Line_Chart，x=fpr，y=tpr，按 class 分组着色。"),
             "",
         ]
 
     # ── 系数表 ─────────────────────────────────────────────────────────────
-    coef_label = "系数（综合重要性）" if not binary else "系数"
+    coef_label = (say("Coefficient (combined importance)", "系数（综合重要性）") if not binary
+                  else say("Coefficient", "系数"))
     L += [
-        "### 特征系数与重要性",
-        f"| 排名 | 特征 | {coef_label} | OR 值 | 重要性占比 |",
+        say("### Feature Coefficients and Importance", "### 特征系数与重要性"),
+        say(f"| Rank | Feature | {coef_label} | OR | Importance Share |",
+            f"| 排名 | 特征 | {coef_label} | OR 值 | 重要性占比 |"),
         "|:----:|------|----------:|------:|----------:|",
     ]
     for _, row in coef_df.iterrows():
@@ -452,42 +468,54 @@ def _build_md(
     # ── 核心洞察 ───────────────────────────────────────────────────────────
     top = coef_df.iloc[0]
     gap = train_acc - test_acc
-    L += ["### 核心洞察",
-          f"- **最重要特征**：`{top['feature']}`，重要性占比 **{top['importance_pct']:.1f}%**"]
+    L += [say("### Key Insights", "### 核心洞察"),
+          say(f"- **Most important feature**: `{top['feature']}`, importance share **{top['importance_pct']:.1f}%**",
+              f"- **最重要特征**：`{top['feature']}`，重要性占比 **{top['importance_pct']:.1f}%**")]
 
     if not binary:
         L.append(
-            "  系数为多类 OvR 各向量的 L2 范数，反映该特征在所有类别中的综合判别力。"
+            say("  Coefficients are the L2 norms of the per-class OvR vectors, reflecting the feature's combined discriminative power across all classes.",
+                "  系数为多类 OvR 各向量的 L2 范数，反映该特征在所有类别中的综合判别力。")
         )
 
     if top["coefficient"] > 0:
         L.append(
-            f"  `{top['feature']}` 系数为正（OR={top['odds_ratio']:.4f}），"
-            f"该特征值越大，正类概率越高。"
+            say(f"  `{top['feature']}` has a positive coefficient (OR={top['odds_ratio']:.4f}); "
+                f"the larger its value, the higher the probability of the positive class.",
+                f"  `{top['feature']}` 系数为正（OR={top['odds_ratio']:.4f}），"
+                f"该特征值越大，正类概率越高。")
         )
     else:
         L.append(
-            f"  `{top['feature']}` 系数为负（OR={top['odds_ratio']:.4f}），"
-            f"该特征值越大，正类概率越低。"
+            say(f"  `{top['feature']}` has a negative coefficient (OR={top['odds_ratio']:.4f}); "
+                f"the larger its value, the lower the probability of the positive class.",
+                f"  `{top['feature']}` 系数为负（OR={top['odds_ratio']:.4f}），"
+                f"该特征值越大，正类概率越低。")
         )
 
     if test_acc >= 0.85:
-        L.append(f"- 测试准确率 {test_acc:.2%}，模型泛化能力优秀。")
+        L.append(say(f"- Test accuracy {test_acc:.2%}; the model generalizes very well.",
+                     f"- 测试准确率 {test_acc:.2%}，模型泛化能力优秀。"))
     elif test_acc >= 0.65:
-        L.append(f"- 测试准确率 {test_acc:.2%}，模型有一定判别力，可考虑调整正则化参数。")
+        L.append(say(f"- Test accuracy {test_acc:.2%}; the model has some discriminative power; consider tuning the regularization parameter.",
+                     f"- 测试准确率 {test_acc:.2%}，模型有一定判别力，可考虑调整正则化参数。"))
     else:
-        L.append(f"- 测试准确率 {test_acc:.2%}，特征区分度有限，建议补充更多特征或清洗数据。")
+        L.append(say(f"- Test accuracy {test_acc:.2%}; features have limited discriminative power; consider adding more features or cleaning the data.",
+                     f"- 测试准确率 {test_acc:.2%}，特征区分度有限，建议补充更多特征或清洗数据。"))
 
     if gap > 0.15:
         L.append(
-            f"- 过拟合风险：训练/测试准确率相差 {gap:.2%}，"
-            f"建议增大 L2 正则化系数（groupby_column 参数）。"
+            say(f"- Overfitting risk: train/test accuracy differ by {gap:.2%}; "
+                f"consider increasing the L2 regularization strength (groupby_column parameter).",
+                f"- 过拟合风险：训练/测试准确率相差 {gap:.2%}，"
+                f"建议增大 L2 正则化系数（groupby_column 参数）。")
         )
 
     if not roc_df.empty:
         best = roc_df.drop_duplicates("class").sort_values("auc", ascending=False).iloc[0]
         L.append(
-            f"- 最高 AUC = **{best['auc']:.4f}**（{best['class']} 类，OvR）。"
+            say(f"- Highest AUC = **{best['auc']:.4f}** (class {best['class']}, OvR).",
+                f"- 最高 AUC = **{best['auc']:.4f}**（{best['class']} 类，OvR）。")
         )
 
     L.append("")
@@ -533,8 +561,10 @@ def run(
 
     if target_column not in df.columns:
         raise ValueError(
-            f"目标列 '{target_column}' 不存在。"
-            f"可用列：{', '.join(df.columns[:20])}"
+            say(f"Target column '{target_column}' does not exist. "
+                f"Available columns: {', '.join(df.columns[:20])}",
+                f"目标列 '{target_column}' 不存在。"
+                f"可用列：{', '.join(df.columns[:20])}")
         )
 
     # ── 预处理 ────────────────────────────────────────────────────────────
@@ -543,7 +573,8 @@ def run(
 
     classes = sorted(df[target_column].unique().tolist())
     if len(classes) < 2:
-        raise ValueError(f"目标列 '{target_column}' 只有 1 种取值，无法分类。")
+        raise ValueError(say(f"Target column '{target_column}' has only 1 distinct value; cannot classify.",
+                             f"目标列 '{target_column}' 只有 1 种取值，无法分类。"))
 
     binary = (len(classes) == 2)
 

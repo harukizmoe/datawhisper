@@ -9,6 +9,7 @@ contain hyphens or other characters not valid in Python identifiers.
 import logging
 log = logging.getLogger(__name__)
 import importlib.util
+from compute.i18n import say
 import os
 from pathlib import Path
 from typing import Any, Dict
@@ -86,7 +87,7 @@ def get(analysis_id: str) -> Dict[str, Any]:
     all_analyses = get_all()
     if analysis_id not in all_analyses:
         avail = ", ".join(all_analyses.keys())
-        raise KeyError(f"分析模块 '{analysis_id}' 未注册。可用模块：{avail}")
+        raise KeyError(say(f"Analysis module '{analysis_id}' is not registered. Available modules: {avail}", f"分析模块 '{analysis_id}' 未注册。可用模块：{avail}"))
     return all_analyses[analysis_id]
 
 
@@ -98,7 +99,9 @@ def build_agent_desc() -> str:
         req = ", ".join(entry.get("required", []))
         opt = ", ".join(entry.get("optional", []))
         lines.append(
-            f"  {entry['id']:<30} — {entry['desc'][:100]}\n"
-            f"    必填参数: {req or '无'} │ 可选参数: {opt or '无'}"
+            say(f"  {entry['id']:<30} — {entry['desc'][:100]}\n"
+                f"    Required params: {req or 'none'} │ Optional params: {opt or 'none'}",
+                f"  {entry['id']:<30} — {entry['desc'][:100]}\n"
+                f"    必填参数: {req or '无'} │ 可选参数: {opt or '无'}")
         )
     return "\n".join(lines)

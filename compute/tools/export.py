@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from ..i18n import say
 from ..validate import normalize_report_outline_args, validate_tool_args
 from infrastructure.artifact_lifecycle import register_artifact
 from infrastructure.paths import content_data_path, resource_root
@@ -96,26 +97,30 @@ class ExportToolsMixin:
             _, skipped = export_to_excel(self.data_source, tables, filepath)
         except Exception as exc:
             log.warning("[export] excel export failed: %s", exc)
-            return f"❌ 导出失败：{exc}"
+            return say(f"❌ Export failed: {exc}", f"❌ 导出失败：{exc}")
 
         self._register_export_artifact(Path(filepath), artifact_type="export")
         download_url = self._build_download_url(safe_name)
         warning = ""
         if skipped:
             skipped_desc = ", ".join(t for t, _ in skipped)
-            warning = (
-                f"\n\n⚠️ 以下 {len(skipped)} 张表写入失败，已跳过：{skipped_desc}"
+            warning = say(
+                f"\n\n⚠️ {len(skipped)} table(s) failed to write and were skipped: {skipped_desc}",
+                f"\n\n⚠️ 以下 {len(skipped)} 张表写入失败，已跳过：{skipped_desc}",
             )
-        return (
+        return say(
+            f"✅ Excel file generated with {len(tables)} table(s): {', '.join(tables)}.{warning}\n\n"
+            f"[📥 Click to download {safe_name}]({download_url})",
             f"✅ Excel 文件已生成，共 {len(tables)} 张表：{', '.join(tables)}。{warning}\n\n"
-            f"[📥 点击下载 {safe_name}]({download_url})"
+            f"[📥 点击下载 {safe_name}]({download_url})",
         )
 
     def _tool_export_excel(self, tables: list, filename: str = "") -> str:
         if not tables or tables == ["*"]:
             tables = self._discover_all_tables()
             if not tables:
-                return "❌ 数据源中没有可用的表格，请先上传数据或运行分析。"
+                return say("❌ No tables available in the data source. Upload data or run an analysis first.",
+                           "❌ 数据源中没有可用的表格，请先上传数据或运行分析。")
         return self._render_excel_export(tables, filename)
 
     def _tool_export_excel_with_jobs(self, tables: list, filename: str = ""):
@@ -126,7 +131,8 @@ class ExportToolsMixin:
         if not tables or tables == ["*"]:
             tables = self._discover_all_tables()
             if not tables:
-                return "❌ 数据源中没有可用的表格，请先上传数据或运行分析。"
+                return say("❌ No tables available in the data source. Upload data or run an analysis first.",
+                           "❌ 数据源中没有可用的表格，请先上传数据或运行分析。")
 
         # 在请求线程预取。
         from Function.Output.excel_export import prefetch_excel_frames
@@ -134,9 +140,10 @@ class ExportToolsMixin:
             frames = prefetch_excel_frames(self.data_source, tables)
         except Exception as exc:
             log.warning("[export] excel prefetch failed: %s", exc)
-            return f"❌ 导出失败：{exc}"
+            return say(f"❌ Export failed: {exc}", f"❌ 导出失败：{exc}")
         if not frames:
-            return "❌ 没有可导出的表格数据，请确认表名正确且数据不为空。"
+            return say("❌ No table data to export. Check that the table names are correct and the data is not empty.",
+                       "❌ 没有可导出的表格数据，请确认表名正确且数据不为空。")
 
         # 估算序列化大小（字节）：行 × 列 × ~8 字节 的启发式。
         est_bytes = 0
@@ -160,19 +167,23 @@ class ExportToolsMixin:
                 _, skipped = write_excel_from_frames(frames, filepath)
             except Exception as exc:
                 log.warning("[export] excel export failed: %s", exc)
-                return f"❌ 导出失败：{exc}"
+                return say(f"❌ Export failed: {exc}", f"❌ 导出失败：{exc}")
             self._register_export_artifact(Path(filepath), artifact_type="export")
             download_url = self._build_download_url(safe_name)
             warning = ""
             if skipped:
                 skipped_desc = ", ".join(t for t, _ in skipped)
-                warning = (
-                    f"\n\n⚠️ 以下 {len(skipped)} 张表写入失败，已跳过：{skipped_desc}"
+                warning = say(
+                    f"\n\n⚠️ {len(skipped)} table(s) failed to write and were skipped: {skipped_desc}",
+                    f"\n\n⚠️ 以下 {len(skipped)} 张表写入失败，已跳过：{skipped_desc}",
                 )
-            return (
+            return say(
+                f"✅ Excel file generated with {len(frames)} table(s): "
+                f"{', '.join(t for t, _ in frames)}.{warning}\n\n"
+                f"[📥 Click to download {safe_name}]({download_url})",
                 f"✅ Excel 文件已生成，共 {len(frames)} 张表："
                 f"{', '.join(t for t, _ in frames)}。{warning}\n\n"
-                f"[📥 点击下载 {safe_name}]({download_url})"
+                f"[📥 点击下载 {safe_name}]({download_url})",
             )
 
         # 大导出：深拷贝快照，交给 worker 写入。
@@ -183,30 +194,34 @@ class ExportToolsMixin:
 
         def _worker(ctx):
             from Function.Output.excel_export import write_excel_from_frames
-            ctx.set_progress(5, "正在整理表格数据")
+            ctx.set_progress(5, say("Preparing table data", "正在整理表格数据"))
             ctx.check_canceled()
-            ctx.set_progress(40, "正在写入 Excel 文件")
+            ctx.set_progress(40, say("Writing Excel file", "正在写入 Excel 文件"))
             safe_name = self._excel_safe_name(filename_snapshot)
             export_dir = self._get_export_dir()
             os.makedirs(export_dir, exist_ok=True)
             filepath = os.path.join(export_dir, safe_name)
             _, skipped = write_excel_from_frames(snapshot, filepath)
             ctx.check_canceled()
-            ctx.set_progress(90, "正在发布 Excel 文件")
+            ctx.set_progress(90, say("Publishing Excel file", "正在发布 Excel 文件"))
             self._register_export_artifact(Path(filepath), artifact_type="export")
             download_url = self._build_download_url(safe_name)
             warning = ""
             if skipped:
                 skipped_desc = ", ".join(t for t, _ in skipped)
-                warning = (
-                    f"\n\n⚠️ 以下 {len(skipped)} 张表写入失败，已跳过：{skipped_desc}"
+                warning = say(
+                    f"\n\n⚠️ {len(skipped)} table(s) failed to write and were skipped: {skipped_desc}",
+                    f"\n\n⚠️ 以下 {len(skipped)} 张表写入失败，已跳过：{skipped_desc}",
                 )
-            result_holder["text"] = (
+            result_holder["text"] = say(
+                f"✅ Excel file generated with {len(snapshot)} table(s): "
+                f"{', '.join(t for t, _ in snapshot)}.{warning}\n\n"
+                f"[📥 Click to download {safe_name}]({download_url})",
                 f"✅ Excel 文件已生成，共 {len(snapshot)} 张表："
                 f"{', '.join(t for t, _ in snapshot)}。{warning}\n\n"
-                f"[📥 点击下载 {safe_name}]({download_url})"
+                f"[📥 点击下载 {safe_name}]({download_url})",
             )
-            ctx.set_progress(100, "Excel 导出完成")
+            ctx.set_progress(100, say("Excel export complete", "Excel 导出完成"))
             return {
                 "tables": len(snapshot),
                 "estimated_bytes": est_bytes,
@@ -219,33 +234,37 @@ class ExportToolsMixin:
             label=f"Excel · {len(tables_snapshot)} tables",
         )
         if job.get("status") == "canceled":
-            return "Excel 导出已取消。"
+            return say("Excel export canceled.", "Excel 导出已取消。")
         if job.get("status") != "succeeded":
-            return f"❌ 导出失败：{job.get('error') or 'background job failed'}"
-        return result_holder.get("text", "❌ 导出失败：后台结果不可用。")
+            return say(f"❌ Export failed: {job.get('error') or 'background job failed'}",
+                       f"❌ 导出失败：{job.get('error') or 'background job failed'}")
+        return result_holder.get("text", say("❌ Export failed: background result unavailable.", "❌ 导出失败：后台结果不可用。"))
 
     def _tool_propose_excel_export(
         self, tables: list, filename: str = "", summary: str = ""
     ) -> dict:
         if tables == ["*"] or tables == ["all"]:
-            label = "全部可用表格（原始数据 + 分析结果）"
+            label = say("All available tables (raw data + analysis results)", "全部可用表格（原始数据 + 分析结果）")
             table_list = tables
         else:
-            label = "、".join(tables) if tables else "（未指定）"
+            label = say(", ", "、").join(tables) if tables else say("(not specified)", "（未指定）")
             table_list = tables
-        markdown = (
+        markdown = say(
+            f"**Export target:** {label}\n\n"
+            f"**File name:** {filename or '(auto-generated)'}.xlsx\n\n",
             f"**导出目标：** {label}\n\n"
-            f"**文件名：** {filename or '（自动生成）'}.xlsx\n\n"
+            f"**文件名：** {filename or '（自动生成）'}.xlsx\n\n",
         )
         if summary:
-            markdown += f"**说明：** {summary}\n"
+            markdown += say(f"**Notes:** {summary}\n", f"**说明：** {summary}\n")
         # 先在数据源中核对指定表名，让不存在的表在导出 job 运行前就暴露
         # （否则缺失的表会在 excel_export 中被静默跳过，用户直到文件为空才发现）。
         if table_list not in (["*"], ["all"]) and self.data_source is not None:
             available = set(self._discover_all_tables())
             missing = [t for t in table_list if t not in available]
             if missing:
-                markdown += f"**⚠️ 不存在的表：** {', '.join(missing)}\n"
+                markdown += say(f"**⚠️ Tables that do not exist:** {', '.join(missing)}\n",
+                                f"**⚠️ 不存在的表：** {', '.join(missing)}\n")
         return {"tables": table_list, "filename": filename, "summary": summary, "markdown": markdown}
 
     # ── Word 报告 ──────────────────────────────────────────────────────────────
@@ -281,27 +300,29 @@ class ExportToolsMixin:
         )
 
         n_charts = len(chart_htmls)
-        chart_note = f"（含 {n_charts} 张图表）" if n_charts else ""
+        chart_note = say(f" (including {n_charts} chart(s))", f"（含 {n_charts} 张图表）") if n_charts else ""
         self._register_export_artifact(Path(_result_path), artifact_type="report")
         download_url = self._build_download_url(download_name)
-        return (
+        return say(
+            f"✅ Report generated with {len(sections)} section(s){chart_note}.\n\n"
+            f"[📥 Click to download {download_name}]({download_url})",
             f"✅ 报告已生成，共 {len(sections)} 个章节{chart_note}。\n\n"
-            f"[📥 点击下载 {download_name}]({download_url})"
+            f"[📥 点击下载 {download_name}]({download_url})",
         )
 
     def _tool_export_report(self, title: str, sections: list) -> str:
         if not sections:
-            return "❌ 报告内容为空，请提供至少一个章节。"
+            return say("❌ The report is empty. Provide at least one section.", "❌ 报告内容为空，请提供至少一个章节。")
 
         try:
             return self._render_report_export(title, sections, self._report_chart_htmls())
         except Exception as exc:
             log.warning("[export] report generation failed: %s", exc)
-            return f"❌ 报告生成失败：{exc}"
+            return say(f"❌ Report generation failed: {exc}", f"❌ 报告生成失败：{exc}")
 
     def _tool_export_report_with_jobs(self, title: str, sections: list):
         if not sections:
-            return "❌ 报告内容为空，请提供至少一个章节。"
+            return say("❌ The report is empty. Provide at least one section.", "❌ 报告内容为空，请提供至少一个章节。")
 
         chart_htmls = self._report_chart_htmls()
         should_job = (
@@ -316,24 +337,24 @@ class ExportToolsMixin:
                 return self._render_report_export(title, sections, chart_htmls)
             except Exception as exc:
                 log.warning("[export] report generation failed: %s", exc)
-                return f"❌ 报告生成失败：{exc}"
+                return say(f"❌ Report generation failed: {exc}", f"❌ 报告生成失败：{exc}")
 
-        title_snapshot = str(title or "分析报告")
+        title_snapshot = str(title or say("Analysis Report", "分析报告"))
         sections_snapshot = copy.deepcopy(sections)
         chart_htmls_snapshot = list(chart_htmls)
         result_holder = {}
 
         def _worker(ctx):
-            ctx.set_progress(5, "正在整理报告素材")
+            ctx.set_progress(5, say("Preparing report material", "正在整理报告素材"))
             ctx.check_canceled()
-            ctx.set_progress(35, "正在生成 Word 报告")
+            ctx.set_progress(35, say("Generating Word report", "正在生成 Word 报告"))
             result = self._render_report_export(
                 title_snapshot, sections_snapshot, chart_htmls_snapshot
             )
             ctx.check_canceled()
-            ctx.set_progress(90, "正在发布报告文件")
+            ctx.set_progress(90, say("Publishing report file", "正在发布报告文件"))
             result_holder["text"] = result
-            ctx.set_progress(100, "报告生成完成")
+            ctx.set_progress(100, say("Report generation complete", "报告生成完成"))
             return {
                 "title": title_snapshot,
                 "sections": len(sections_snapshot),
@@ -346,10 +367,11 @@ class ExportToolsMixin:
             label=f"{title_snapshot} · {len(sections_snapshot)} sections",
         )
         if job.get("status") == "canceled":
-            return "报告生成已取消。"
+            return say("Report generation canceled.", "报告生成已取消。")
         if job.get("status") != "succeeded":
-            return f"❌ 报告生成失败：{job.get('error') or 'background job failed'}"
-        return result_holder.get("text", "❌ 报告生成失败：后台结果不可用。")
+            return say(f"❌ Report generation failed: {job.get('error') or 'background job failed'}",
+                       f"❌ 报告生成失败：{job.get('error') or 'background job failed'}")
+        return result_holder.get("text", say("❌ Report generation failed: background result unavailable.", "❌ 报告生成失败：后台结果不可用。"))
 
     def _tool_propose_report_outline(self, title: str, sections: list) -> dict:
         normalized = normalize_report_outline_args({"title": title, "sections": sections})
@@ -358,26 +380,31 @@ class ExportToolsMixin:
             raise ValueError(validation_error)
         title = normalized["title"]
         sections = normalized["sections"]
-        rows = ["| # | 章节标题 |\n|---|---------|"]
+        rows = [say("| # | Section title |\n|---|---------|", "| # | 章节标题 |\n|---|---------|")]
         for i, sec in enumerate(sections, 1):
             heading = sec.get("heading", f"Section {i}") if isinstance(sec, dict) else str(sec)
             rows.append(f"| {i} | {heading} |")
         markdown = (
-            f"**{title}**（共 {len(sections)} 个章节）\n\n" + "\n".join(rows)
+            say(f"**{title}** ({len(sections)} section(s))\n\n", f"**{title}**（共 {len(sections)} 个章节）\n\n") + "\n".join(rows)
         )
         return {"title": title, "sections": sections, "markdown": markdown}
 
     # ── PPT 导出 ───────────────────────────────────────────────────────────────
 
     def _tool_set_ppt_color_scheme(self, scheme: str) -> str:
-        from charts.color_schemes import COLOR_SCHEMES
+        from charts.color_schemes import COLOR_SCHEMES, get_scheme_description
         scheme = scheme.lower().strip()
         if scheme not in COLOR_SCHEMES:
             available = ", ".join(COLOR_SCHEMES.keys())
-            return f"未知配色方案 '{scheme}'。可用方案：{available}"
+            return say(f"Unknown color scheme '{scheme}'. Available schemes: {available}",
+                       f"未知配色方案 '{scheme}'。可用方案：{available}")
         self.ppt_color_scheme = scheme
         info = COLOR_SCHEMES[scheme]
-        return f"✅ 配色已切换为「{info['name']}」（{info['description']}），后续图表和 PPT 均使用此配色。"
+        desc = get_scheme_description(scheme)
+        return say(
+            f"✅ Color scheme switched to \"{info['name']}\" ({desc}); later charts and PPTs will use it.",
+            f"✅ 配色已切换为「{info['name']}」（{desc}），后续图表和 PPT 均使用此配色。",
+        )
 
     def _tool_propose_ppt_outline(self, title: str, slides: list) -> dict:
         # 双语布局标签 —— 按 conventions §B 使用 _tt(zh, en)
@@ -399,7 +426,7 @@ class ExportToolsMixin:
             "stacked_bar":        ("堆叠柱状图", "Stacked Bar"),
             "timeline":           ("时间轴", "Timeline"),
         }
-        rows = ["| # | 布局 | 内容摘要 |\n|---|------|---------|"]
+        rows = [say("| # | Layout | Content summary |\n|---|------|---------|", "| # | 布局 | 内容摘要 |\n|---|------|---------|")]
         for i, s in enumerate(slides, 1):
             layout = s.get("layout", "")
             p = s.get("params", {})
@@ -412,7 +439,7 @@ class ExportToolsMixin:
             )
             summary = f"{title_str} · {extra}" if extra else title_str
             rows.append(f"| {i} | {label} | {summary} |")
-        markdown = f"**{title}**（共 {len(slides)} 张）\n\n" + "\n".join(rows)
+        markdown = say(f"**{title}** ({len(slides)} slide(s))\n\n", f"**{title}**（共 {len(slides)} 张）\n\n") + "\n".join(rows)
         return {"title": title, "slides": slides, "markdown": markdown}
 
     def _ppt_safe_name(self, title: str, filename: str) -> str:
@@ -457,7 +484,8 @@ class ExportToolsMixin:
             )
         except ImportError as exc:
             raise ImportError(
-                f"PPT 模块加载失败（请确认已安装 python-pptx 和 lxml）：{exc}"
+                say(f"Failed to load the PPT module (check that python-pptx and lxml are installed): {exc}",
+                    f"PPT 模块加载失败（请确认已安装 python-pptx 和 lxml）：{exc}")
             ) from exc
 
         COLOR_MAP = {
@@ -585,8 +613,10 @@ class ExportToolsMixin:
             layout = spec.get("layout", "")
             if layout not in _SUPPORTED:
                 raise ValueError(
-                    f"第 {i} 张幻灯片使用了不支持的布局 '{layout}'。"
-                    f"支持的布局：{', '.join(sorted(_SUPPORTED))}"
+                    say(f"Slide {i} uses an unsupported layout '{layout}'. "
+                        f"Supported layouts: {', '.join(sorted(_SUPPORTED))}",
+                        f"第 {i} 张幻灯片使用了不支持的布局 '{layout}'。"
+                        f"支持的布局：{', '.join(sorted(_SUPPORTED))}")
                 )
             params = _resolve(spec.get("params", {}))
             if layout in ("grouped_bar", "stacked_bar") and "series" in params:
@@ -633,8 +663,8 @@ class ExportToolsMixin:
                 err_msg = str(exc)
                 try:
                     eng.section_divider(
-                        section_label=f"第 {i} 页",
-                        title="渲染失败",
+                        section_label=say(f"Slide {i}", f"第 {i} 页"),
+                        title=say("Render failed", "渲染失败"),
                         subtitle=err_msg[:200],
                     )
                 except Exception as ph_exc:
@@ -660,27 +690,31 @@ class ExportToolsMixin:
                 title, slides, filename, scheme,
             )
         except ImportError as exc:
-            return f"❌ {exc}\n\n运行：`pip install python-pptx lxml`"
+            return say(f"❌ {exc}\n\nRun: `pip install python-pptx lxml`", f"❌ {exc}\n\n运行：`pip install python-pptx lxml`")
         except (ValueError, RuntimeError) as exc:
             return f"❌ {exc}"
         except Exception as exc:
             log.warning("[export] PPT generation failed: %s", exc)
-            return f"❌ PPT 生成失败：{exc}"
+            return say(f"❌ PPT generation failed: {exc}", f"❌ PPT 生成失败：{exc}")
 
         self._register_export_artifact(Path(filepath), artifact_type="export")
         download_url = self._build_download_url(safe_name)
         warning = ""
         if failed_slides:
             failed_desc = ", ".join(
-                f"第 {idx} 页({layout})" for idx, layout, _ in failed_slides
+                say(f"slide {idx} ({layout})", f"第 {idx} 页({layout})") for idx, layout, _ in failed_slides
             )
-            warning = (
+            warning = say(
+                f"\n\n⚠️ {len(failed_slides)} slide(s) failed to render "
+                f"and were replaced with placeholders; please check manually: {failed_desc}",
                 f"\n\n⚠️ 以下 {len(failed_slides)} 张幻灯片渲染失败，"
-                f"已用占位页替代，请手动检查：{failed_desc}"
+                f"已用占位页替代，请手动检查：{failed_desc}",
             )
-        return (
+        return say(
+            f"✅ PowerPoint presentation generated with **{len(slides)}** slide(s).{warning}\n\n"
+            f"[📥 Click to download {safe_name}]({download_url})",
             f"✅ PowerPoint 演示文稿已生成，共 **{len(slides)}** 张幻灯片。{warning}\n\n"
-            f"[📥 点击下载 {safe_name}]({download_url})"
+            f"[📥 点击下载 {safe_name}]({download_url})",
         )
 
     def _tool_generate_ppt_with_jobs(self, title: str, slides: list, filename: str = ""):
@@ -701,46 +735,51 @@ class ExportToolsMixin:
             return self._tool_generate_ppt(title, slides, filename)
 
         # 给 worker 的不可变快照 —— 没有活对象跨线程。
-        title_snapshot = str(title or "演示文稿")
+        title_snapshot = str(title or say("Presentation", "演示文稿"))
         slides_snapshot = copy.deepcopy(slides)
         filename_snapshot = str(filename or "")
         scheme_snapshot = str(scheme)
         result_holder = {}
 
         def _worker(ctx):
-            ctx.set_progress(5, "正在初始化 PPT 引擎")
+            ctx.set_progress(5, say("Initializing PPT engine", "正在初始化 PPT 引擎"))
             ctx.check_canceled()
-            ctx.set_progress(35, "正在渲染幻灯片")
+            ctx.set_progress(35, say("Rendering slides", "正在渲染幻灯片"))
 
             # 幻灯片粒度的进度回调：35% → 85% 区间，每渲染一张 tick 一次。
             # 也让 worker 能在幻灯片之间轮询取消，而不是每份 deck 一次。
             def _on_slide_done(i, total):
                 pct = 35 + int(50 * i / total) if total else 35
-                ctx.set_progress(pct, f"已渲染 {i}/{total} 张")
+                ctx.set_progress(pct, say(f"Rendered {i}/{total}", f"已渲染 {i}/{total} 张"))
                 ctx.check_canceled()
 
             filepath, safe_name, failed_slides = self._render_ppt(
                 title_snapshot, slides_snapshot, filename_snapshot, scheme_snapshot,
                 on_slide_done=_on_slide_done,
             )
-            ctx.set_progress(90, "正在发布 PPT 文件")
+            ctx.set_progress(90, say("Publishing PPT file", "正在发布 PPT 文件"))
             self._register_export_artifact(Path(filepath), artifact_type="export")
             download_url = self._build_download_url(safe_name)
             warning = ""
             if failed_slides:
                 failed_desc = ", ".join(
-                    f"第 {idx} 页({layout})" for idx, layout, _ in failed_slides
+                    say(f"slide {idx} ({layout})", f"第 {idx} 页({layout})") for idx, layout, _ in failed_slides
                 )
-                warning = (
+                warning = say(
+                    f"\n\n⚠️ {len(failed_slides)} slide(s) failed to render "
+                    f"and were replaced with placeholders; please check manually: {failed_desc}",
                     f"\n\n⚠️ 以下 {len(failed_slides)} 张幻灯片渲染失败，"
-                    f"已用占位页替代，请手动检查：{failed_desc}"
+                    f"已用占位页替代，请手动检查：{failed_desc}",
                 )
-            result_holder["text"] = (
+            result_holder["text"] = say(
+                f"✅ PowerPoint presentation generated with "
+                f"**{len(slides_snapshot)}** slide(s).{warning}\n\n"
+                f"[📥 Click to download {safe_name}]({download_url})",
                 f"✅ PowerPoint 演示文稿已生成，"
                 f"共 **{len(slides_snapshot)}** 张幻灯片。{warning}\n\n"
-                f"[📥 点击下载 {safe_name}]({download_url})"
+                f"[📥 点击下载 {safe_name}]({download_url})",
             )
-            ctx.set_progress(100, "PPT 生成完成")
+            ctx.set_progress(100, say("PPT generation complete", "PPT 生成完成"))
             return {
                 "slides": len(slides_snapshot),
                 "scheme": scheme_snapshot,
@@ -753,22 +792,23 @@ class ExportToolsMixin:
             label=f"{title_snapshot} · {total} slides",
         )
         if job.get("status") == "canceled":
-            return "PPT 生成已取消。"
+            return say("PPT generation canceled.", "PPT 生成已取消。")
         if job.get("status") != "succeeded":
-            return f"❌ PPT 生成失败：{job.get('error') or 'background job failed'}"
-        return result_holder.get("text", "❌ PPT 生成失败：后台结果不可用。")
+            return say(f"❌ PPT generation failed: {job.get('error') or 'background job failed'}",
+                       f"❌ PPT 生成失败：{job.get('error') or 'background job failed'}")
+        return result_holder.get("text", say("❌ PPT generation failed: background result unavailable.", "❌ PPT 生成失败：后台结果不可用。"))
 
     # ── 看板（Dashboard）────────────────────────────────────────────────────────
 
     def _tool_propose_dashboard_outline(self, name: str, widgets: list) -> dict:
-        rows = ["| # | 标题 | 图表类型 | 核心字段 |", "|---|------|---------|---------|"]
+        rows = [say("| # | Title | Chart type | Key fields |", "| # | 标题 | 图表类型 | 核心字段 |"), "|---|------|---------|---------|"]
         for i, w in enumerate(widgets, 1):
-            title = w.get("title", f"图表 {i}")
+            title = w.get("title", say(f"Chart {i}", f"图表 {i}"))
             chart_type = w.get("chart_type", "Bar_Chart")
             fm = w.get("field_mapping", {})
             fields = ", ".join(f"{k}={v}" for k, v in fm.items()) if fm else "—"
             rows.append(f"| {i} | {title} | {chart_type} | {fields} |")
-        markdown = f"**{name}**（共 {len(widgets)} 个组件）\n\n" + "\n".join(rows)
+        markdown = say(f"**{name}** ({len(widgets)} widget(s))\n\n", f"**{name}**（共 {len(widgets)} 个组件）\n\n") + "\n".join(rows)
         return {"name": name, "widgets": widgets, "markdown": markdown}
 
     def _tool_generate_dashboard(
@@ -792,7 +832,7 @@ class ExportToolsMixin:
             )
         except Exception as exc:
             log.warning("[export] dashboard generation failed: %s", exc)
-            return f"❌ 看板生成失败：{exc}"
+            return say(f"❌ Dashboard generation failed: {exc}", f"❌ 看板生成失败：{exc}")
 
         dashboard_id = data.get("dashboard_id", "")
         url = data.get("url", f"/dashboard/{dashboard_id}")
@@ -800,9 +840,11 @@ class ExportToolsMixin:
         if sid:
             url = f"{url}?sid={sid}"
         export_url = f"/api/dashboard/{dashboard_id}/export-html"
-        return (
+        return say(
+            f"✅ Dashboard \"{name}\" generated with **{len(widgets)}** chart widget(s).\n\n"
+            f"[📊 Open dashboard]({url})  [📥 Download HTML]({export_url})",
             f"✅ 看板「{name}」已生成，包含 **{len(widgets)}** 个图表组件。\n\n"
-            f"[📊 打开看板]({url})  [📥 下载 HTML]({export_url})"
+            f"[📊 打开看板]({url})  [📥 下载 HTML]({export_url})",
         )
 
     def _format_dashboard_result(self, name: str, widgets: list, data: dict) -> str:
@@ -812,9 +854,11 @@ class ExportToolsMixin:
         if sid:
             url = f"{url}?sid={sid}"
         export_url = f"/api/dashboard/{dashboard_id}/export-html"
-        return (
+        return say(
+            f"✅ Dashboard \"{name}\" generated with **{len(widgets)}** chart widget(s).\n\n"
+            f"[📊 Open dashboard]({url})  [📥 Download HTML]({export_url})",
             f"✅ 看板「{name}」已生成，包含 **{len(widgets)}** 个图表组件。\n\n"
-            f"[📊 打开看板]({url})  [📥 下载 HTML]({export_url})"
+            f"[📊 打开看板]({url})  [📥 下载 HTML]({export_url})",
         )
 
     def _tool_generate_dashboard_with_jobs(
@@ -836,7 +880,7 @@ class ExportToolsMixin:
             )
         except Exception as exc:
             log.warning("[export] dashboard prefetch failed: %s", exc)
-            return f"❌ 看板生成失败：{exc}"
+            return say(f"❌ Dashboard generation failed: {exc}", f"❌ 看板生成失败：{exc}")
 
         total_rows = 0
         for item in widget_inputs:
@@ -870,7 +914,7 @@ class ExportToolsMixin:
                 return self._format_dashboard_result(name, widgets, _build(widget_inputs))
             except Exception as exc:
                 log.warning("[export] dashboard generation failed: %s", exc)
-                return f"❌ 看板生成失败：{exc}"
+                return say(f"❌ Dashboard generation failed: {exc}", f"❌ 看板生成失败：{exc}")
 
         snapshot = []
         for item in widget_inputs:
@@ -880,15 +924,15 @@ class ExportToolsMixin:
                 "df": df.copy(deep=True) if df is not None else None,
                 "error": item.get("error"),
             })
-        name_snapshot = str(name or "数据看板")
+        name_snapshot = str(name or say("Data Dashboard", "数据看板"))
         widgets_snapshot = copy.deepcopy(widgets)
         color_scheme_snapshot = str(color_scheme)
         result_holder = {}
 
         def _worker(ctx):
-            ctx.set_progress(10, "正在整理看板数据")
+            ctx.set_progress(10, say("Preparing dashboard data", "正在整理看板数据"))
             ctx.check_canceled()
-            ctx.set_progress(45, "正在渲染看板组件")
+            ctx.set_progress(45, say("Rendering dashboard widgets", "正在渲染看板组件"))
             data = build_dashboard_from_prefetched_widgets(
                 self._chart_store,
                 session_id=self._session_id,
@@ -898,11 +942,11 @@ class ExportToolsMixin:
                 color_scheme=color_scheme_snapshot,
             )
             ctx.check_canceled()
-            ctx.set_progress(90, "正在发布看板")
+            ctx.set_progress(90, say("Publishing dashboard", "正在发布看板"))
             result_holder["text"] = self._format_dashboard_result(
                 name_snapshot, widgets_snapshot, data
             )
-            ctx.set_progress(100, "看板生成完成")
+            ctx.set_progress(100, say("Dashboard generation complete", "看板生成完成"))
             return {
                 "name": name_snapshot,
                 "widgets": len(widgets_snapshot),
@@ -915,7 +959,8 @@ class ExportToolsMixin:
             label=f"{name_snapshot} · {len(widgets_snapshot)} widgets",
         )
         if job.get("status") == "canceled":
-            return "看板生成已取消。"
+            return say("Dashboard generation canceled.", "看板生成已取消。")
         if job.get("status") != "succeeded":
-            return f"❌ 看板生成失败：{job.get('error') or 'background job failed'}"
-        return result_holder.get("text", "❌ 看板生成失败：后台结果不可用。")
+            return say(f"❌ Dashboard generation failed: {job.get('error') or 'background job failed'}",
+                       f"❌ 看板生成失败：{job.get('error') or 'background job failed'}")
+        return result_holder.get("text", say("❌ Dashboard generation failed: background result unavailable.", "❌ 看板生成失败：后台结果不可用。"))

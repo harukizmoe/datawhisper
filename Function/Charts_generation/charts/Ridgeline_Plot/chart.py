@@ -26,11 +26,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
 
-_DATA_FMT = "group列(分类) + value列(数值)"
-_DESC = "多个密度曲线沿垂直轴排列并略微重叠，展示分布形态对比和演变趋势。"
+
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -130,7 +130,7 @@ def _build_html(title: str, chart_name: str, library: str,
                 data_fmt: str, desc: str, embed: str) -> str:
     esc = _html.escape
     return f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="{say('en', 'zh-CN')}"><head><meta charset="UTF-8">
 <title>{esc(title)}</title>
 <style>
 body{{font-family:"Heiti SC","Microsoft YaHei",sans-serif;margin:40px;background:#fafafa}}
@@ -143,8 +143,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{esc(title)}</h1><div class="subtitle">{esc(chart_name)} | {esc(library)}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{esc(data_fmt)}<br>
-<strong>说明：</strong>{esc(desc)}
+<strong>{say('Data format:', '数据格式：')}</strong>{esc(data_fmt)}<br>
+<strong>{say('Description:', '说明：')}</strong>{esc(desc)}
 </div></body></html>"""
 
 
@@ -168,7 +168,7 @@ def generate(
     excel_path: str = None,
     group: str = None,
     value: str = None,
-    title: str = "山脊线图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -181,9 +181,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 检测并转换宽格式数据
     is_wide = _is_wide_format(df)
@@ -191,7 +191,7 @@ def generate(
         df = _wide_to_long(df)
         group_col = "group"
         value_col = "value"
-        warnings.append("检测到宽格式数据，已自动转换为长格式")
+        warnings.append(say("Wide-format data detected and automatically converted to long format", "检测到宽格式数据，已自动转换为长格式"))
     else:
         # 兼容 required_roles 为 group/value 或 x/y 两种写法
         group_col = mapping.get("group")
@@ -200,16 +200,18 @@ def generate(
         value_col = value_col if value_col is not None else (mapping.get("y") if mapping.get("y") is not None else value)
 
     title = options.get("title", title)
+    if title is None:
+        title = say("Ridgeline Plot", "山脊线图")
 
     _group = _auto_col(df, group_col, "group", "分组", "类别", "行业", "地区")
     _value = _auto_col(df, value_col, "value", "数值", "销售额", "薪资", "价格")
 
     if _value is None or _value not in df.columns:
-        warnings.append("找不到必填字段 [value]")
+        warnings.append(say("Required field [value] not found", "找不到必填字段 [value]"))
         return ChartResult(warnings=warnings)
 
     if _group is None or _group not in df.columns:
-        warnings.append("找不到必填字段 [group]")
+        warnings.append(say("Required field [group] not found", "找不到必填字段 [group]"))
         return ChartResult(warnings=warnings)
 
     # 获取配色方案
@@ -246,7 +248,7 @@ def generate(
     for grp in groups:
         grp_data = df[df[_group] == grp][_value].dropna().values
         if len(grp_data) < 2:
-            warnings.append(f"分组 '{grp}' 数据点过少（<2），已跳过")
+            warnings.append(say(f"Group '{grp}' has too few data points (<2), skipped", f"分组 '{grp}' 数据点过少（<2），已跳过"))
             continue
 
         density = _compute_density(grp_data, x_range)
@@ -257,7 +259,7 @@ def generate(
     groups = valid_groups
 
     if not groups:
-        return ChartResult(warnings=warnings + ["没有足够的数据生成山脊线图"])
+        return ChartResult(warnings=warnings + [say("Not enough data to generate a ridgeline plot", "没有足够的数据生成山脊线图")])
 
     fig = go.Figure()
 
@@ -308,8 +310,8 @@ def generate(
             customdata=np.column_stack([density, np.full_like(density, idx)]),
             hovertemplate=(
                 f"<b>{grp}</b><br>"
-                "值: %{x:.2f}<br>"
-                "密度: %{customdata[0]:.4f}"
+                + say("Value", "值") + ": %{x:.2f}<br>"
+                + say("Density", "密度") + ": %{customdata[0]:.4f}"
                 "<extra></extra>"
             )
         ))
@@ -319,7 +321,7 @@ def generate(
     fig.update_layout(
         title=title,
         xaxis_title=_value,
-        yaxis_title="分组",
+        yaxis_title=say("Group", "分组"),
         font_family="Heiti SC, Microsoft YaHei, sans-serif",
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -344,7 +346,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "ridgeline_plot", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "ridgeline_plot", "plotly", say("group column (categorical) + value column (numeric)", "group列(分类) + value列(数值)"), say("Multiple density curves are stacked along the vertical axis with slight overlap, showing distribution shapes and how they change.", "多个密度曲线沿垂直轴排列并略微重叠，展示分布形态对比和演变趋势。"), chart_html)
 
     meta = {
         "chart_id": "ridgeline_plot",

@@ -35,11 +35,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(数值) + y列(数值) + 可选size列(气泡大小) + 可选color列(分组)"
-_DESC = "展示两个或多个数值变量之间的关系，适合发现相关性、聚类和异常值。"
+
 
 
 def _norm(s: str) -> str:
@@ -92,7 +92,7 @@ def _auto_col(df: pd.DataFrame, role: str, exclude: set = None) -> Optional[str]
 def _build_html(title: str, chart_name: str, library: str,
                 data_fmt: str, desc: str, embed: str) -> str:
     return f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="{say('en', 'zh-CN')}"><head><meta charset="UTF-8">
 <title>{title}</title>
 <style>
 body{{font-family:"Heiti SC","Microsoft YaHei",sans-serif;margin:40px;background:#fafafa}}
@@ -105,8 +105,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -145,7 +145,7 @@ def generate(
     y: str = "y",
     size: str = None,
     color: str = None,
-    title: str = "散点图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     """
@@ -175,9 +175,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -192,6 +192,8 @@ def generate(
     color_col = mapping.get("color")
     color_col = color_col if color_col is not None else color
     title = options.get("title", title)
+    if title is None:
+        title = say("Scatter Plot", "散点图")
     color_scheme_name = options.get("color_scheme", "mckinsey")
     show_trendline = bool(options.get("trendline", False))
     opacity = float(options.get("opacity", 0.7))
@@ -203,13 +205,13 @@ def generate(
     if _x:
         exclude_set.add(_x)
     else:
-        return ChartResult(warnings=["无法找到x列"])
+        return ChartResult(warnings=[say("Could not find the x column", "无法找到x列")])
 
     _y = y_col if y_col and y_col != "y" and y_col in df.columns else _auto_col(df, "y", exclude_set)
     if _y:
         exclude_set.add(_y)
     else:
-        return ChartResult(warnings=["无法找到y列"])
+        return ChartResult(warnings=[say("Could not find the y column", "无法找到y列")])
 
     _size = size_col if size_col and size_col in df.columns else _auto_col(df, "size", exclude_set)
     if _size:
@@ -231,15 +233,15 @@ def generate(
         df[_x] = _to_numeric_col(df[_x])
         df[_y] = _to_numeric_col(df[_y])
         if df[_x].isna().all() or df[_y].isna().all():
-            return ChartResult(warnings=["x或y列包含非数值数据"])
+            return ChartResult(warnings=[say("The x or y column contains non-numeric data", "x或y列包含非数值数据")])
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"数据转换失败: {e}"])
+        return ChartResult(warnings=[say(f"Data conversion failed: {e}", f"数据转换失败: {e}")])
 
     # 删除NaN行
     df_plot = df.dropna(subset=[_x, _y])
     if len(df_plot) < 2:
-        return ChartResult(warnings=["有效数据点少于2个"])
+        return ChartResult(warnings=[say("Fewer than 2 valid data points", "有效数据点少于2个")])
 
     # 处理气泡大小
     marker_sizes = [marker_size] * len(df_plot)
@@ -256,7 +258,7 @@ def generate(
                     marker_sizes = [marker_size] * len(df_plot)
         except Exception as e:
             log.warning("[chart] 图表生成异常: %s", e)
-            warnings.append(f"气泡大小处理失败: {e}")
+            warnings.append(say(f"Failed to process bubble size: {e}", f"气泡大小处理失败: {e}"))
 
     # 获取配色
     try:
@@ -264,7 +266,7 @@ def generate(
         primary_color = color_scheme.get("primary", "#0084D1")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}")
+        warnings.append(say(f"Failed to load color scheme: {e}", f"配色方案加载失败: {e}"))
         primary_color = "#0084D1"
 
     # 生成图表
@@ -348,9 +350,9 @@ def generate(
                     x=x_line,
                     y=y_line,
                     mode="lines",
-                    name=f"趋势线 (R²={r_squared:.3f})",
+                    name=f"{say('Trendline', '趋势线')} (R²={r_squared:.3f})",
                     line=dict(color="rgba(200,0,0,0.5)", width=2, dash="dash"),
-                    hovertemplate="趋势线<br>x: %{x:.2f}<br>y: %{y:.2f}<extra></extra>",
+                    hovertemplate=say("Trendline", "趋势线") + "<br>x: %{x:.2f}<br>y: %{y:.2f}<extra></extra>",
                     showlegend=True
                 ))
 
@@ -382,13 +384,13 @@ def generate(
 
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
         if not chart_html or len(chart_html) < 100:
-            return ChartResult(warnings=["图表生成失败"])
+            return ChartResult(warnings=[say("Chart generation failed", "图表生成失败")])
 
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"图表生成失败: {e}"])
+        return ChartResult(warnings=[say(f"Chart generation failed: {e}", f"图表生成失败: {e}")])
 
-    html = _build_html(title, "scatter_plot", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "scatter_plot", "plotly", say("x column (numeric) + y column (numeric) + optional size column (bubble size) + optional color column (group)", "x列(数值) + y列(数值) + 可选size列(气泡大小) + 可选color列(分组)"), say("Shows the relationship between two or more numeric variables; useful for spotting correlations, clusters and outliers.", "展示两个或多个数值变量之间的关系，适合发现相关性、聚类和异常值。"), chart_html)
 
     meta = {
         "chart_id": "scatter_plot",

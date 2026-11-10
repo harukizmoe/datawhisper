@@ -33,20 +33,28 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Optional, Tuple, List
 
+from compute.i18n import say
+
 # ── 模块元数据 ──────────────────────────────────────────────────────────────
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
 ANALYSIS_ID   = "Time_Series_Prophet"
-ANALYSIS_NAME = "Prophet 风格时间序列预测"
-ANALYSIS_DESC = (
+ANALYSIS_NAME = say("Prophet-style time series forecasting", "Prophet 风格时间序列预测")
+ANALYSIS_DESC = say(
+    "Forecasts a time series with the Prophet additive decomposition framework (trend + seasonality + residual), "
+    "implemented in pure numpy+pandas with no need to install the prophet/fbprophet package. "
+    "Automatically detects yearly / weekly / intraday seasonality and models a piecewise linear trend. "
+    "Use groupby_column to specify the time column name; "
+    "use n_deciles to specify the number of forecast steps (default 30).",
     "使用 Prophet 加法分解框架（趋势 + 季节性 + 残差）预测时间序列，"
     "纯 numpy+pandas 实现，无需安装 prophet/fbprophet 包。"
     "自动识别年度 / 周度 / 日内季节性，分段线性趋势建模。"
     "通过 groupby_column 指定时间列名；"
-    "通过 n_deciles 指定预测步数（默认 30）。"
+    "通过 n_deciles 指定预测步数（默认 30）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
-    "groupby_column (时间列名，默认自动探测)",
-    "n_deciles (预测步数，默认 30)",
+    say("groupby_column (time column name, auto-detected by default)", "groupby_column (时间列名，默认自动探测)"),
+    say("n_deciles (number of forecast steps, default 30)", "n_deciles (预测步数，默认 30)"),
 ]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
 
@@ -647,30 +655,30 @@ def _build_metrics_df(series: pd.Series, params: dict, backtest: Optional[dict] 
         n_cp_active = 0
 
     rows = [
-        {"metric": "模型类型",          "value": "Prophet 加法分解"},
-        {"metric": "趋势类型",          "value": "分段线性（岭回归/L2 变点检测）"},
-        {"metric": "日内季节性（24h）",  "value": f"傅里叶阶数 {params['daily_order']}"  if params["use_daily"]  else "未启用"},
-        {"metric": "周度季节性（7d）",   "value": f"傅里叶阶数 {params['weekly_order']}" if params["use_weekly"] else "未启用"},
-        {"metric": "年度季节性（365d）", "value": f"傅里叶阶数 {params['yearly_order']}" if params["use_yearly"] else "未启用"},
-        {"metric": "活跃变点数",         "value": n_cp_active},
-        {"metric": "训练样本数",         "value": len(series)},
-        {"metric": "R²（训练集）",       "value": round(train_m["r2"], 4)},
-        {"metric": "MAE（训练集）",      "value": round(train_m["mae"], 4)},
-        {"metric": "RMSE（训练集）",     "value": round(train_m["rmse"], 4)},
-        {"metric": "MAPE %（训练集）",   "value": round(train_m["mape"], 2) if not np.isnan(train_m["mape"]) else "N/A"},
-        {"metric": "WAPE %（训练集）",   "value": round(train_m["wape"], 2) if not np.isnan(train_m["wape"]) else "N/A"},
-        {"metric": "sMAPE %（训练集）",  "value": round(train_m["smape"], 2) if not np.isnan(train_m["smape"]) else "N/A"},
+        {"metric": say("Model type", "模型类型"),          "value": say("Prophet additive decomposition", "Prophet 加法分解")},
+        {"metric": say("Trend type", "趋势类型"),          "value": say("Piecewise linear (ridge/L2 changepoint detection)", "分段线性（岭回归/L2 变点检测）")},
+        {"metric": say("Intraday seasonality (24h)", "日内季节性（24h）"),  "value": say(f"Fourier order {params['daily_order']}", f"傅里叶阶数 {params['daily_order']}")  if params["use_daily"]  else say("Disabled", "未启用")},
+        {"metric": say("Weekly seasonality (7d)", "周度季节性（7d）"),   "value": say(f"Fourier order {params['weekly_order']}", f"傅里叶阶数 {params['weekly_order']}") if params["use_weekly"] else say("Disabled", "未启用")},
+        {"metric": say("Yearly seasonality (365d)", "年度季节性（365d）"), "value": say(f"Fourier order {params['yearly_order']}", f"傅里叶阶数 {params['yearly_order']}") if params["use_yearly"] else say("Disabled", "未启用")},
+        {"metric": say("Active changepoints", "活跃变点数"),         "value": n_cp_active},
+        {"metric": say("Training samples", "训练样本数"),         "value": len(series)},
+        {"metric": say("R² (train)", "R²（训练集）"),       "value": round(train_m["r2"], 4)},
+        {"metric": say("MAE (train)", "MAE（训练集）"),      "value": round(train_m["mae"], 4)},
+        {"metric": say("RMSE (train)", "RMSE（训练集）"),     "value": round(train_m["rmse"], 4)},
+        {"metric": say("MAPE % (train)", "MAPE %（训练集）"),   "value": round(train_m["mape"], 2) if not np.isnan(train_m["mape"]) else "N/A"},
+        {"metric": say("WAPE % (train)", "WAPE %（训练集）"),   "value": round(train_m["wape"], 2) if not np.isnan(train_m["wape"]) else "N/A"},
+        {"metric": say("sMAPE % (train)", "sMAPE %（训练集）"),  "value": round(train_m["smape"], 2) if not np.isnan(train_m["smape"]) else "N/A"},
     ]
 
     if backtest and backtest.get("ok", False):
         rows += [
-            {"metric": "回测折数",          "value": backtest["folds"]},
-            {"metric": "R²（回测）",        "value": round(backtest["val_r2"], 4) if np.isfinite(backtest["val_r2"]) else "N/A"},
-            {"metric": "MAE（回测）",       "value": round(backtest["val_mae"], 4) if np.isfinite(backtest["val_mae"]) else "N/A"},
-            {"metric": "RMSE（回测）",      "value": round(backtest["val_rmse"], 4) if np.isfinite(backtest["val_rmse"]) else "N/A"},
-            {"metric": "MAPE %（回测）",    "value": round(backtest["val_mape"], 2) if np.isfinite(backtest["val_mape"]) else "N/A"},
-            {"metric": "WAPE %（回测）",    "value": round(backtest["val_wape"], 2) if np.isfinite(backtest["val_wape"]) else "N/A"},
-            {"metric": "sMAPE %（回测）",   "value": round(backtest["val_smape"], 2) if np.isfinite(backtest["val_smape"]) else "N/A"},
+            {"metric": say("Backtest folds", "回测折数"),          "value": backtest["folds"]},
+            {"metric": say("R² (backtest)", "R²（回测）"),        "value": round(backtest["val_r2"], 4) if np.isfinite(backtest["val_r2"]) else "N/A"},
+            {"metric": say("MAE (backtest)", "MAE（回测）"),       "value": round(backtest["val_mae"], 4) if np.isfinite(backtest["val_mae"]) else "N/A"},
+            {"metric": say("RMSE (backtest)", "RMSE（回测）"),      "value": round(backtest["val_rmse"], 4) if np.isfinite(backtest["val_rmse"]) else "N/A"},
+            {"metric": say("MAPE % (backtest)", "MAPE %（回测）"),    "value": round(backtest["val_mape"], 2) if np.isfinite(backtest["val_mape"]) else "N/A"},
+            {"metric": say("WAPE % (backtest)", "WAPE %（回测）"),    "value": round(backtest["val_wape"], 2) if np.isfinite(backtest["val_wape"]) else "N/A"},
+            {"metric": say("sMAPE % (backtest)", "sMAPE %（回测）"),   "value": round(backtest["val_smape"], 2) if np.isfinite(backtest["val_smape"]) else "N/A"},
         ]
 
     return pd.DataFrame(rows)
@@ -684,26 +692,26 @@ def _build_md(target_col, time_col, steps, series, params, metrics_df, result_df
     forecast_rows = result_df[result_df["segment"] == "forecast"].head(10)
 
     L = [
-        f"## Prophet 风格时间序列预测 — `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        "| 模型类型 | Prophet 加法分解（趋势 + 季节性） |",
-        f"| 时间列 | `{time_col or '（行序号）'}` |",
-        f"| 训练样本数 | {len(series)} |",
-        f"| 预测步数 | {steps} |",
-        f"| 日内季节性（24h） | {'✓ 启用（N=' + str(params['daily_order'])  + '）' if params['use_daily']  else '未启用'} |",
-        f"| 周度季节性（7d）  | {'✓ 启用（N=' + str(params['weekly_order']) + '）' if params['use_weekly'] else '未启用'} |",
-        f"| 年度季节性（365d）| {'✓ 启用（N=' + str(params['yearly_order']) + '）' if params['use_yearly'] else '未启用'} |",
+        say(f"## Prophet-style time series forecast — `{target_col}`\n", f"## Prophet 风格时间序列预测 — `{target_col}`\n"),
+        say("### Model overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say("| Model type | Prophet additive decomposition (trend + seasonality) |", "| 模型类型 | Prophet 加法分解（趋势 + 季节性） |"),
+        say(f"| Time column | `{time_col or '(row index)'}` |", f"| 时间列 | `{time_col or '（行序号）'}` |"),
+        say(f"| Training samples | {len(series)} |", f"| 训练样本数 | {len(series)} |"),
+        say(f"| Forecast steps | {steps} |", f"| 预测步数 | {steps} |"),
+        say(f"| Intraday seasonality (24h) | {'✓ Enabled (N=' + str(params['daily_order'])  + ')' if params['use_daily']  else 'Disabled'} |", f"| 日内季节性（24h） | {'✓ 启用（N=' + str(params['daily_order'])  + '）' if params['use_daily']  else '未启用'} |"),
+        say(f"| Weekly seasonality (7d)  | {'✓ Enabled (N=' + str(params['weekly_order']) + ')' if params['use_weekly'] else 'Disabled'} |", f"| 周度季节性（7d）  | {'✓ 启用（N=' + str(params['weekly_order']) + '）' if params['use_weekly'] else '未启用'} |"),
+        say(f"| Yearly seasonality (365d)| {'✓ Enabled (N=' + str(params['yearly_order']) + ')' if params['use_yearly'] else 'Disabled'} |", f"| 年度季节性（365d）| {'✓ 启用（N=' + str(params['yearly_order']) + '）' if params['use_yearly'] else '未启用'} |"),
         "",
-        "### 模型评估",
-        "| 指标 | 值 |", "|------|-----|",
+        say("### Model evaluation", "### 模型评估"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
     ]
     for _, row in metrics_df.iterrows():
         L.append(f"| {row['metric']} | {row['value']} |")
     L.append("")
 
-    L += ["### 预测摘要（未来数据点）",
-          "| 时间点 | 预测值 | 95% 置信区间 |",
+    L += [say("### Forecast summary (future points)", "### 预测摘要（未来数据点）"),
+          say("| Time | Forecast | 95% CI |", "| 时间点 | 预测值 | 95% 置信区间 |"),
           "|--------|-------:|-------------|"]
     for _, row in forecast_rows.iterrows():
         lo = row["lower_ci"] if not pd.isna(row["lower_ci"]) else "—"
@@ -717,7 +725,7 @@ def _build_md(target_col, time_col, steps, series, params, metrics_df, result_df
     last_actual   = float(series.iloc[-1])
     last_pred_row = result_df[result_df["segment"] == "forecast"].iloc[-1]
     last_pred     = float(last_pred_row["y_pred"])
-    direction     = "上升" if last_pred > last_actual else "下降"
+    direction     = say("up", "上升") if last_pred > last_actual else say("down", "下降")
     chg_pct       = abs(last_pred - last_actual) / abs(last_actual) * 100 if last_actual != 0 else 0
 
     if len(params["deltas"]) > 0:
@@ -727,24 +735,27 @@ def _build_md(target_col, time_col, steps, series, params, metrics_df, result_df
         n_cp_active = 0
 
     L += [
-        "### 核心洞察",
-        f"- **趋势方向**：预测期末值（{last_pred:.4f}）"
-        f"较历史末值（{last_actual:.4f}）{direction}，幅度约 **{chg_pct:.1f}%**。",
-        f"- **变点检测**：历史数据中识别出 {n_cp_active} 个显著趋势变点。",
+        say("### Key insights", "### 核心洞察"),
+        say(f"- **Trend direction**: the end-of-forecast value ({last_pred:.4f}) is "
+            f"{direction} vs. the last historical value ({last_actual:.4f}), by about **{chg_pct:.1f}%**.",
+            f"- **趋势方向**：预测期末值（{last_pred:.4f}）"
+            f"较历史末值（{last_actual:.4f}）{direction}，幅度约 **{chg_pct:.1f}%**。"),
+        say(f"- **Changepoint detection**: {n_cp_active} significant trend changepoints identified in the historical data.",
+            f"- **变点检测**：历史数据中识别出 {n_cp_active} 个显著趋势变点。"),
     ]
     if params["use_daily"]:
-        L.append(f"- **日内季节性**：振幅约 {float(np.ptp(params['daily_hat'])):.4f}（峰谷差），周期 24 小时。")
+        L.append(say(f"- **Intraday seasonality**: amplitude about {float(np.ptp(params['daily_hat'])):.4f} (peak-to-trough), period 24 hours.", f"- **日内季节性**：振幅约 {float(np.ptp(params['daily_hat'])):.4f}（峰谷差），周期 24 小时。"))
     if params["use_weekly"]:
-        L.append(f"- **周度季节性**：振幅约 {float(np.ptp(params['weekly_hat'])):.4f}（峰谷差），周期 7 天。")
+        L.append(say(f"- **Weekly seasonality**: amplitude about {float(np.ptp(params['weekly_hat'])):.4f} (peak-to-trough), period 7 days.", f"- **周度季节性**：振幅约 {float(np.ptp(params['weekly_hat'])):.4f}（峰谷差），周期 7 天。"))
     if params["use_yearly"]:
-        L.append(f"- **年度季节性**：振幅约 {float(np.ptp(params['yearly_hat'])):.4f}（峰谷差），周期 365 天。")
+        L.append(say(f"- **Yearly seasonality**: amplitude about {float(np.ptp(params['yearly_hat'])):.4f} (peak-to-trough), period 365 days.", f"- **年度季节性**：振幅约 {float(np.ptp(params['yearly_hat'])):.4f}（峰谷差），周期 365 天。"))
 
     L += [
         "",
-        "> **图表建议**",
-        "> - Line_Chart(analysis_result)：x=ds，y=y_pred + y_actual，按 segment 分组着色",
-        "> - Line_Chart(analysis_breakdown)：x=ds，y=trend + yearly + weekly + daily — 成分分解可视化",
-        "> - analysis_metrics 表直接展示 R²/MAE/RMSE",
+        say("> **Chart suggestions**", "> **图表建议**"),
+        say("> - Line_Chart(analysis_result): x=ds, y=y_pred + y_actual, colored by segment", "> - Line_Chart(analysis_result)：x=ds，y=y_pred + y_actual，按 segment 分组着色"),
+        say("> - Line_Chart(analysis_breakdown): x=ds, y=trend + yearly + weekly + daily — component decomposition view", "> - Line_Chart(analysis_breakdown)：x=ds，y=trend + yearly + weekly + daily — 成分分解可视化"),
+        say("> - The analysis_metrics table shows R²/MAE/RMSE directly", "> - analysis_metrics 表直接展示 R²/MAE/RMSE"),
     ]
     return "\n".join(L)
 
@@ -769,11 +780,11 @@ def run(
     n_deciles      : 预测步数(默认 30)
     """
     progress = progress_callback or (lambda _pct, _message="": None)
-    progress(5, "正在校验 Prophet 输入")
+    progress(5, say("Validating Prophet inputs", "正在校验 Prophet 输入"))
     if target_column not in df.columns:
-        raise ValueError(f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}")
+        raise ValueError(say(f"Target column '{target_column}' does not exist. Available columns: {', '.join(df.columns[:20])}", f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}"))
     if not pd.api.types.is_numeric_dtype(df[target_column]):
-        raise ValueError(f"目标列 '{target_column}' 不是数值类型,Prophet 预测要求连续数值目标变量。")
+        raise ValueError(say(f"Target column '{target_column}' is not numeric; Prophet forecasting requires a continuous numeric target variable.", f"目标列 '{target_column}' 不是数值类型,Prophet 预测要求连续数值目标变量。"))
 
     try:
         steps = int(n_deciles)
@@ -782,12 +793,12 @@ def run(
     if steps <= 0:
         steps = _DEFAULT_STEPS
 
-    progress(18, "正在准备时间序列")
+    progress(18, say("Preparing time series", "正在准备时间序列"))
     time_col = _detect_time_col(df, groupby_column or "")
     series, day_scale = _prepare_series(df, time_col, target_column)
 
     if len(series) < 10:
-        raise ValueError(f"有效数据点不足({len(series)} 个),Prophet 至少需要 10 个数据点。")
+        raise ValueError(say(f"Not enough valid data points ({len(series)}); Prophet needs at least 10.", f"有效数据点不足({len(series)} 个),Prophet 至少需要 10 个数据点。"))
 
     # ─────────────────────────────────────────────────────────────────────
     #  数据量保护:超过阈值时降采样到日级别
@@ -800,7 +811,7 @@ def run(
     if time_col and isinstance(series.index, pd.DatetimeIndex) and len(series) > _RESAMPLE_THRESHOLD:
         # 候选：4小时、8小时、1天
         cand = ["4H", "8H", "D"]
-        progress(30, "正在评估降采样频率")
+        progress(30, say("Evaluating resampling frequency", "正在评估降采样频率"))
         new_series, selected_freq = _select_best_resample(series, cand, steps)
         if selected_freq != "original":
             series = new_series
@@ -818,27 +829,27 @@ def run(
 
     _, t_max_days_tmp = _to_t(series.index)
     yearly_order, weekly_order, daily_order = _auto_fourier_orders(t_max_days_tmp, day_scale)
-    progress(48, "正在拟合趋势和季节性")
+    progress(48, say("Fitting trend and seasonality", "正在拟合趋势和季节性"))
     params = _fit_prophet(series, day_scale, yearly_order, weekly_order, daily_order)
 
     # 构建结果表
-    progress(72, "正在生成 Prophet 预测")
+    progress(72, say("Generating Prophet forecast", "正在生成 Prophet 预测"))
     result_df, breakdown_df = _build_result_df(series, params, steps, day_scale, clip_negative)
-    progress(84, "正在执行滚动回测")
+    progress(84, say("Running rolling backtest", "正在执行滚动回测"))
     bt = _rolling_backtest(series, day_scale, n_folds=3, horizon=min(steps, max(7, len(series) // 12)))
     metrics_df = _build_metrics_df(series, params, backtest=bt)
 
     # 在 metrics 表里记录降采样信息
     if resampled:
         extra = pd.DataFrame([{
-            "metric": "数据降采样",
-            "value":  f"原 {original_len} 点 → '{selected_freq}' ({_RESAMPLE_AGG}+插值) → {len(series)} 点",
+            "metric": say("Data resampling", "数据降采样"),
+            "value":  say(f"{original_len} points → '{selected_freq}' ({_RESAMPLE_AGG}+interpolation) → {len(series)} points", f"原 {original_len} 点 → '{selected_freq}' ({_RESAMPLE_AGG}+插值) → {len(series)} 点"),
         }])
         metrics_df = pd.concat([extra, metrics_df], ignore_index=True)
     if clip_negative:
         extra2 = pd.DataFrame([{
-            "metric": "预测下限裁剪",
-            "value":  "已启用(训练数据全部非负,预测值裁剪到 ≥0)",
+            "metric": say("Forecast lower-bound clipping", "预测下限裁剪"),
+            "value":  say("Enabled (all training data non-negative; forecasts clipped to ≥0)", "已启用(训练数据全部非负,预测值裁剪到 ≥0)"),
         }])
         metrics_df = pd.concat([metrics_df, extra2], ignore_index=True)
 
@@ -852,5 +863,5 @@ def run(
         result_df  = result_df,
     )
 
-    progress(98, "Prophet 分析计算完成")
+    progress(98, say("Prophet analysis complete", "Prophet 分析计算完成"))
     return result_df, breakdown_df, metrics_df, markdown

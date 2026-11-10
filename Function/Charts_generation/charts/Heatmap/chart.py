@@ -21,6 +21,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,15 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "row列 + col列 + value列（三列长格式）或 宽格式(行标签 + 多个数值列)"
-_DESC = "用颜色深浅表示数值大小，适合展示矩阵数据和相关性。支持宽格式数据自动转换。"
+def _data_fmt() -> str:
+    return say("row column + col column + value column (three-column long format), or wide format (row label + multiple numeric columns)", "row列 + col列 + value列（三列长格式）或 宽格式(行标签 + 多个数值列)")
+
+
+def _desc() -> str:
+    return say(
+        "Uses color intensity to represent values; suited to matrix data and correlations. Wide-format data is converted automatically.",
+        "用颜色深浅表示数值大小，适合展示矩阵数据和相关性。支持宽格式数据自动转换。",
+    )
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -218,7 +226,7 @@ def generate(
     row: str = "row",
     col: str = "col",
     value: str = "value",
-    title: str = "热力图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -231,9 +239,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     # ``generate`` is also used directly in tests and legacy call sites. Keep
     # its column handling consistent with the dispatcher, which stringifies
@@ -256,7 +264,7 @@ def generate(
     col_col = col_col if col_col is not None else (mapping.get("x") if mapping.get("x") is not None else col)
     val_col = mapping.get("value")
     val_col = val_col if val_col is not None else (mapping.get("z") if mapping.get("z") is not None else value)
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Heatmap", "热力图"))
 
     # 配色方案：优先用 options.color_scheme，作为 plotly colorscale
     _scheme = get_color_scheme(options.get("color_scheme", "mckinsey"))
@@ -279,12 +287,15 @@ def generate(
         z_data, y_labels, x_labels = _convert_wide_to_matrix(df, id_col)
 
         if not x_labels:
-            return ChartResult(warnings=["宽格式热力图没有可用的数值列"])
+            return ChartResult(warnings=[say("Wide-format heatmap has no usable numeric columns", "宽格式热力图没有可用的数值列")])
 
-        y_label = options.get("y_title") or (id_col or "行")
-        x_label = options.get("x_title") or "列"
+        y_label = options.get("y_title") or (id_col or say("Row", "行"))
+        x_label = options.get("x_title") or say("Column", "列")
         warnings.append(
-            f"自动转换宽格式数据为矩阵：{y_label} (行) × {x_label} (列)"
+            say(
+                f"Wide-format data converted to matrix automatically: {y_label} (rows) × {x_label} (columns)",
+                f"自动转换宽格式数据为矩阵：{y_label} (行) × {x_label} (列)",
+            )
         )
         
         # 创建热力图
@@ -296,7 +307,7 @@ def generate(
             text=z_data.tolist(),
             texttemplate="%{text:.2f}",
             textfont={"size": 10},
-            hovertemplate=f"{y_label}: %{{y}}<br>{x_label}: %{{x}}<br>值: %{{z:.3g}}<extra></extra>"
+            hovertemplate=say(f"{y_label}: %{{y}}<br>{x_label}: %{{x}}<br>Value: %{{z:.3g}}<extra></extra>", f"{y_label}: %{{y}}<br>{x_label}: %{{x}}<br>值: %{{z:.3g}}<extra></extra>")
         ))
         
         fig.update_layout(
@@ -331,14 +342,14 @@ def generate(
 
         for role, col_ in [("row", _row), ("col", _col), ("value", _val)]:
             if col_ is None or col_ not in df.columns:
-                warnings.append(f"找不到必填字段 [{role}]")
+                warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
         if _row not in df.columns or _col not in df.columns or _val not in df.columns:
             return ChartResult(warnings=warnings)
 
         if len({_row, _col, _val}) != 3:
             return ChartResult(warnings=[
-                "热力图的行、列和值字段必须是三个不同的列"
+                say("The heatmap row, column and value fields must be three different columns", "热力图的行、列和值字段必须是三个不同的列")
             ])
 
         matrix_df = df[[_row, _col, _val]].copy()
@@ -347,22 +358,26 @@ def generate(
             df[_val].notna().sum() - matrix_df[_val].notna().sum()
         )
         if invalid_values:
-            warnings.append(f"已忽略 {invalid_values} 个无法转换为数值的值")
+            warnings.append(say(f"Ignored {invalid_values} values that could not be converted to numbers", f"已忽略 {invalid_values} 个无法转换为数值的值"))
         matrix_df = matrix_df.dropna(subset=[_val])
         if matrix_df.empty:
-            return ChartResult(warnings=warnings + ["value 字段不含可用数值"])
+            return ChartResult(warnings=warnings + [say("The value field contains no usable numbers", "value 字段不含可用数值")])
 
         duplicate_rows = int(matrix_df.duplicated([_row, _col], keep=False).sum())
         aggfunc = str(options.get("aggfunc") or "sum").lower()
         valid_aggfuncs = {"sum", "mean", "median", "min", "max", "first", "last", "count"}
         if aggfunc not in valid_aggfuncs:
             return ChartResult(warnings=[
-                "options.aggfunc 必须是 sum、mean、median、min、max、first、last 或 count"
+                say("options.aggfunc must be one of sum, mean, median, min, max, first, last or count", "options.aggfunc 必须是 sum、mean、median、min、max、first、last 或 count")
             ])
         if duplicate_rows:
             warnings.append(
-                f"检测到 {duplicate_rows} 条重复的行/列组合，已按 {aggfunc} 聚合；"
-                "可通过 options.aggfunc 指定聚合方式"
+                say(
+                    f"Detected {duplicate_rows} duplicate row/column combinations; aggregated with {aggfunc}; "
+                    "use options.aggfunc to choose the aggregation",
+                    f"检测到 {duplicate_rows} 条重复的行/列组合，已按 {aggfunc} 聚合；"
+                    "可通过 options.aggfunc 指定聚合方式",
+                )
             )
 
         # 转换为透视表（矩阵）。不填充缺失组合，以免把“未观测”伪装成零值。
@@ -371,7 +386,7 @@ def generate(
             aggfunc=aggfunc, observed=True, dropna=False
         )
         if pivot_df.empty:
-            return ChartResult(warnings=warnings + ["无法从输入生成热力图矩阵"])
+            return ChartResult(warnings=warnings + [say("Could not build a heatmap matrix from the input", "无法从输入生成热力图矩阵")])
         pivot_df.columns = [str(c) for c in pivot_df.columns]
         pivot_df.index   = [str(i) for i in pivot_df.index]
 
@@ -390,7 +405,7 @@ def generate(
         _texttemplate = "%{text:.0f}" if _all_int else "%{text:.2f}"
         show_text = len(y_vals) * len(x_vals) <= 225
         if not show_text:
-            warnings.append("矩阵超过 225 个单元格，已隐藏数值标签；请通过悬停查看数值")
+            warnings.append(say("Matrix exceeds 225 cells; value labels hidden — hover to see values", "矩阵超过 225 个单元格，已隐藏数值标签；请通过悬停查看数值"))
 
         heatmap_kwargs = dict(
             z=z_vals,
@@ -398,7 +413,7 @@ def generate(
             x=x_vals,
             colorscale=_palette,
             textfont={"size": 11},
-            hovertemplate=f"{y_label}: %{{y}}<br>{x_label}: %{{x}}<br>值: %{{z:.3g}}<extra></extra>"
+            hovertemplate=say(f"{y_label}: %{{y}}<br>{x_label}: %{{x}}<br>Value: %{{z:.3g}}<extra></extra>", f"{y_label}: %{{y}}<br>{x_label}: %{{x}}<br>值: %{{z:.3g}}<extra></extra>")
         )
         if show_text:
             heatmap_kwargs.update(text=z_vals, texttemplate=_texttemplate)
@@ -422,7 +437,7 @@ def generate(
         )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "heatmap", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "heatmap", "plotly", _data_fmt(), _desc(), chart_html)
 
 
     meta = {

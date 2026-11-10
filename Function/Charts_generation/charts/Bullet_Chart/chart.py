@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -36,8 +37,13 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "label列 + actual列 + target列 + [low/mid/high列]"
-_DESC = "用实际值与目标值对比，背景范围表示绩效等级，适合KPI/绩效追踪。"
+
+def _data_fmt() -> str:
+    return say("label column + actual column + target column + [low/mid/high columns]", "label列 + actual列 + target列 + [low/mid/high列]")
+
+
+def _desc() -> str:
+    return say("Compares actual values against targets; background bands show performance levels. Suited to KPI / performance tracking.", "用实际值与目标值对比，背景范围表示绩效等级，适合KPI/绩效追踪。")
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -97,8 +103,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -107,22 +113,22 @@ def _validate_bullet_data(df: pd.DataFrame, label_col: str, actual_col: str, tar
     warnings: List[str] = []
 
     if df.empty:
-        warnings.append("数据为空")
+        warnings.append(say("Data is empty", "数据为空"))
         return warnings
 
     # 检查空值
     empty_rows = df[df[[label_col, actual_col, target_col]].isnull().any(axis=1)]
     if len(empty_rows) > 0:
-        warnings.append(f"检测到 {len(empty_rows)} 行空值，已过滤")
+        warnings.append(say(f"Found {len(empty_rows)} rows with null values; filtered out", f"检测到 {len(empty_rows)} 行空值，已过滤"))
 
     # 检查负值
     invalid_actual = df[df[actual_col] < 0]
     if len(invalid_actual) > 0:
-        warnings.append(f"检测到 {len(invalid_actual)} 行负值实际值，已过滤")
+        warnings.append(say(f"Found {len(invalid_actual)} rows with negative actual values; filtered out", f"检测到 {len(invalid_actual)} 行负值实际值，已过滤"))
 
     invalid_target = df[df[target_col] < 0]
     if len(invalid_target) > 0:
-        warnings.append(f"检测到 {len(invalid_target)} 行负值目标值，已过滤")
+        warnings.append(say(f"Found {len(invalid_target)} rows with negative target values; filtered out", f"检测到 {len(invalid_target)} 行负值目标值，已过滤"))
 
     return warnings
 
@@ -139,7 +145,7 @@ def generate(
     low: Optional[str] = None,
     mid: Optional[str] = None,
     high: Optional[str] = None,
-    title: str = "靶心图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings: List[str] = []
@@ -153,12 +159,12 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"], meta={"error_stage": "read_excel"})
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")], meta={"error_stage": "read_excel"})
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"], meta={"error_stage": "input"})
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")], meta={"error_stage": "input"})
 
     if not isinstance(df, pd.DataFrame) or df.empty:
-        return ChartResult(warnings=["输入数据为空或格式错误"], meta={"error_stage": "input"})
+        return ChartResult(warnings=[say("Input data is empty or malformed", "输入数据为空或格式错误")], meta={"error_stage": "input"})
 
     # 2) 参数优先级：mapping > 函数参数默认值
     # 注意 chart_selector 声明可选角色为 low/medium/high，而旧版模块读 "mid"。
@@ -175,7 +181,7 @@ def generate(
     mid_hint = mid_hint if mid_hint is not None else (mapping.get("mid") if mapping.get("mid") is not None else (mapping.get("middle") if mapping.get("middle") is not None else mid))
     high_hint = mapping.get("high")
     high_hint = high_hint if high_hint is not None else high
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Bullet Chart", "靶心图"))
 
     # 3) 自动识别列
     _lbl = _auto_col(df, lbl_hint, "label", "name", "category", "指标", "名称", "类目")
@@ -199,7 +205,7 @@ def generate(
     for role, col in [("label", _lbl), ("actual", _act), ("target", _tgt)]:
         if col is None or col not in df.columns:
             required_missing.append(role)
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if required_missing:
         return ChartResult(
@@ -240,7 +246,7 @@ def generate(
 
     if d.empty:
         return ChartResult(
-            warnings=warnings + ["处理后无有效数据"],
+            warnings=warnings + [say("No valid data after processing", "处理后无有效数据")],
             meta={
                 "error_stage": "clean_data",
                 "detected_mapping": detected_mapping,
@@ -265,9 +271,9 @@ def generate(
     fig = go.Figure()
 
     # 动态区间标签：根据输入数据标签改变
-    low_label = str(mapping.get("low") or _low or "及格")
-    mid_label = str(mapping.get("mid") or _mid or "良好")
-    high_label = str(mapping.get("high") or _high or "优秀")
+    low_label = str(mapping.get("low") or _low or say("Pass", "及格"))
+    mid_label = str(mapping.get("mid") or _mid or say("Good", "良好"))
+    high_label = str(mapping.get("high") or _high or say("Excellent", "优秀"))
 
     # 背景范围 low -> mid -> high
     for idx, (_, row) in enumerate(d.iterrows()):
@@ -282,7 +288,7 @@ def generate(
                 y=[lbl], x=[low_val], orientation='h',
                 marker=dict(color=_low_color),
                 name=low_label, showlegend=(idx == 0),
-                hovertemplate=f'<b>{lbl}</b><br>{low_label}区间: 0 - {low_val:.2f}<extra></extra>'
+                hovertemplate=f'<b>{lbl}</b><br>' + say(f"{low_label} range: 0 - {low_val:.2f}", f"{low_label}区间: 0 - {low_val:.2f}") + '<extra></extra>'
             ))
 
         if low_val is not None and mid_val is not None and mid_val > low_val:
@@ -290,7 +296,7 @@ def generate(
                 y=[lbl], x=[mid_val - low_val], orientation='h', base=low_val,
                 marker=dict(color=_mid_color),
                 name=mid_label, showlegend=(idx == 0),
-                hovertemplate=f'<b>{lbl}</b><br>{mid_label}区间: {low_val:.2f} - {mid_val:.2f}<extra></extra>'
+                hovertemplate=f'<b>{lbl}</b><br>' + say(f"{mid_label} range: {low_val:.2f} - {mid_val:.2f}", f"{mid_label}区间: {low_val:.2f} - {mid_val:.2f}") + '<extra></extra>'
             ))
 
         if mid_val is not None and high_val is not None and high_val > mid_val:
@@ -298,7 +304,7 @@ def generate(
                 y=[lbl], x=[high_val - mid_val], orientation='h', base=mid_val,
                 marker=dict(color=_high_color),
                 name=high_label, showlegend=(idx == 0),
-                hovertemplate=f'<b>{lbl}</b><br>{high_label}区间: {mid_val:.2f} - {high_val:.2f}<extra></extra>'
+                hovertemplate=f'<b>{lbl}</b><br>' + say(f"{high_label} range: {mid_val:.2f} - {high_val:.2f}", f"{high_label}区间: {mid_val:.2f} - {high_val:.2f}") + '<extra></extra>'
             ))
 
     # 实际值
@@ -307,10 +313,10 @@ def generate(
         x=d[_act],
         orientation='h',
         marker=dict(color=_actual_color),
-        name='实际值',
+        name=say('Actual', '实际值'),
         text=d[_act].round(1),
         textposition='inside',
-        hovertemplate='<b>%{y}</b><br>实际: %{x:.2f}<extra></extra>'
+        hovertemplate='<b>%{y}</b><br>' + say('Actual', '实际') + ': %{x:.2f}<extra></extra>'
     ))
 
     # 目标值
@@ -319,15 +325,15 @@ def generate(
         x=d[_tgt],
         mode='markers',
         marker=dict(symbol='line-ns', size=22, color=_target_color, line=dict(width=3)),
-        name='目标值',
-        hovertemplate='<b>%{y}</b><br>目标: %{x:.2f}<extra></extra>'
+        name=say('Target', '目标值'),
+        hovertemplate='<b>%{y}</b><br>' + say('Target', '目标') + ': %{x:.2f}<extra></extra>'
     ))
 
     fig.update_layout(
         barmode='overlay',
         title=title,
-        xaxis_title='数值',
-        yaxis_title='指标',
+        xaxis_title=say('Value', '数值'),
+        yaxis_title=say('Metric', '指标'),
         height=max(300, len(d) * 50),
         margin=dict(l=150, r=40, t=60, b=40),
         showlegend=True,
@@ -339,7 +345,7 @@ def generate(
 
     # 7) 产出 html + spec
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "bullet_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "bullet_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
 
     # 返回你要的“输入数据标签”与“识别到的列”

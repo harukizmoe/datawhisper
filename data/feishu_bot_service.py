@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import requests
 
 from data.feishu_bot_store import load_config
+from compute.i18n import say
 from infrastructure.credential_store import CredentialStoreError, load_secret
 
 
@@ -16,16 +17,21 @@ _MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages"
 _CHATS_URL = "https://open.feishu.cn/open-apis/im/v1/chats"
 _REQUEST_TIMEOUT = (3.05, 10)
 _RECEIVE_ID_TYPES = {"chat_id", "open_id"}
-_CHAT_LIST_ERROR_HINTS = {
-    99991672: (
-        "飞书返回 99991672：缺少群组读取权限。请在开放平台的权限管理中申请 "
-        "“获取群组信息”（im:chat:readonly）或“获取与更新群组信息”（im:chat），然后发布新版本。"
-    ),
-    232001: "飞书返回 232001：群列表请求参数无效，请刷新后重试。",
-    232004: "飞书返回 232004：App ID 不存在，请检查应用凭据。",
-    232025: "飞书返回 232025：请在飞书开放平台为应用开启“机器人”能力，并发布新版本。",
-    232034: "飞书返回 232034：应用在当前企业未启用，请在管理后台安装或启用该应用。",
-}
+def _chat_list_error_hint(code: int) -> str | None:
+    """按错误码返回群列表接口的已知提示；运行时取值以跟随界面语言。"""
+    hints = {
+        99991672: say(
+            "Feishu returned 99991672: missing permission to read groups. In the Open Platform permission management, request "
+            "\"Obtain group information\" (im:chat:readonly) or \"Obtain and update group information\" (im:chat), then publish a new version.",
+            "飞书返回 99991672：缺少群组读取权限。请在开放平台的权限管理中申请 "
+            "“获取群组信息”（im:chat:readonly）或“获取与更新群组信息”（im:chat），然后发布新版本。",
+        ),
+        232001: say("Feishu returned 232001: invalid group list request parameters. Refresh and retry.", "飞书返回 232001：群列表请求参数无效，请刷新后重试。"),
+        232004: say("Feishu returned 232004: App ID does not exist. Check the app credentials.", "飞书返回 232004：App ID 不存在，请检查应用凭据。"),
+        232025: say("Feishu returned 232025: enable the \"Bot\" capability for the app on the Feishu Open Platform and publish a new version.", "飞书返回 232025：请在飞书开放平台为应用开启“机器人”能力，并发布新版本。"),
+        232034: say("Feishu returned 232034: the app is not enabled for this organization. Install or enable it in the admin console.", "飞书返回 232034：应用在当前企业未启用，请在管理后台安装或启用该应用。"),
+    }
+    return hints.get(code)
 
 
 class FeishuBotError(RuntimeError):
@@ -68,21 +74,21 @@ class FeishuBotStatus:
 
 def validate_app_id(value: object) -> str:
     if not isinstance(value, str):
-        raise ValueError("App ID 必须是文本")
+        raise ValueError(say("App ID must be text", "App ID 必须是文本"))
     app_id = value.strip()
     if not app_id or len(app_id) > 128 or any(char.isspace() for char in app_id):
-        raise ValueError("请填写有效的飞书 App ID")
+        raise ValueError(say("Please enter a valid Feishu App ID", "请填写有效的飞书 App ID"))
     return app_id
 
 
 def validate_receive_target(receive_id_type: object, receive_id: object) -> tuple[str, str]:
     if receive_id_type not in _RECEIVE_ID_TYPES:
-        raise ValueError("接收对象类型仅支持群聊 chat_id 或用户 open_id")
+        raise ValueError(say("The recipient type only supports group chat_id or user open_id", "接收对象类型仅支持群聊 chat_id 或用户 open_id"))
     if not isinstance(receive_id, str):
-        raise ValueError("接收对象 ID 必须是文本")
+        raise ValueError(say("The recipient ID must be text", "接收对象 ID 必须是文本"))
     value = receive_id.strip()
     if not value or len(value) > 256 or any(char.isspace() for char in value):
-        raise ValueError("请填写有效的目标群 chat_id 或用户 open_id")
+        raise ValueError(say("Please enter a valid target group chat_id or user open_id", "请填写有效的目标群 chat_id 或用户 open_id"))
     return str(receive_id_type), value
 
 
@@ -140,7 +146,7 @@ def _configured_application() -> tuple[str, str, str, str]:
     try:
         receive_id_type, receive_id = validate_receive_target(config["receive_id_type"], config["receive_id"])
     except ValueError as exc:
-        raise FeishuBotError("请先从群列表中选择一个目标群") from exc
+        raise FeishuBotError(say("Please select a target group from the group list first", "请先从群列表中选择一个目标群")) from exc
     return app_id, app_secret, receive_id_type, receive_id
 
 
@@ -149,16 +155,16 @@ def _configured_credentials(config: dict | None = None) -> tuple[str, str]:
     try:
         app_id = validate_app_id(config["app_id"])
     except ValueError as exc:
-        raise FeishuBotError("请先保存飞书 App ID") from exc
+        raise FeishuBotError(say("Please save the Feishu App ID first", "请先保存飞书 App ID")) from exc
     env_secret = str(os.environ.get("BAA_FEISHU_APP_SECRET") or "").strip()
     if env_secret:
         return app_id, env_secret
     if not config["app_secret_ref"]:
-        raise FeishuBotError("请先保存飞书 App Secret")
+        raise FeishuBotError(say("Please save the Feishu App Secret first", "请先保存飞书 App Secret"))
     try:
         app_secret = load_secret(config["app_secret_ref"])
     except (CredentialStoreError, ValueError) as exc:
-        raise FeishuBotError(f"无法读取飞书 App Secret：{exc}") from exc
+        raise FeishuBotError(say(f"Cannot read the Feishu App Secret: {exc}", f"无法读取飞书 App Secret：{exc}")) from exc
     return app_id, app_secret
 
 
@@ -170,27 +176,27 @@ def event_verification_token() -> str:
         return env_token
     reference = config["event_verification_token_ref"]
     if not reference:
-        raise FeishuBotError("请先在飞书机器人设置中保存事件校验 Token")
+        raise FeishuBotError(say("Please save the event verification token in the Feishu bot settings first", "请先在飞书机器人设置中保存事件校验 Token"))
     try:
         return load_secret(reference)
     except (CredentialStoreError, ValueError) as exc:
-        raise FeishuBotError(f"无法读取飞书事件校验 Token：{exc}") from exc
+        raise FeishuBotError(say(f"Cannot read the Feishu event verification token: {exc}", f"无法读取飞书事件校验 Token：{exc}")) from exc
 
 
 def _tenant_access_token(app_id: str, app_secret: str) -> str:
     try:
         response = requests.post(_TOKEN_URL, json={"app_id": app_id, "app_secret": app_secret}, timeout=_REQUEST_TIMEOUT)
     except requests.RequestException as exc:
-        raise FeishuBotError("无法连接飞书开放平台，请检查网络") from exc
+        raise FeishuBotError(say("Cannot reach the Feishu Open Platform; check the network", "无法连接飞书开放平台，请检查网络")) from exc
     if not response.ok:
-        raise FeishuBotError(f"飞书凭证验证返回 HTTP {response.status_code}")
+        raise FeishuBotError(say(f"Feishu credential verification returned HTTP {response.status_code}", f"飞书凭证验证返回 HTTP {response.status_code}"))
     try:
         body = response.json()
     except ValueError as exc:
-        raise FeishuBotError("飞书凭证验证返回了无效响应") from exc
+        raise FeishuBotError(say("Feishu credential verification returned an invalid response", "飞书凭证验证返回了无效响应")) from exc
     token = body.get("tenant_access_token") if isinstance(body, dict) else ""
     if not token:
-        raise FeishuBotError("飞书未接受 App ID 或 App Secret，请检查应用状态和凭据")
+        raise FeishuBotError(say("Feishu did not accept the App ID or App Secret; check the app status and credentials", "飞书未接受 App ID 或 App Secret，请检查应用状态和凭据"))
     return str(token)
 
 
@@ -213,31 +219,32 @@ def list_joined_chats() -> list[dict[str, str]]:
                 timeout=_REQUEST_TIMEOUT,
             )
         except requests.RequestException as exc:
-            raise FeishuBotError("无法读取飞书群列表，请检查网络") from exc
+            raise FeishuBotError(say("Cannot read the Feishu group list; check the network", "无法读取飞书群列表，请检查网络")) from exc
         if not response.ok:
             try:
                 error_body = response.json()
             except ValueError:
                 error_body = {}
             code = error_body.get("code") if isinstance(error_body, dict) else None
-            if isinstance(code, int) and code in _CHAT_LIST_ERROR_HINTS:
-                raise FeishuBotError(_CHAT_LIST_ERROR_HINTS[code])
+            hint = _chat_list_error_hint(code) if isinstance(code, int) else None
+            if hint:
+                raise FeishuBotError(hint)
             if isinstance(code, int):
-                raise FeishuBotError(f"飞书群列表请求被拒绝（错误码 {code}）；请检查机器人能力、群组信息权限和应用发布状态。")
-            raise FeishuBotError(f"飞书群列表接口返回 HTTP {response.status_code}")
+                raise FeishuBotError(say(f"Feishu rejected the group list request (error code {code}); check the bot capability, group information permission and app publish status.", f"飞书群列表请求被拒绝（错误码 {code}）；请检查机器人能力、群组信息权限和应用发布状态。"))
+            raise FeishuBotError(say(f"The Feishu group list API returned HTTP {response.status_code}", f"飞书群列表接口返回 HTTP {response.status_code}"))
         try:
             body = response.json()
         except ValueError as exc:
-            raise FeishuBotError("飞书群列表返回了无效响应") from exc
+            raise FeishuBotError(say("The Feishu group list returned an invalid response", "飞书群列表返回了无效响应")) from exc
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, dict):
-            raise FeishuBotError("飞书拒绝读取群列表，请开通获取群组信息权限并发布应用")
+            raise FeishuBotError(say("Feishu refused to return the group list; grant the group information permission and publish the app", "飞书拒绝读取群列表，请开通获取群组信息权限并发布应用"))
         for item in data.get("items") or []:
             if not isinstance(item, dict):
                 continue
             chat_id = str(item.get("chat_id") or "").strip()
             if chat_id:
-                chats.append({"chat_id": chat_id, "name": str(item.get("name") or "未命名群")})
+                chats.append({"chat_id": chat_id, "name": str(item.get("name") or say("Untitled group", "未命名群"))})
         if not data.get("has_more"):
             break
         page_token = str(data.get("page_token") or "")
@@ -256,15 +263,15 @@ def _post_message(access_token: str, target_type: str, target_id: str, payload: 
             timeout=_REQUEST_TIMEOUT,
         )
     except requests.RequestException as exc:
-        raise FeishuBotError("无法发送飞书机器人消息，请检查网络") from exc
+        raise FeishuBotError(say("Cannot send the Feishu bot message; check the network", "无法发送飞书机器人消息，请检查网络")) from exc
     if not response.ok:
-        raise FeishuBotError(f"飞书机器人消息接口返回 HTTP {response.status_code}")
+        raise FeishuBotError(say(f"The Feishu bot message API returned HTTP {response.status_code}", f"飞书机器人消息接口返回 HTTP {response.status_code}"))
     try:
         body = response.json()
     except ValueError:
         body = {}
     if isinstance(body, dict) and body.get("code") not in (None, 0):
-        raise FeishuBotError("飞书拒绝了该消息，请检查机器人是否已加入目标群以及应用权限")
+        raise FeishuBotError(say("Feishu rejected the message; check that the bot has joined the target group and the app permissions", "飞书拒绝了该消息，请检查机器人是否已加入目标群以及应用权限"))
 
 
 def _resolve_target(receive_id: str | None, receive_id_type: str | None) -> tuple[str, str, str, str]:
@@ -278,7 +285,7 @@ def _resolve_target(receive_id: str | None, receive_id_type: str | None) -> tupl
             receive_id_type or "chat_id", receive_id,
         )
     except ValueError as exc:
-        raise FeishuBotError("飞书会话目标无效，请重新执行 /robot 连接") from exc
+        raise FeishuBotError(say("The Feishu conversation target is invalid; run /robot to reconnect", "飞书会话目标无效，请重新执行 /robot 连接")) from exc
     return app_id, app_secret, target_type, target_id
 
 
@@ -295,9 +302,9 @@ def send_text(
     """
     message = str(text or "").strip()
     if not message:
-        raise FeishuBotError("发送内容不能为空")
+        raise FeishuBotError(say("The message to send must not be empty", "发送内容不能为空"))
     if len(message) > 4000:
-        raise FeishuBotError("飞书机器人单条测试消息不能超过 4000 个字符")
+        raise FeishuBotError(say("A single Feishu bot test message must not exceed 4000 characters", "飞书机器人单条测试消息不能超过 4000 个字符"))
     app_id, app_secret, target_type, target_id = _resolve_target(receive_id, receive_id_type)
     access_token = _tenant_access_token(app_id, app_secret)
     _post_message(
@@ -343,7 +350,7 @@ def send_markdown(
     """
     message = str(text or "").strip()
     if not message:
-        raise FeishuBotError("发送内容不能为空")
+        raise FeishuBotError(say("The message to send must not be empty", "发送内容不能为空"))
     app_id, app_secret, target_type, target_id = _resolve_target(receive_id, receive_id_type)
     access_token = _tenant_access_token(app_id, app_secret)
     for chunk in _split_markdown(message):
@@ -365,12 +372,12 @@ def send_conversation_turn(*, chat_id: str, user_message: str, assistant_message
     """Mirror one completed Web turn in order, splitting long replies safely."""
     user = str(user_message or "").strip()
     if user:
-        send_text(f"🧑 Web 对话\n{user}", receive_id=chat_id, receive_id_type="chat_id")
+        send_text(say(f"🧑 Web conversation\n{user}", f"🧑 Web 对话\n{user}"), receive_id=chat_id, receive_id_type="chat_id")
     assistant = str(assistant_message or "").strip()
     if assistant:
         # Assistant replies are Markdown; send as cards so Feishu renders them.
-        send_markdown(f"**🤖 智析 Agent**\n{assistant}", receive_id=chat_id, receive_id_type="chat_id")
+        send_markdown(say(f"**🤖 DataWhisper Agent**\n{assistant}", f"**🤖 智析 Agent**\n{assistant}"), receive_id=chat_id, receive_id_type="chat_id")
 
 
 def send_test_message() -> None:
-    send_text("智析 Agent 已成功连接飞书应用机器人。后续分析结果将可同步至此群。")
+    send_text(say("DataWhisper Agent is now connected to the Feishu app bot. Analysis results can be synced to this chat from now on.", "智析 Agent 已成功连接飞书应用机器人。后续分析结果将可同步至此群。"))

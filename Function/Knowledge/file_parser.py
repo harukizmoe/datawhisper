@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 
 import pandas as pd
 
+from compute.i18n import say
+
 # ── Template detection ────────────────────────────────────────────────────────
 
 # Minimum number of recognised header keywords to classify a sheet as structured
@@ -151,7 +153,51 @@ def extract_text(filepath: str) -> str:
 
 # ── LLM extraction ────────────────────────────────────────────────────────────
 
-_EXTRACT_PROMPT = """你是业务知识整理助手。请从以下文本中提取所有业务指标定义、业务规则和背景知识。
+def _extract_prompt() -> str:
+    """按界面语言返回知识提取提示词；`{text}` 由调用方替换。"""
+    return say(
+"""You are a business knowledge organizing assistant. Extract all business metric definitions, business rules and background knowledge from the text below.
+
+Output strictly in the following JSON format and nothing else:
+{
+  "metrics": [
+    {
+      "table": "metrics",
+      "name": "Metric name in English or Chinese (required)",
+      "alias": "Aliases, comma separated; leave empty if none",
+      "definition": "Business definition of the metric",
+      "sql_template": "SQL template that computes the metric; leave empty if none",
+      "notes": "Calculation basis, caveats, etc."
+    }
+  ],
+  "business_rules": [
+    {
+      "table": "business_rules",
+      "rule_id": "English identifier of the rule (e.g. retention_sanity)",
+      "description": "Description of the rule",
+      "condition": "Condition under which the rule is violated (natural language)",
+      "severity": "error or warning"
+    }
+  ],
+  "context_notes": [
+    {
+      "table": "context_notes",
+      "topic": "Topic",
+      "content": "Background knowledge content",
+      "tags": "Related tags, comma separated"
+    }
+  ]
+}
+
+Rules:
+- Leave fields that cannot be extracted as empty strings; do not make anything up
+- Keep only one record per metric
+- If the text contains no knowledge of a category, return [] for that array
+
+---TEXT START---
+{text}
+---TEXT END---""",
+"""你是业务知识整理助手。请从以下文本中提取所有业务指标定义、业务规则和背景知识。
 
 严格按照以下 JSON 格式输出，不要输出任何其他内容：
 {
@@ -191,7 +237,8 @@ _EXTRACT_PROMPT = """你是业务知识整理助手。请从以下文本中提�
 
 ---文本开始---
 {text}
----文本结束---"""
+---文本结束---""",
+    )
 
 
 _CHUNK_SIZE = 12000  # chars per chunk
@@ -267,7 +314,7 @@ def _llm_call_once(
         if audit is not None:
             audit.fail(e)
         log.error("[file_parser] LLM API call failed: %s", e)
-        raise RuntimeError(f"LLM 调用失败: {e}") from e
+        raise RuntimeError(say(f"LLM call failed: {e}", f"LLM 调用失败: {e}")) from e
     if audit is not None:
         audit.succeed(locals().get("usage"))
     log.info("[file_parser] LLM response (first 300 chars): %r", raw[:300])
@@ -290,7 +337,7 @@ def extraction_prompts(text: str) -> list[str]:
             current = (current + "\n\n" + para).strip() if current else para
     if current:
         chunks.append(current.strip())
-    return [_EXTRACT_PROMPT.replace("{text}", chunk) for chunk in chunks]
+    return [_extract_prompt().replace("{text}", chunk) for chunk in chunks]
 
 
 def merge_extracted(replies: list[str]) -> list[dict]:

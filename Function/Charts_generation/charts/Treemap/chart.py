@@ -24,11 +24,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
-
-_DATA_FMT = "labels列(类别名称) + values列(数值) + 可选parents列(父级)"
-_DESC = "用矩形面积表示占比，支持多层级嵌套展示。适合展示有层级且数量较多的分类数据。"
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -165,8 +163,8 @@ body {{
 </div>
 </div>
 <div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div>
 </div>
 </body>
@@ -181,12 +179,15 @@ def generate(
     path: str = "path",
     value: str = "value",
     parents: str = None,
-    title: str = "矩形树图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
     options = options or {}
     mapping = mapping or {}
+    _data_fmt = say("labels column (category names) + values column (numbers) + optional parents column (parent level)", "labels列(类别名称) + values列(数值) + 可选parents列(父级)")
+    _desc = say("Uses rectangle area to show proportions and supports multi-level nesting. Suited to hierarchical categorical data with many categories.", "用矩形面积表示占比，支持多层级嵌套展示。适合展示有层级且数量较多的分类数据。")
+    _render_err = say("Chart rendering failed. Open the console to see the error.", "图表渲染失败，请打开控制台查看错误。")
 
     if df is None:
         if excel_path:
@@ -194,9 +195,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 调度器 _normalize_chart_mapping 把 labels→label、values→value 归一化，
     # 而 _auto_detect_mapping 对 treemap 设 labels/parents/values。
@@ -207,7 +208,7 @@ def generate(
     value_col = value_col if value_col is not None else (mapping.get("values") if mapping.get("values") is not None else value)
     parents_col = mapping.get("parents")
     parents_col = parents_col if parents_col is not None else (mapping.get("parent") if mapping.get("parent") is not None else parents)
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Treemap", "矩形树图"))
 
     color_scheme_name = options.get("color_scheme", "mckinsey")
     color_scheme = get_color_scheme(color_scheme_name)
@@ -248,32 +249,32 @@ def generate(
                 # 第一列是父级（类别少），第二列是子级（类别多）
                 _parents = text_cols[0]
                 _path = text_cols[1]
-                warnings.append(f"自动检测到层级关系：{_parents}(父级) -> {_path}(子级)")
+                warnings.append(say(f"Hierarchy detected automatically: {_parents} (parent) -> {_path} (child)", f"自动检测到层级关系：{_parents}(父级) -> {_path}(子级)"))
 
     if _path is None or _path not in df.columns:
-        warnings.append("找不到必填字段 [labels/path]")
+        warnings.append(say("Required field not found [labels/path]", "找不到必填字段 [labels/path]"))
         return ChartResult(warnings=warnings)
 
     if _value is None or _value not in df.columns:
-        warnings.append("找不到必填字段 [values/value]")
+        warnings.append(say("Required field not found [values/value]", "找不到必填字段 [values/value]"))
         return ChartResult(warnings=warnings)
 
     df = df.copy()
     df = df[df[_path].notna()].copy()
 
     if df.empty:
-        return ChartResult(warnings=["错误：labels/path 列无有效数据"])
+        return ChartResult(warnings=[say("Error: labels/path column has no valid data", "错误：labels/path 列无有效数据")])
 
     if (_value in df.columns) and (df[_value] <= 0).any():
-        warnings.append(f"警告：{_value} 列包含非正数，已过滤")
+        warnings.append(say(f"Warning: column {_value} contains non-positive values; they were filtered out", f"警告：{_value} 列包含非正数，已过滤"))
         df = df[df[_value] > 0].copy()
         if len(df) == 0:
-            return ChartResult(warnings=[f"错误：{_value} 列无有效数据（需>0）"])
+            return ChartResult(warnings=[say(f"Error: column {_value} has no valid data (must be >0)", f"错误：{_value} 列无有效数据（需>0）")])
 
     df[_value] = pd.to_numeric(df[_value], errors="coerce")
     df = df[df[_value].notna()].copy()
     if df.empty:
-        return ChartResult(warnings=[f"错误：{_value} 列无法解析为有效数值"])
+        return ChartResult(warnings=[say(f"Error: column {_value} cannot be parsed as valid numbers", f"错误：{_value} 列无法解析为有效数值")])
 
     df = df.copy()
     df[_path] = df[_path].astype(str)
@@ -339,7 +340,7 @@ def generate(
 
     # 长度保护
     if not (len(labels) == len(values) == len(parents_list)):
-        return ChartResult(warnings=["错误：labels / values / parents 长度不一致"])
+        return ChartResult(warnings=[say("Error: labels / values / parents lengths are inconsistent", "错误：labels / values / parents 长度不一致")])
 
     # 颜色扩展到数据长度
     colors = (marker_colors * (len(labels) // len(marker_colors) + 1))[:len(labels)]
@@ -392,14 +393,14 @@ def generate(
                 console.error("Treemap render error:", e);
                 var el = document.getElementById('{fig_id}');
                 if (el) {{
-                    el.innerHTML = '<div style="color:#c00;padding:12px;">图表渲染失败，请打开控制台查看错误。</div>';
+                    el.innerHTML = '<div style="color:#c00;padding:12px;">{_render_err}</div>';
                 }}
             }}
         }})();
     </script>
 </div>"""
 
-    html = _build_html(title, "treemap", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "treemap", "plotly", _data_fmt, _desc, chart_html)
 
     meta = {
         "chart_id": "treemap",

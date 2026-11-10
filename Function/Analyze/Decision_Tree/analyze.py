@@ -23,16 +23,25 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
 
+from compute.i18n import say
+
 
 # ── 模块元数据（供 registry 读取）─────────────────────────────────────────
 
 ANALYSIS_ID   = "Decision_Tree"
-ANALYSIS_NAME = "决策树分析（Decision Tree）"
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("Decision Tree Analysis", "决策树分析（Decision Tree）")
 ANALYSIS_DESC = (
-    "使用 ID3 / C4.5 / CART 决策树对数据进行分类分析。"
-    "输出特征重要性、训练/测试准确率、混淆矩阵及 ROC 曲线（含 AUC）。"
-    "通过 groupby_column 参数指定算法（ID3/C4.5/CART，默认 C4.5），"
-    "通过 n_deciles 参数指定最大树深（0 = 不限，默认不限）。"
+    say(
+        "Classifies data with an ID3 / C4.5 / CART decision tree. "
+        "Outputs feature importance, train/test accuracy, confusion matrix and ROC curves (with AUC). "
+        "The groupby_column parameter selects the algorithm (ID3/C4.5/CART, default C4.5); "
+        "the n_deciles parameter sets the maximum tree depth (0 = unlimited, default unlimited).",
+        "使用 ID3 / C4.5 / CART 决策树对数据进行分类分析。"
+        "输出特征重要性、训练/测试准确率、混淆矩阵及 ROC 曲线（含 AUC）。"
+        "通过 groupby_column 参数指定算法（ID3/C4.5/CART，默认 C4.5），"
+        "通过 n_deciles 参数指定最大树深（0 = 不限，默认不限）。",
+    )
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
@@ -486,7 +495,8 @@ def _tree_text(tree, max_lines: int = _MAX_TREE_LINES) -> str:
     lines = _tree_lines(tree)
     if len(lines) > max_lines:
         lines = lines[:max_lines] + [
-            f"... (共 {len(lines)} 行，仅展示前 {max_lines} 行)"
+            say(f"... ({len(lines)} lines in total, showing only the first {max_lines})",
+                f"... (共 {len(lines)} 行，仅展示前 {max_lines} 行)")
         ]
     return "\n".join(lines)
 
@@ -510,31 +520,36 @@ def _build_md(
     roc_df:          pd.DataFrame,
 ) -> str:
     algo_name = {
-        "ID3":  "ID3（信息增益）",
-        "C4.5": "C4.5（增益率）",
-        "CART": "CART（基尼指数）",
+        "ID3":  say("ID3 (Information Gain)", "ID3（信息增益）"),
+        "C4.5": say("C4.5 (Gain Ratio)", "C4.5（增益率）"),
+        "CART": say("CART (Gini Index)", "CART（基尼指数）"),
     }.get(algo, algo)
     depth  = _tree_depth(tree)
     leaves = _tree_leaves(tree)
 
     L = [
-        f"## 决策树分析 - `{target_col}` - {algo_name}\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 算法 | {algo_name} |",
-        (f"| 类别数 | {n_classes}"
-         f"（{', '.join(str(c) for c in class_names[:8])}"
-         f"{'...' if len(class_names) > 8 else ''}）|"),
-        f"| 训练样本 | {n_train} |",
-        f"| 测试样本 | {n_test} |",
-        f"| 树深度 | {depth} |",
-        f"| 叶节点数 | {leaves} |",
-        f"| 最大深度限制 | {'不限' if max_depth_param is None else max_depth_param} |",
+        say(f"## Decision Tree Analysis - `{target_col}` - {algo_name}\n",
+            f"## 决策树分析 - `{target_col}` - {algo_name}\n"),
+        say("### Model Overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Algorithm | {algo_name} |", f"| 算法 | {algo_name} |"),
+        say(f"| Number of classes | {n_classes}"
+            f" ({', '.join(str(c) for c in class_names[:8])}"
+            f"{'...' if len(class_names) > 8 else ''}) |",
+            f"| 类别数 | {n_classes}"
+            f"（{', '.join(str(c) for c in class_names[:8])}"
+            f"{'...' if len(class_names) > 8 else ''}）|"),
+        say(f"| Training samples | {n_train} |", f"| 训练样本 | {n_train} |"),
+        say(f"| Test samples | {n_test} |", f"| 测试样本 | {n_test} |"),
+        say(f"| Tree depth | {depth} |", f"| 树深度 | {depth} |"),
+        say(f"| Leaf nodes | {leaves} |", f"| 叶节点数 | {leaves} |"),
+        say(f"| Max depth limit | {'Unlimited' if max_depth_param is None else max_depth_param} |",
+            f"| 最大深度限制 | {'不限' if max_depth_param is None else max_depth_param} |"),
         "",
-        "### 准确率",
-        "| 集合 | 准确率 |", "|------|--------|",
-        f"| 训练集 | **{train_acc:.2%}** |",
-        f"| 测试集 | **{test_acc:.2%}** |",
+        say("### Accuracy", "### 准确率"),
+        say("| Set | Accuracy |", "| 集合 | 准确率 |"), "|------|--------|",
+        say(f"| Training set | **{train_acc:.2%}** |", f"| 训练集 | **{train_acc:.2%}** |"),
+        say(f"| Test set | **{test_acc:.2%}** |", f"| 测试集 | **{test_acc:.2%}** |"),
         "",
     ]
 
@@ -543,23 +558,26 @@ def _build_md(
         auc_rows = roc_df.drop_duplicates("class")[["class", "auc"]].sort_values("auc", ascending=False)
         L += [
             "### ROC / AUC",
-            "| 类别 | AUC | 评级 |",
+            say("| Class | AUC | Rating |", "| 类别 | AUC | 评级 |"),
             "|------|-----|------|",
         ]
         for _, row in auc_rows.iterrows():
-            rating = "优秀" if row["auc"] >= 0.9 else ("良好" if row["auc"] >= 0.75 else "一般")
+            rating = (say("Excellent", "优秀") if row["auc"] >= 0.9
+                      else (say("Good", "良好") if row["auc"] >= 0.75 else say("Fair", "一般")))
             L.append(f"| {row['class']} | **{row['auc']:.4f}** | {rating} |")
         L += [
             "",
-            "> ROC 曲线数据存储于 `analysis_roc` 表（class / fpr / tpr / auc）。",
-            "> 绘图方法：Line_Chart，x=fpr，y=tpr，按 class 分组着色。",
+            say("> ROC curve data is stored in the `analysis_roc` table (class / fpr / tpr / auc).",
+                "> ROC 曲线数据存储于 `analysis_roc` 表（class / fpr / tpr / auc）。"),
+            say("> Plotting: Line_Chart, x=fpr, y=tpr, colored by class.",
+                "> 绘图方法：Line_Chart，x=fpr，y=tpr，按 class 分组着色。"),
             "",
         ]
 
     # ── 特征重要性 ────────────────────────────────────────────────────────
     L += [
-        "### 特征重要性",
-        "| 排名 | 特征 | 重要性得分 | 占比 |",
+        say("### Feature Importance", "### 特征重要性"),
+        say("| Rank | Feature | Importance Score | Share |", "| 排名 | 特征 | 重要性得分 | 占比 |"),
         "|:----:|------|----------:|-----:|",
     ]
     for _, row in feat_imp.iterrows():
@@ -573,30 +591,38 @@ def _build_md(
     # ── 核心洞察 ──────────────────────────────────────────────────────────
     top = feat_imp.iloc[0]
     gap = train_acc - test_acc
-    L += ["### 核心洞察",
-          f"- **最重要特征**：`{top['feature']}`，重要性占比 **{top['importance_pct']:.1f}%**"]
+    L += [say("### Key Insights", "### 核心洞察"),
+          say(f"- **Most important feature**: `{top['feature']}`, importance share **{top['importance_pct']:.1f}%**",
+              f"- **最重要特征**：`{top['feature']}`，重要性占比 **{top['importance_pct']:.1f}%**")]
 
     if test_acc >= 0.85:
-        L.append(f"- 测试准确率 {test_acc:.2%}，模型泛化能力优秀。")
+        L.append(say(f"- Test accuracy {test_acc:.2%}; the model generalizes very well.",
+                     f"- 测试准确率 {test_acc:.2%}，模型泛化能力优秀。"))
     elif test_acc >= 0.65:
-        L.append(f"- 测试准确率 {test_acc:.2%}，可考虑调整 max_depth 进一步优化。")
+        L.append(say(f"- Test accuracy {test_acc:.2%}; consider tuning max_depth to improve further.",
+                     f"- 测试准确率 {test_acc:.2%}，可考虑调整 max_depth 进一步优化。"))
     else:
-        L.append(f"- 测试准确率 {test_acc:.2%}，特征区分度不足或数据量过少。")
+        L.append(say(f"- Test accuracy {test_acc:.2%}; features are not discriminative enough or there is too little data.",
+                     f"- 测试准确率 {test_acc:.2%}，特征区分度不足或数据量过少。"))
 
     if gap > 0.15:
         L.append(
-            f"- 过拟合风险：训练/测试准确率相差 {gap:.2%}，"
-            f"建议通过 n_deciles 参数设置最大树深。"
+            say(f"- Overfitting risk: train/test accuracy differ by {gap:.2%}; "
+                f"consider limiting the maximum tree depth via the n_deciles parameter.",
+                f"- 过拟合风险：训练/测试准确率相差 {gap:.2%}，"
+                f"建议通过 n_deciles 参数设置最大树深。")
         )
 
     if not roc_df.empty:
         best_row = roc_df.drop_duplicates("class").sort_values("auc", ascending=False).iloc[0]
         L.append(
-            f"- 最高 AUC = **{best_row['auc']:.4f}**"
-            f"（{best_row['class']} 类，OvR）。"
+            say(f"- Highest AUC = **{best_row['auc']:.4f}** "
+                f"(class {best_row['class']}, OvR).",
+                f"- 最高 AUC = **{best_row['auc']:.4f}**"
+                f"（{best_row['class']} 类，OvR）。")
         )
 
-    L += ["", "### 决策树结构", "```", _tree_text(tree), "```", ""]
+    L += ["", say("### Decision Tree Structure", "### 决策树结构"), "```", _tree_text(tree), "```", ""]
     return "\n".join(L)
 
 
@@ -635,8 +661,10 @@ def run(
 
     if target_column not in df.columns:
         raise ValueError(
-            f"目标列 '{target_column}' 不存在。"
-            f"可用列：{', '.join(df.columns[:20])}"
+            say(f"Target column '{target_column}' does not exist. "
+                f"Available columns: {', '.join(df.columns[:20])}",
+                f"目标列 '{target_column}' 不存在。"
+                f"可用列：{', '.join(df.columns[:20])}")
         )
 
     # ── 预处理 ────────────────────────────────────────────────────────────
@@ -646,9 +674,10 @@ def run(
 
     feature_cols = [c for c in df.columns if c != target_column]
     if not feature_cols:
-        raise ValueError("数据集中没有可用的特征列。")
+        raise ValueError(say("The dataset has no usable feature columns.", "数据集中没有可用的特征列。"))
     if df[target_column].nunique() < 2:
-        raise ValueError(f"目标列 '{target_column}' 只有 1 种取值，无法分类。")
+        raise ValueError(say(f"Target column '{target_column}' has only 1 distinct value; cannot classify.",
+                             f"目标列 '{target_column}' 只有 1 种取值，无法分类。"))
 
     # ── 训练 / 测试分割 ───────────────────────────────────────────────────
     train_df, test_df = _split(df, test_size=0.3)

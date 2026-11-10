@@ -14,6 +14,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -187,7 +188,7 @@ def _build_chord_html(matrix: pd.DataFrame, title: str, highlight_node: Optional
 <body>
 <div class="container">
     <h1>{esc_title}</h1>
-    <div class="subtitle">弦图 Chord Diagram | D3.js</div>
+    <div class="subtitle">{say("Chord Diagram", "弦图 Chord Diagram")} | D3.js</div>
     <div id="chord-container"></div>
 </div>
 <div class="tooltip" id="tooltip"></div>
@@ -242,7 +243,7 @@ g.selectAll(".ribbon")
         const sourceName = nodes[d.source.index].id;
         const targetName = nodes[d.target.index].id;
         const value = matrix[d.source.index][d.target.index];
-        tooltip.innerHTML = `<strong>${{sourceName}} → ${{targetName}}</strong><br>强度: ${{value.toFixed(2)}}`;
+        tooltip.innerHTML = `<strong>${{sourceName}} → ${{targetName}}</strong><br>{say("Strength", "强度")}: ${{value.toFixed(2)}}`;
         tooltip.style.display = "block";
         tooltip.style.left = (event.pageX + 10) + "px";
         tooltip.style.top = (event.pageY + 10) + "px";
@@ -284,7 +285,7 @@ def generate(
     source: str = "source",
     target: str = "target",
     value: str = "value",
-    title: str = "弦图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings = []
@@ -297,11 +298,11 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Chord Diagram", "弦图"))
     highlight_node = options.get("highlight_node")
     highlight_color = options.get("highlight_color", "#003D7A")
     symmetric = options.get("symmetric", True)
@@ -323,25 +324,25 @@ def generate(
         _val = mapping.get("value") if mapping.get("value") in df.columns else val_col
 
         if _src is None or _src not in df.columns:
-            return ChartResult(warnings=["找不到必填字段 [source]"])
+            return ChartResult(warnings=[say("Required field [source] not found", "找不到必填字段 [source]")])
         if _tgt is None or _tgt not in df.columns:
-            return ChartResult(warnings=["找不到必填字段 [target]"])
+            return ChartResult(warnings=[say("Required field [target] not found", "找不到必填字段 [target]")])
         if _val is None or _val not in df.columns:
-            return ChartResult(warnings=["找不到必填字段 [value]"])
+            return ChartResult(warnings=[say("Required field [value] not found", "找不到必填字段 [value]")])
 
         matrix = _edge_list_to_adjacency(df, _src, _tgt, _val, symmetric=symmetric)
         matrix = _normalize_matrix(matrix)
     else:
-        return ChartResult(warnings=["无法识别数据格式"])
+        return ChartResult(warnings=[say("Unable to recognize data format", "无法识别数据格式")])
 
     if matrix.empty:
-        return ChartResult(warnings=["无有效数据"])
+        return ChartResult(warnings=[say("No valid data", "无有效数据")])
 
     try:
         matrix = matrix.astype(float)
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"数据类型转换失败: {e}"])
+        return ChartResult(warnings=[say(f"Data type conversion failed: {e}", f"数据类型转换失败: {e}")])
 
     # 配色方案：优先用 options.color_scheme，回退到 MCKINSEY_COLORS
     _scheme = get_color_scheme(options.get("color_scheme", "mckinsey"))

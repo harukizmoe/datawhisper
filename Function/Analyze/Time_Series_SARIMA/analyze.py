@@ -21,21 +21,29 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Optional, Tuple, List
 
+from compute.i18n import say
+
 warnings.filterwarnings("ignore")
 
 # ── 模块元数据 ──────────────────────────────────────────────────────────────
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
 ANALYSIS_ID   = "Time_Series_SARIMA"
-ANALYSIS_NAME = "SARIMA 季节性时间序列预测"
-ANALYSIS_DESC = (
+ANALYSIS_NAME = say("SARIMA seasonal time series forecasting", "SARIMA 季节性时间序列预测")
+ANALYSIS_DESC = say(
+    "Models and forecasts a univariate time series with seasonal fluctuations using SARIMA. "
+    "Automatically infers the seasonal period, runs an ADF test and AIC-based order selection, "
+    "and outputs forecasts together with a seasonal decomposition. "
+    "Use groupby_column to specify the time column name or the seasonal period (a pure number such as '12'); "
+    "use n_deciles to specify the number of forecast steps (default 12).",
     "使用 SARIMA 模型对含季节性波动的单变量时间序列建模预测。"
     "自动推断季节周期、执行 ADF 检验、AIC 选阶，输出预测值与季节分解结果。"
     "通过 groupby_column 指定时间列名或季节周期（纯数字如 '12'）；"
-    "通过 n_deciles 指定预测步数（默认 12）。"
+    "通过 n_deciles 指定预测步数（默认 12）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
-    "groupby_column (时间列名，或季节周期数字如 '12'/'4'/'7'，默认自动推断)",
-    "n_deciles (预测步数，默认 12)",
+    say("groupby_column (time column name, or a seasonal period number such as '12'/'4'/'7'; inferred automatically by default)", "groupby_column (时间列名，或季节周期数字如 '12'/'4'/'7'，默认自动推断)"),
+    say("n_deciles (number of forecast steps, default 12)", "n_deciles (预测步数，默认 12)"),
 ]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
 
@@ -309,16 +317,16 @@ def _build_metrics_df(series, fitted, model_result, order, seasonal_order, adf_p
     p, d, q = order
     P, D, Q, s = seasonal_order
     rows = [
-        {"metric": "模型阶数 (p,d,q)",          "value": f"({p},{d},{q})"},
-        {"metric": "季节阶数 (P,D,Q,s)",         "value": f"({P},{D},{Q},{s})"},
-        {"metric": "检测到的季节周期 s",          "value": period},
-        {"metric": "ADF p值（原始序列）",         "value": round(adf_pval, 4)},
+        {"metric": say("Model order (p,d,q)", "模型阶数 (p,d,q)"),          "value": f"({p},{d},{q})"},
+        {"metric": say("Seasonal order (P,D,Q,s)", "季节阶数 (P,D,Q,s)"),         "value": f"({P},{D},{Q},{s})"},
+        {"metric": say("Detected seasonal period s", "检测到的季节周期 s"),          "value": period},
+        {"metric": say("ADF p-value (original series)", "ADF p值（原始序列）"),         "value": round(adf_pval, 4)},
         {"metric": "AIC",                        "value": round(model_result.aic, 4)},
         {"metric": "BIC",                        "value": round(model_result.bic, 4)},
-        {"metric": "MAE（训练集）",               "value": round(mae,  4)},
-        {"metric": "RMSE（训练集）",              "value": round(rmse, 4)},
-        {"metric": "MAPE %（训练集）",            "value": round(mape, 2) if not np.isnan(mape) else "N/A"},
-        {"metric": "训练样本数",                  "value": len(series)},
+        {"metric": say("MAE (train)", "MAE（训练集）"),               "value": round(mae,  4)},
+        {"metric": say("RMSE (train)", "RMSE（训练集）"),              "value": round(rmse, 4)},
+        {"metric": say("MAPE % (train)", "MAPE %（训练集）"),            "value": round(mape, 2) if not np.isnan(mape) else "N/A"},
+        {"metric": say("Training samples", "训练样本数"),                  "value": len(series)},
     ]
     return pd.DataFrame(rows)
 
@@ -333,26 +341,26 @@ def _build_md(target_col, time_col, order, seasonal_order, adf_pval,
     P, D, Q, s = seasonal_order
 
     L = [
-        f"## SARIMA 季节性时间序列预测 — `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 模型类型 | SARIMA({p},{d},{q})({P},{D},{Q})[{s}] |",
-        "| 选阶方法 | auto_arima stepwise（AIC，全量数据） |",
-        f"| 时间列 | `{time_col or '（行序号）'}` |",
-        f"| 训练样本数 | {len(series)} |",
-        f"| 季节周期 s | {period} |",
-        f"| 预测步数 | {steps} |",
-        f"| ADF p值 | {adf_pval:.4f}（{'平稳 ✓' if stationary else '非平稳，已差分'}） |",
+        say(f"## SARIMA seasonal time series forecast — `{target_col}`\n", f"## SARIMA 季节性时间序列预测 — `{target_col}`\n"),
+        say("### Model overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Model type | SARIMA({p},{d},{q})({P},{D},{Q})[{s}] |", f"| 模型类型 | SARIMA({p},{d},{q})({P},{D},{Q})[{s}] |"),
+        say("| Order selection | auto_arima stepwise (AIC, full data) |", "| 选阶方法 | auto_arima stepwise（AIC，全量数据） |"),
+        say(f"| Time column | `{time_col or '(row index)'}` |", f"| 时间列 | `{time_col or '（行序号）'}` |"),
+        say(f"| Training samples | {len(series)} |", f"| 训练样本数 | {len(series)} |"),
+        say(f"| Seasonal period s | {period} |", f"| 季节周期 s | {period} |"),
+        say(f"| Forecast steps | {steps} |", f"| 预测步数 | {steps} |"),
+        say(f"| ADF p-value | {adf_pval:.4f} ({'stationary ✓' if stationary else 'non-stationary, differenced'}) |", f"| ADF p值 | {adf_pval:.4f}（{'平稳 ✓' if stationary else '非平稳，已差分'}） |"),
         "",
-        "### 模型评估",
-        "| 指标 | 值 |", "|------|-----|",
+        say("### Model evaluation", "### 模型评估"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
     ]
     for _, row in metrics_df.iterrows():
         L.append(f"| {row['metric']} | {row['value']} |")
     L.append("")
 
-    L += ["### 预测摘要（未来数据点）",
-          "| 时间点 | 预测值 | 95% 置信区间 |",
+    L += [say("### Forecast summary (future points)", "### 预测摘要（未来数据点）"),
+          say("| Time | Forecast | 95% CI |", "| 时间点 | 预测值 | 95% 置信区间 |"),
           "|--------|-------:|-------------|"]
     for i, (idx, row) in enumerate(forecast_df.iterrows()):
         if i >= 10:
@@ -363,20 +371,24 @@ def _build_md(target_col, time_col, order, seasonal_order, adf_pval,
 
     last_actual = float(series.iloc[-1])
     last_pred   = float(forecast_df["mean"].iloc[-1])
-    direction   = "上升" if last_pred > last_actual else "下降"
+    direction   = say("up", "上升") if last_pred > last_actual else say("down", "下降")
     chg_pct     = abs(last_pred - last_actual) / abs(last_actual) * 100 if last_actual != 0 else 0
 
     L += [
-        "### 核心洞察",
-        f"- **趋势方向**：预测期末值（{last_pred:.4f}）较历史末值（{last_actual:.4f}）{direction}"
-        f"，幅度约 **{chg_pct:.1f}%**。",
-        f"- **季节性**：检测到周期 s={period}，季节差分 D={D}，"
-        f"{'模型包含季节成分' if P > 0 or Q > 0 else '季节参数较弱'}。",
+        say("### Key insights", "### 核心洞察"),
+        say(f"- **Trend direction**: the end-of-forecast value ({last_pred:.4f}) is {direction} vs. the last historical value ({last_actual:.4f})"
+            f", by about **{chg_pct:.1f}%**.",
+            f"- **趋势方向**：预测期末值（{last_pred:.4f}）较历史末值（{last_actual:.4f}）{direction}"
+            f"，幅度约 **{chg_pct:.1f}%**。"),
+        say(f"- **Seasonality**: detected period s={period}, seasonal differencing D={D}, "
+            f"{'the model includes seasonal components' if P > 0 or Q > 0 else 'seasonal parameters are weak'}.",
+            f"- **季节性**：检测到周期 s={period}，季节差分 D={D}，"
+            f"{'模型包含季节成分' if P > 0 or Q > 0 else '季节参数较弱'}。"),
         "",
-        "> **图表建议**",
-        "> - Line_Chart(analysis_result)：x=ds，y=y_pred + y_actual，按 segment 分组着色",
-        "> - Line_Chart(analysis_breakdown)：x=ds，y=trend + seasonal — 季节分解可视化",
-        "> - analysis_metrics 表直接展示模型指标",
+        say("> **Chart suggestions**", "> **图表建议**"),
+        say("> - Line_Chart(analysis_result): x=ds, y=y_pred + y_actual, colored by segment", "> - Line_Chart(analysis_result)：x=ds，y=y_pred + y_actual，按 segment 分组着色"),
+        say("> - Line_Chart(analysis_breakdown): x=ds, y=trend + seasonal — seasonal decomposition view", "> - Line_Chart(analysis_breakdown)：x=ds，y=trend + seasonal — 季节分解可视化"),
+        say("> - The analysis_metrics table shows model metrics directly", "> - analysis_metrics 表直接展示模型指标"),
     ]
     return "\n".join(L)
 
@@ -401,14 +413,14 @@ def run(
     n_deciles      : 预测步数（默认 12）
     """
     progress = progress_callback or (lambda _pct, _message="": None)
-    progress(5, "正在校验 SARIMA 输入")
+    progress(5, say("Validating SARIMA inputs", "正在校验 SARIMA 输入"))
     try:
         import pmdarima  # noqa
     except ImportError:
-        raise ImportError("pmdarima 未安装。请运行: pip install pmdarima")
+        raise ImportError(say("pmdarima is not installed. Please run: pip install pmdarima", "pmdarima 未安装。请运行: pip install pmdarima"))
 
     if target_column not in df.columns:
-        raise ValueError(f"目标列 '{target_column}' 不存在。可用列: {', '.join(df.columns[:20])}")
+        raise ValueError(say(f"Target column '{target_column}' does not exist. Available columns: {', '.join(df.columns[:20])}", f"目标列 '{target_column}' 不存在。可用列: {', '.join(df.columns[:20])}"))
 
     try:
         steps = int(n_deciles)
@@ -429,7 +441,7 @@ def run(
             time_col_hint = groupby_column
 
     # 检测时间列 & 准备序列
-    progress(15, "正在准备季节性序列")
+    progress(15, say("Preparing seasonal series", "正在准备季节性序列"))
     time_col = _detect_time_col(df, time_col_hint)
     series, freq_str = _prepare_series(df, time_col, target_column)
 
@@ -455,7 +467,7 @@ def run(
               f"+ 时间插值 → {len(series)} 个点(freq={freq_attr})")
 
     if len(series) < 16:
-        raise ValueError(f"有效数据点不足({len(series)} 个),SARIMA 至少需要 16 个数据点。")
+        raise ValueError(say(f"Not enough valid data points ({len(series)}); SARIMA needs at least 16.", f"有效数据点不足({len(series)} 个),SARIMA 至少需要 16 个数据点。"))
 
     # 季节周期
     period = manual_period if manual_period else _infer_season_period(freq_str, series)
@@ -464,20 +476,20 @@ def run(
         period = 2
 
     # 平稳性
-    progress(28, "正在检验序列平稳性")
+    progress(28, say("Testing series stationarity", "正在检验序列平稳性"))
     stationary, adf_pval = _adf_test(series)
 
     # auto_arima stepwise 全量选阶
-    progress(42, "正在选择 SARIMA 阶数")
+    progress(42, say("Selecting SARIMA orders", "正在选择 SARIMA 阶数"))
     order, seasonal_order = _auto_order(series, period)
     P, D, Q, s = seasonal_order
 
     # 拟合 & 预测
-    progress(68, "正在拟合 SARIMA 并预测")
+    progress(68, say("Fitting SARIMA and forecasting", "正在拟合 SARIMA 并预测"))
     fitted, forecast_df, residuals, model_result, warmup = _fit_predict(series, order, seasonal_order, steps)
 
     # 结果表
-    progress(88, "正在整理预测和季节分解结果")
+    progress(88, say("Assembling forecast and seasonal decomposition results", "正在整理预测和季节分解结果"))
     result_df    = _build_result_df(series, fitted, forecast_df)
     breakdown_df = _seasonal_decompose(series, period)
     metrics_df   = _build_metrics_df(series, fitted, model_result, order, seasonal_order, adf_pval, period)
@@ -485,8 +497,8 @@ def run(
     # 在 metrics 表里记录降采样信息,方便上游展示
     if resampled:
         extra = pd.DataFrame([{
-            "metric": "数据降采样",
-            "value":  f"原 {original_len} 点 → '{_RESAMPLE_FREQ}' ({_RESAMPLE_AGG}+插值) → {len(series)} 点",
+            "metric": say("Data resampling", "数据降采样"),
+            "value":  say(f"{original_len} points → '{_RESAMPLE_FREQ}' ({_RESAMPLE_AGG}+interpolation) → {len(series)} points", f"原 {original_len} 点 → '{_RESAMPLE_FREQ}' ({_RESAMPLE_AGG}+插值) → {len(series)} 点"),
         }])
         metrics_df = pd.concat([extra, metrics_df], ignore_index=True)
 
@@ -504,5 +516,5 @@ def run(
         period         = s if s > 1 else period,
     )
 
-    progress(98, "SARIMA 分析计算完成")
+    progress(98, say("SARIMA analysis complete", "SARIMA 分析计算完成"))
     return result_df, breakdown_df, metrics_df, markdown

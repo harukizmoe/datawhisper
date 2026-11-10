@@ -22,11 +22,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
 
-_DATA_FMT = "age_group列 + male列 + female列"
-_DESC = "人口金字塔图，左右分别展示男性和女性数据，适合人口结构分析。"
+
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -99,8 +99,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -113,7 +113,7 @@ def generate(
     age: str = "age",
     male: str = "male",
     female: str = "female",
-    title: str = "人口金字塔图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -126,9 +126,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     age_col = mapping.get("age")
     age_col = age_col if age_col is not None else age
@@ -137,6 +137,8 @@ def generate(
     female_col = mapping.get("female")
     female_col = female_col if female_col is not None else female
     title = options.get("title", title)
+    if title is None:
+        title = say("Population Pyramid", "人口金字塔图")
 
     # 获取配色方案
     color_scheme_name = options.get("color_scheme", "mckinsey")
@@ -146,7 +148,7 @@ def generate(
         female_color = color_scheme.get("negative", "#DA3B01")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}，使用默认配色")
+        warnings.append(say(f"Failed to load color scheme: {e}; using default colors", f"配色方案加载失败: {e}，使用默认配色"))
         male_color = "#003D7A"
         female_color = "#DA3B01"
 
@@ -156,7 +158,7 @@ def generate(
 
     for role, col_ in [("age", _age), ("male", _male), ("female", _female)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _age not in df.columns or _male not in df.columns or _female not in df.columns:
         return ChartResult(warnings=warnings)
@@ -169,9 +171,9 @@ def generate(
     before = len(df_plot)
     df_plot = df_plot.dropna(subset=[_male, _female])
     if before != len(df_plot):
-        warnings.append(f"已忽略 {before - len(df_plot)} 行无法解析为数值的男/女人口数据")
+        warnings.append(say(f"Ignored {before - len(df_plot)} row(s) of male/female population data that could not be parsed as numbers", f"已忽略 {before - len(df_plot)} 行无法解析为数值的男/女人口数据"))
     if df_plot.empty:
-        return ChartResult(warnings=warnings + ["男/女列不含可用数值"])
+        return ChartResult(warnings=warnings + [say("Male/female columns contain no usable numeric values", "男/女列不含可用数值")])
 
     fig = go.Figure()
 
@@ -180,10 +182,10 @@ def generate(
         y=df_plot[_age],
         x=-df_plot[_male],
         orientation="h",
-        name="男性",
+        name=say("Male", "男性"),
         marker=dict(color=male_color),
         customdata=df_plot[_male],  # 存储绝对值
-        hovertemplate="<b>%{y}</b><br>男性: %{customdata:,.0f}<extra></extra>",
+        hovertemplate=f"<b>%{{y}}</b><br>{say('Male', '男性')}: %{{customdata:,.0f}}<extra></extra>",
         **kwargs
     ))
 
@@ -192,10 +194,10 @@ def generate(
         y=df_plot[_age],
         x=df_plot[_female],
         orientation="h",
-        name="女性",
+        name=say("Female", "女性"),
         marker=dict(color=female_color),
         customdata=df_plot[_female],  # 存储绝对值
-        hovertemplate="<b>%{y}</b><br>女性: %{customdata:,.0f}<extra></extra>",
+        hovertemplate=f"<b>%{{y}}</b><br>{say('Female', '女性')}: %{{customdata:,.0f}}<extra></extra>",
         **kwargs
     ))
     
@@ -209,11 +211,11 @@ def generate(
         margin=dict(l=60, r=60, t=80, b=60),
         title_font_size=16,
         xaxis=dict(
-            title=dict(text="男性  ←  人数  →  女性", font=dict(size=12)),
+            title=dict(text=say("Male  ←  Population  →  Female", "男性  ←  人数  →  女性"), font=dict(size=12)),
             tickfont=dict(size=11),
         ),
         yaxis=dict(
-            title=dict(text="年龄段", font=dict(size=12)),
+            title=dict(text=say("Age group", "年龄段"), font=dict(size=12)),
             tickfont=dict(size=11)
         ),
         hovermode="closest",
@@ -243,7 +245,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "pyramid_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "pyramid_chart", "plotly", say("age_group column + male column + female column", "age_group列 + male列 + female列"), say("Population pyramid with male and female data shown on the left and right; suitable for population structure analysis.", "人口金字塔图，左右分别展示男性和女性数据，适合人口结构分析。"), chart_html)
 
     meta = {
         "chart_id": "pyramid_chart",

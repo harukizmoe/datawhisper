@@ -7,6 +7,8 @@ import zipfile
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
+from compute.i18n import say
+
 
 # ── Lightweight Markdown → docx rendering (subset) ──────────────────────────
 # Renders the common markdown the LLM emits for report section bodies into
@@ -104,14 +106,14 @@ def export_to_report(
         from docx import Document
         from docx.shared import Pt, RGBColor
     except ImportError as exc:
-        raise ImportError("python-docx 未安装，请运行: pip install python-docx") from exc
+        raise ImportError(say("python-docx is not installed; run: pip install python-docx", "python-docx 未安装，请运行: pip install python-docx")) from exc
 
     doc = Document()
 
     # ── Title block ────────────────────────────────────────────────────
     doc.add_heading(title, level=0)
     ts_para = doc.add_paragraph(
-        f"生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        say(f"Generated at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", f"生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
     )
     ts_para.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
     ts_para.runs[0].font.size = Pt(10)
@@ -150,10 +152,14 @@ def export_to_report(
     # ── Chart reference section ─────────────────────────────────────────
     if chart_htmls:
         slug = _title_slug(title)
-        doc.add_heading("图表附件", level=1)
+        doc.add_heading(say("Chart attachments", "图表附件"), level=1)
         doc.add_paragraph(
-            f"本报告共包含 {len(chart_htmls)} 张交互式图表，"
-            "已随报告一同打包为 HTML 文件，请用浏览器打开查看。"
+            say(
+                f"This report contains {len(chart_htmls)} interactive charts, "
+                "packaged with the report as HTML files; open them in a browser to view.",
+                f"本报告共包含 {len(chart_htmls)} 张交互式图表，"
+                "已随报告一同打包为 HTML 文件，请用浏览器打开查看。",
+            )
         )
         for i in range(len(chart_htmls)):
             doc.add_paragraph(f"• {slug}_chart_{i + 1:02d}.html")

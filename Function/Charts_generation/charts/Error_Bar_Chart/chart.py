@@ -31,12 +31,20 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(分组类别) + y列(原始数值) - 系统自动计算Q25、Q50、Q75"
-_DESC = "展示分组数据的中位数及其四分位数范围。误差条自动计算为Q25-Q75区间。"
+def _data_fmt() -> str:
+    return say("x column (group category) + y column (raw values); Q25, Q50, Q75 are computed automatically", "x列(分组类别) + y列(原始数值) - 系统自动计算Q25、Q50、Q75")
+
+
+def _desc() -> str:
+    return say(
+        "Shows the median of grouped data and its quartile range. Error bars are computed automatically as the Q25-Q75 interval.",
+        "展示分组数据的中位数及其四分位数范围。误差条自动计算为Q25-Q75区间。",
+    )
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -115,7 +123,7 @@ def generate(
     excel_path: str = None,
     x: str = "x",
     y: str = "y",
-    title: str = "误差条形图",
+    title: Optional[str] = None,
     orientation: str = "h",   # 默认改为横向，更像示例
     **kwargs
 ) -> ChartResult:
@@ -129,15 +137,15 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
     y_col = mapping.get("y")
     y_col = y_col if y_col is not None else y
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Error Bar Chart", "误差条形图"))
     orientation = options.get("orientation", orientation)
 
     color_scheme_name = options.get("color_scheme", "mckinsey")
@@ -146,7 +154,7 @@ def generate(
         bar_color = color_scheme.get("primary", "#B58F78")  # 更接近示例棕色
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}，使用默认颜色")
+        warnings.append(say(f"Failed to load color scheme: {e}; using default colors", f"配色方案加载失败: {e}，使用默认颜色"))
         bar_color = "#B58F78"
 
     # 先按用户 mapping 显式指定
@@ -171,9 +179,9 @@ def generate(
         _y = _auto_col(df, "收入", "值", "数值", "value", "amount", "y")
 
     if _x is None or _x not in df.columns:
-        return ChartResult(warnings=warnings + ["找不到必填字段 [x]"])
+        return ChartResult(warnings=warnings + [say("Required field [x] not found", "找不到必填字段 [x]")])
     if _y is None or _y not in df.columns:
-        return ChartResult(warnings=warnings + ["找不到必填字段 [y]"])
+        return ChartResult(warnings=warnings + [say("Required field [y] not found", "找不到必填字段 [y]")])
 
     df_plot = df[[_x, _y]].copy()
     df_plot.columns = ["group", "value"]
@@ -181,7 +189,7 @@ def generate(
     df_plot = df_plot.dropna()
 
     if df_plot.empty:
-        return ChartResult(warnings=warnings + ["数据为空"])
+        return ChartResult(warnings=warnings + [say("Data is empty", "数据为空")])
 
     grouped_stats = (
         df_plot.groupby("group", as_index=False)["value"]
@@ -193,7 +201,7 @@ def generate(
         )
     )
     if (grouped_stats["count"] < 2).all():
-        warnings.append("每个分组仅1条记录，Q25=Q50=Q75，误差线长度为0（这是正常现象）。")
+        warnings.append(say("Each group has only 1 record, so Q25=Q50=Q75 and the error bar length is 0 (this is normal).", "每个分组仅1条记录，Q25=Q50=Q75，误差线长度为0（这是正常现象）。"))
     grouped_stats["error_minus"] = grouped_stats["q50"] - grouped_stats["q25"]
     grouped_stats["error_plus"] = grouped_stats["q75"] - grouped_stats["q50"]
 
@@ -216,9 +224,9 @@ def generate(
                 width=6
             ),
             marker=dict(color=bar_color),
-            name="中位数",
+            name=say("Median", "中位数"),
             customdata=grouped_stats[["q25", "q75", "count"]],
-            hovertemplate="<b>%{x}</b><br>Q50(中位数): %{y:,.0f}<br>Q25: %{customdata[0]:,.0f}<br>Q75: %{customdata[1]:,.0f}<br>样本数: %{customdata[2]}<extra></extra>",
+            hovertemplate=say("<b>%{x}</b><br>Q50 (median): %{y:,.0f}<br>Q25: %{customdata[0]:,.0f}<br>Q75: %{customdata[1]:,.0f}<br>Samples: %{customdata[2]}<extra></extra>", "<b>%{x}</b><br>Q50(中位数): %{y:,.0f}<br>Q25: %{customdata[0]:,.0f}<br>Q75: %{customdata[1]:,.0f}<br>样本数: %{customdata[2]}<extra></extra>"),
             **kwargs
         ))
     else:
@@ -236,9 +244,9 @@ def generate(
                 width=6
             ),
             marker=dict(color=bar_color),
-            name="中位数",
+            name=say("Median", "中位数"),
             customdata=grouped_stats[["q25", "q75", "count"]],
-            hovertemplate="<b>%{y}</b><br>Q50(中位数): %{x:,.0f}<br>Q25: %{customdata[0]:,.0f}<br>Q75: %{customdata[1]:,.0f}<br>样本数: %{customdata[2]}<extra></extra>",
+            hovertemplate=say("<b>%{y}</b><br>Q50 (median): %{x:,.0f}<br>Q25: %{customdata[0]:,.0f}<br>Q75: %{customdata[1]:,.0f}<br>Samples: %{customdata[2]}<extra></extra>", "<b>%{y}</b><br>Q50(中位数): %{x:,.0f}<br>Q25: %{customdata[0]:,.0f}<br>Q75: %{customdata[1]:,.0f}<br>样本数: %{customdata[2]}<extra></extra>"),
             **kwargs
         ))
 
@@ -294,7 +302,7 @@ def generate(
         fig.update_xaxes(gridcolor="rgba(0,0,0,0)")
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "error_bar_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "error_bar_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
     # 可选：导出静态图片（需要 kaleido）
     image_bytes = None
@@ -303,7 +311,7 @@ def generate(
             image_bytes = fig.to_image(format="png", scale=2)
         except Exception as e:
             log.warning("[chart] 图表生成异常: %s", e)
-            warnings.append(f"PNG导出失败(需安装kaleido): {e}")
+            warnings.append(say(f"PNG export failed (kaleido required): {e}", f"PNG导出失败(需安装kaleido): {e}"))
 
     meta = {
         "chart_id": "error_bar_chart",

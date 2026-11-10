@@ -51,6 +51,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
+from .i18n import say
+
 
 ASK_USER_EMPTY_OPTIONS = "ASKU-001"
 ASK_USER_OPTION_COUNT = "ASKU-002"
@@ -239,16 +241,20 @@ def _validate_file_read_paths(stmt, allowed_roots: List[Path]) -> Optional[str]:
             is_read_node = True
             paths, all_lit = _extract_path_literals(node)
             if not all_lit:
-                return (f"禁止非字面量路径参数：{node_type}() 的路径参数必须是"
-                        "字符串字面量，不接受变量/列引用/拼接表达式。")
+                return say(f"Non-literal path argument not allowed: the path argument of {node_type}() must be a "
+                           "string literal; variables, column references and concatenated expressions are not accepted.",
+                           f"禁止非字面量路径参数：{node_type}() 的路径参数必须是"
+                           "字符串字面量，不接受变量/列引用/拼接表达式。")
 
         # Anonymous 节点：read_csv_auto / read_text / read_blob 等
         elif _is_file_read_anonymous(node):
             is_read_node = True
             paths, all_lit = _extract_path_literals(node)
             if not all_lit:
-                return (f"禁止非字面量路径参数：{node.name}() 的路径参数必须是"
-                        "字符串字面量，不接受变量/列引用/拼接表达式。")
+                return say(f"Non-literal path argument not allowed: the path argument of {node.name}() must be a "
+                           "string literal; variables, column references and concatenated expressions are not accepted.",
+                           f"禁止非字面量路径参数：{node.name}() 的路径参数必须是"
+                           "字符串字面量，不接受变量/列引用/拼接表达式。")
 
         # DuckDB 接受 SELECT * FROM 'file.csv' 作为文件扫描。sqlglot 会把它
         # 解析成带引号的 Table 标识符而非 ReadCSV，因此它必须走同一套
@@ -288,14 +294,16 @@ def _looks_like_file_table(value: str) -> bool:
 def _check_single_path(path_str: str, norm_roots: List[Path]) -> Optional[str]:
     """校验单个路径字符串是否在白名单根目录内。"""
     if not path_str:
-        return "文件读取函数的路径参数为空。"
+        return say("The path argument of the file-read function is empty.", "文件读取函数的路径参数为空。")
 
     # ── 网络 URL 一律拒绝（SSRF 防护）──────────────────────────────────────
     path_lower = path_str.lower().strip()
     for scheme in _BLOCKED_URL_SCHEMES:
         if path_lower.startswith(scheme):
-            return (f"禁止网络路径：{path_str}（仅允许本地工作目录/上传目录内文件，"
-                    "不接受 http/https/s3/gs/azure/hdfs 等 URL）。")
+            return say(f"Network paths are not allowed: {path_str} (only files inside the local working directory/upload directory are allowed; "
+                       "URLs such as http/https/s3/gs/azure/hdfs are not accepted).",
+                       f"禁止网络路径：{path_str}（仅允许本地工作目录/上传目录内文件，"
+                       "不接受 http/https/s3/gs/azure/hdfs 等 URL）。")
 
     # ── 路径解析 ────────────────────────────────────────────────────────────
     # 相对路径：相对第一个白名单根解析（通常是 workdir，未挂载时是 uploads）
@@ -319,7 +327,7 @@ def _check_single_path(path_str: str, norm_roots: List[Path]) -> Optional[str]:
                 else:
                     resolved = candidate.expanduser().resolve(strict=False)
     except (OSError, RuntimeError) as e:
-        return f"路径解析失败：{path_str}（{e}）"
+        return say(f"Failed to resolve path: {path_str} ({e})", f"路径解析失败：{path_str}（{e}）")
 
     # 通配符路径：检查父目录（去掉通配符部分后）是否在白名单内
     # 例如 read_csv('data/*.csv') —— 检查 data/ 目录是否在白名单
@@ -340,9 +348,12 @@ def _check_single_path(path_str: str, norm_roots: List[Path]) -> Optional[str]:
             continue
 
     if not in_whitelist:
-        return (f"路径不在允许的工作目录/上传目录内：{path_str} "
-                f"(resolved: {check_path})。允许的根目录："
-                + ", ".join(str(r) for r in norm_roots))
+        return say(f"Path is outside the allowed working/upload directories: {path_str} "
+                   f"(resolved: {check_path}). Allowed roots: "
+                   + ", ".join(str(r) for r in norm_roots),
+                   f"路径不在允许的工作目录/上传目录内：{path_str} "
+                   f"(resolved: {check_path})。允许的根目录："
+                   + ", ".join(str(r) for r in norm_roots))
 
     return None
 
@@ -365,9 +376,10 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
     """
     # ── 多语句检查 ─────────────────────────────────────────────────────────────
     if len(statements) > 1:
-        return "不允许多语句 SQL（检测到分号分隔的多条语句）。"
+        return say("Multi-statement SQL is not allowed (semicolon-separated statements detected).",
+                   "不允许多语句 SQL（检测到分号分隔的多条语句）。")
     if not statements:
-        return "SQL 语句为空。"
+        return say("The SQL statement is empty.", "SQL 语句为空。")
 
     stmt = statements[0]
 
@@ -377,19 +389,26 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
     elif isinstance(stmt, exp.Create):
         kind = str(stmt.args.get("kind") or "").upper()
         if kind not in ("TABLE", "VIEW"):
-            return (
+            return say(
+                f"Only CREATE TABLE / CREATE VIEW are allowed; detected CREATE {kind or '?'}. "
+                "Creating functions, macros, indexes, schemas and similar objects is not allowed.",
                 f"只允许 CREATE TABLE / CREATE VIEW，检测到 CREATE {kind or '?'}。"
                 "函数、宏、索引、模式等对象不允许创建。"
             )
     elif isinstance(stmt, exp.Drop):
         kind = str(stmt.args.get("kind") or "").upper()
         if kind not in ("TABLE", "VIEW"):
-            return f"只允许 DROP TABLE / DROP VIEW，检测到 DROP {kind or '?'}。"
+            return say(f"Only DROP TABLE / DROP VIEW are allowed; detected DROP {kind or '?'}.",
+                       f"只允许 DROP TABLE / DROP VIEW，检测到 DROP {kind or '?'}。")
     elif isinstance(stmt, (exp.Insert, exp.Update, exp.Delete, exp.Alter, exp.TruncateTable, exp.Merge)):
         pass  # 内存中的数据变更 —— A6 下允许
     else:
         stmt_type = type(stmt).__name__
-        return (
+        return say(
+            f"Statement type not allowed: {stmt_type}. "
+            "SELECT/WITH queries and CREATE/INSERT/UPDATE/DELETE/DROP/ALTER/"
+            "TRUNCATE/MERGE data operations are allowed; system statements such as PRAGMA/INSTALL/ATTACH/COPY/SET/"
+            "BEGIN are forbidden.",
             f"不允许的语句类型: {stmt_type}。"
             "允许 SELECT/WITH 查询与 CREATE/INSERT/UPDATE/DELETE/DROP/ALTER/"
             "TRUNCATE/MERGE 数据操作；禁止 PRAGMA/INSTALL/ATTACH/COPY/SET/"
@@ -402,7 +421,8 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
         if isinstance(node, exp.Anonymous):
             fname = (node.name or "").lower()
             if fname in _BANNED_FUNCTIONS:
-                return f"禁止使用函数 {fname}()：该函数可访问文件系统写入/网络/扩展。"
+                return say(f"Function {fname}() is not allowed: it can write to the file system or access the network/extensions.",
+                           f"禁止使用函数 {fname}()：该函数可访问文件系统写入/网络/扩展。")
 
         # 具名函数节点
         if isinstance(node, exp.Func):
@@ -411,12 +431,13 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
             sql_name = getattr(node, "sql_name", lambda: "")()
             for candidate in (fname, sql_name.lower()):
                 if candidate in _BANNED_FUNCTIONS:
-                    return f"禁止使用函数 {candidate}()：该函数可访问文件系统写入/网络/扩展。"
+                    return say(f"Function {candidate}() is not allowed: it can write to the file system or access the network/extensions.",
+                               f"禁止使用函数 {candidate}()：该函数可访问文件系统写入/网络/扩展。")
 
     # ── COPY 语句扫描 ──────────────────────────────────────────────────────────
     for node in stmt.walk():
         if isinstance(node, exp.Copy):
-            return "禁止 COPY 操作：不允许将数据写入文件。"
+            return say("COPY is not allowed: writing data to files is forbidden.", "禁止 COPY 操作：不允许将数据写入文件。")
 
     # ── 文件读取路径白名单（A4）───────────────────────────────────────────────
     err = _validate_file_read_paths(stmt, allowed_roots)
@@ -465,7 +486,8 @@ def validate_sql_structured(
             return SqlValidationResult("failed", err, used_heuristic=True)
         return SqlValidationResult(
             "degraded",
-            f"sqlglot 未安装，SQL 仅经过关键字级校验（错误代码：{SQLG_NOT_INSTALLED}）",
+            say(f"sqlglot is not installed; the SQL only passed keyword-level validation (error code: {SQLG_NOT_INSTALLED})",
+                f"sqlglot 未安装，SQL 仅经过关键字级校验（错误代码：{SQLG_NOT_INSTALLED}）"),
             used_heuristic=True,
             code=SQLG_NOT_INSTALLED,
         )
@@ -482,7 +504,8 @@ def validate_sql_structured(
             return SqlValidationResult("failed", err, used_heuristic=True)
         return SqlValidationResult(
             "degraded",
-            f"sqlglot 无法解析该 SQL，仅经过关键字级校验（错误代码：{SQLG_PARSE_FAILED}）",
+            say(f"sqlglot could not parse this SQL; it only passed keyword-level validation (error code: {SQLG_PARSE_FAILED})",
+                f"sqlglot 无法解析该 SQL，仅经过关键字级校验（错误代码：{SQLG_PARSE_FAILED}）"),
             used_heuristic=True,
             code=SQLG_PARSE_FAILED,
         )
@@ -534,13 +557,14 @@ def _validate_sql_heuristic(sql: str) -> Optional[str]:
     sql_lower = sql_stripped.lower()
 
     if not sql_lower:
-        return "SQL 语句为空。"
+        return say("The SQL statement is empty.", "SQL 语句为空。")
 
     # ── 多语句检查（按未加引号的分号切分）────────────────────────────────────
     sql_no_trail = sql_stripped.rstrip(";").strip()
     _no_quotes = re.sub(r"'[^']*'|\"[^\"]*\"", "", sql_no_trail)
     if ";" in _no_quotes:
-        return "不允许多语句 SQL（检测到分号分隔的多条语句）。"
+        return say("Multi-statement SQL is not allowed (semicolon-separated statements detected).",
+                   "不允许多语句 SQL（检测到分号分隔的多条语句）。")
 
     # ── Banned DuckDB extension/network keywords (heuristic 模式仍禁) ─────────
     _BANNED_TOKENS = [
@@ -552,7 +576,8 @@ def _validate_sql_heuristic(sql: str) -> Optional[str]:
     for pattern in _BANNED_TOKENS:
         if re.search(pattern, sql_lower):
             token = pattern.replace(r"\b", "").strip()
-            return f"禁止使用 {token}：该操作可访问文件系统写入/网络/扩展/会话状态。"
+            return say(f"{token} is not allowed: this operation can write to the file system or access the network/extensions/session state.",
+                       f"禁止使用 {token}：该操作可访问文件系统写入/网络/扩展/会话状态。")
 
     # ── File-read 函数：heuristic 模式下一律拒绝（无法做路径白名单）──────────
     _FILE_READ_TOKENS = [
@@ -564,8 +589,10 @@ def _validate_sql_heuristic(sql: str) -> Optional[str]:
     for pattern in _FILE_READ_TOKENS:
         if re.search(pattern, sql_lower):
             token = pattern.replace(r"\b", "").strip()
-            return (f"heuristic 模式下禁止 {token}（sqlglot 不可用时无法做路径白名单校验）。"
-                    "请安装 sqlglot 或改用已注册表查询。")
+            return say(f"{token} is not allowed in heuristic mode (path allowlisting is impossible without sqlglot). "
+                       "Install sqlglot or query a registered table instead.",
+                       f"heuristic 模式下禁止 {token}（sqlglot 不可用时无法做路径白名单校验）。"
+                       "请安装 sqlglot 或改用已注册表查询。")
 
     return None
 

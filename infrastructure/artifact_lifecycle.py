@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from compute.i18n import say
 from infrastructure.paths import content_data_path
 
 log = logging.getLogger(__name__)
@@ -59,13 +60,13 @@ def load_lifecycle_settings() -> dict[str, Any]:
 def save_lifecycle_settings(settings: dict[str, Any]) -> dict[str, Any]:
     preset = str(settings.get("retention_preset") or "forever")
     if preset not in {"7", "14", "forever", "custom"}:
-        raise ValueError("保留策略无效")
+        raise ValueError(say("Invalid retention policy", "保留策略无效"))
     try:
         custom_days = int(settings.get("retention_custom_days", 30))
     except (TypeError, ValueError) as exc:
-        raise ValueError("自定义保留天数必须是整数") from exc
+        raise ValueError(say("Custom retention days must be an integer", "自定义保留天数必须是整数")) from exc
     if not 0 <= custom_days <= 3650:
-        raise ValueError("自定义保留天数必须在 0 到 3650 之间")
+        raise ValueError(say("Custom retention days must be between 0 and 3650", "自定义保留天数必须在 0 到 3650 之间"))
     normalized = {"retention_preset": preset, "retention_custom_days": custom_days}
     path = _settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +145,7 @@ def soft_delete_session_group(session_dir: Path, filename: str, *, archive_artif
     try:
         source = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"无法读取会话文件: {exc}") from exc
+        raise ValueError(say(f"Cannot read the session file: {exc}", f"无法读取会话文件: {exc}")) from exc
     session_id = str(source.get("session_id") or "").strip()
     candidates = [target]
     if session_id:
@@ -181,7 +182,7 @@ def soft_delete_session_group(session_dir: Path, filename: str, *, archive_artif
             artifact_filename = f"{artifact['registry_id'].replace(':', '_')}__{artifact['filename']}"
             destination = (trash / "artifacts" / artifact_filename).resolve(strict=False)
             if not source_path.is_file() or not _within(source_path, data_root) or not _within(destination, trash):
-                failed.append({"filename": artifact_filename, "error": "产物路径无效"})
+                failed.append({"filename": artifact_filename, "error": say("Invalid artifact path", "产物路径无效")})
                 continue
             try:
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -347,9 +348,9 @@ def restore_session_trash(trash_id: str) -> dict[str, Any]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         files = manifest["files"]
     except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("回收站项目已损坏，无法恢复") from exc
+        raise ValueError(say("The trash item is corrupted and cannot be restored", "回收站项目已损坏，无法恢复")) from exc
     if not isinstance(files, list) or not files:
-        raise ValueError("回收站项目不包含可恢复文件")
+        raise ValueError(say("The trash item contains no restorable files", "回收站项目不包含可恢复文件"))
     artifacts = manifest.get("artifacts") or []
     if not isinstance(artifacts, list):
         artifacts = []
@@ -362,26 +363,26 @@ def restore_session_trash(trash_id: str) -> dict[str, Any]:
         source = (group / Path(name).name).resolve(strict=False)
         destination = (session_dir / Path(name).name).resolve(strict=False)
         if not name or not source.is_file() or not _within(source, group) or not _within(destination, session_dir):
-            raise ValueError("回收站项目包含无效文件")
+            raise ValueError(say("The trash item contains an invalid file", "回收站项目包含无效文件"))
         if destination.exists():
-            raise ValueError(f"无法恢复：{destination.name} 已存在")
+            raise ValueError(say(f"Cannot restore: {destination.name} already exists", f"无法恢复：{destination.name} 已存在"))
         sources.append((source, destination, "json", ""))
 
     data_root = content_data_path().resolve(strict=False)
     for artifact in artifacts:
         if not isinstance(artifact, dict):
-            raise ValueError("回收站项目包含无效产物")
+            raise ValueError(say("The trash item contains an invalid artifact", "回收站项目包含无效产物"))
         registry_id = str(artifact.get("registry_id") or "")
         relative = str(artifact.get("relative_path") or "")
         moved_filename = str(artifact.get("moved_filename") or artifact.get("filename") or "")
         source = (group / "artifacts" / Path(moved_filename).name).resolve(strict=False)
         destination = (data_root / relative).resolve(strict=False)
         if not registry_id or not moved_filename or not relative:
-            raise ValueError("回收站项目包含无效产物")
+            raise ValueError(say("The trash item contains an invalid artifact", "回收站项目包含无效产物"))
         if not source.is_file() or not _within(source, group) or not _within(destination, data_root):
-            raise ValueError("回收站项目包含无效产物")
+            raise ValueError(say("The trash item contains an invalid artifact", "回收站项目包含无效产物"))
         if destination.exists():
-            raise ValueError(f"无法恢复：{destination.name} 已存在")
+            raise ValueError(say(f"Cannot restore: {destination.name} already exists", f"无法恢复：{destination.name} 已存在"))
         sources.append((source, destination, "artifact", registry_id))
 
     with _LOCK:
@@ -500,14 +501,14 @@ def register_artifact(
     root = content_data_path().resolve(strict=False)
     resolved = path.resolve(strict=False)
     if not path.is_file():
-        raise ValueError("产物路径不在受控数据目录内")
+        raise ValueError(say("The artifact path is outside the managed data directory", "产物路径不在受控数据目录内"))
     key = artifact_id or uuid.uuid4().hex
     if not _within(resolved, root):
         if workspace_root is None or not workspace_id:
-            raise ValueError("产物路径不在受控数据目录内")
+            raise ValueError(say("The artifact path is outside the managed data directory", "产物路径不在受控数据目录内"))
         artifacts_root = (Path(workspace_root).resolve(strict=False) / "artifacts").resolve(strict=False)
         if not _within(resolved, artifacts_root):
-            raise ValueError("产物路径不在受控数据目录内")
+            raise ValueError(say("The artifact path is outside the managed data directory", "产物路径不在受控数据目录内"))
         _record("workspace_artifact_registered", {
             "artifact_id": key,
             "type": artifact_type,
@@ -542,7 +543,7 @@ def _managed_artifact_dirs() -> dict[str, Path]:
 def _safe_relative_path(value: str) -> Path:
     relative = Path(str(value or ""))
     if not str(value or "").strip() or relative.is_absolute() or ".." in relative.parts:
-        raise ValueError("产物路径无效")
+        raise ValueError(say("Invalid artifact path", "产物路径无效"))
     return relative
 
 
@@ -651,7 +652,7 @@ def uploads_storage_preview() -> dict[str, Any]:
 def recycle_upload_file(category: str, relative_path: str) -> dict[str, Any]:
     """Move a safe upload-side candidate into managed upload trash."""
     if category not in {"unknown_uploads", "parsed_excel_cache"}:
-        raise ValueError("仅支持回收未知上传或 Excel 解析缓存")
+        raise ValueError(say("Only unknown uploads or Excel parse caches can be moved to the trash", "仅支持回收未知上传或 Excel 解析缓存"))
     uploads_root = content_data_path("uploads").resolve(strict=False)
     relative = _safe_relative_path(relative_path)
     target = (uploads_root / relative).resolve(strict=False)
@@ -659,10 +660,10 @@ def recycle_upload_file(category: str, relative_path: str) -> dict[str, Any]:
         raise FileNotFoundError(relative_path)
     parts = relative.parts
     if parts and parts[0] == "knowledge":
-        raise ValueError("知识库文件不能在这里删除")
+        raise ValueError(say("Knowledge base files cannot be deleted here", "知识库文件不能在这里删除"))
     actual_category = "parsed_excel_cache" if parts and parts[0] == ".parsed_excel" else "unknown_uploads"
     if actual_category != category:
-        raise ValueError("上传文件分类不匹配")
+        raise ValueError(say("The upload file category does not match", "上传文件分类不匹配"))
     data_root = content_data_path().resolve(strict=False)
     registry_path = str(target.relative_to(data_root))
     with _LOCK:
@@ -672,7 +673,7 @@ def recycle_upload_file(category: str, relative_path: str) -> dict[str, Any]:
             if str(item.get("type") or "") == "upload"
         }
         if registry_path in registered_upload_paths:
-            raise ValueError("已登记上传不能按未知上传回收")
+            raise ValueError(say("A registered upload cannot be trashed as an unknown upload", "已登记上传不能按未知上传回收"))
         trash_id = f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex}"
         trash = _upload_trash_root() / trash_id
         trash.mkdir(parents=True, exist_ok=False)
@@ -736,16 +737,16 @@ def restore_upload_trash(trash_id: str) -> dict[str, Any]:
         raise FileNotFoundError(trash_id)
     manifest = _read_upload_trash_manifest(group, root)
     if not manifest:
-        raise ValueError("上传回收站项目已损坏，无法恢复")
+        raise ValueError(say("The upload trash item is corrupted and cannot be restored", "上传回收站项目已损坏，无法恢复"))
     filename = str(manifest.get("filename") or "")
     relative = _safe_relative_path(str(manifest.get("relative_path") or ""))
     source = (group / Path(filename).name).resolve(strict=False)
     uploads_root = content_data_path("uploads").resolve(strict=False)
     destination = (uploads_root / relative).resolve(strict=False)
     if not filename or not source.is_file() or not _within(source, group) or not _within(destination, uploads_root):
-        raise ValueError("上传回收站项目包含无效文件")
+        raise ValueError(say("The upload trash item contains an invalid file", "上传回收站项目包含无效文件"))
     if destination.exists():
-        raise ValueError(f"无法恢复：{destination.name} 已存在")
+        raise ValueError(say(f"Cannot restore: {destination.name} already exists", f"无法恢复：{destination.name} 已存在"))
     with _LOCK:
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, destination)
@@ -891,7 +892,7 @@ def recycle_unregistered_artifact(kind: str, relative_path: str) -> dict[str, An
     """Move an unregistered legacy chart/export into managed artifact trash."""
     managed = _managed_artifact_dirs()
     if kind not in managed:
-        raise ValueError("仅支持回收 charts / exports 历史产物")
+        raise ValueError(say("Only historical charts / exports artifacts can be moved to the trash", "仅支持回收 charts / exports 历史产物"))
     root = content_data_path().resolve(strict=False)
     base = managed[kind].resolve(strict=False)
     relative = _safe_relative_path(relative_path)
@@ -903,7 +904,7 @@ def recycle_unregistered_artifact(kind: str, relative_path: str) -> dict[str, An
     with _LOCK:
         registered_paths = {str(item.get("path") or "") for item in _active_registry_items(_load_registry())}
         if registry_path in registered_paths:
-            raise ValueError("该产物已经登记，不能按历史产物回收")
+            raise ValueError(say("This artifact is already registered and cannot be trashed as a historical artifact", "该产物已经登记，不能按历史产物回收"))
         trash_id = f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex}"
         trash = _artifact_trash_root() / trash_id
         trash.mkdir(parents=True, exist_ok=False)
@@ -928,13 +929,13 @@ def recycle_registered_artifact(artifact_id: str) -> dict[str, Any]:
     """Move an active registered, unreferenced artifact into managed trash."""
     artifact_id = str(artifact_id or "")
     if not artifact_id:
-        raise ValueError("artifact_id 不能为空")
+        raise ValueError(say("artifact_id must not be empty", "artifact_id 不能为空"))
     preview = registered_artifact_reference_preview()
     # Use the full unreferenced id set, not the 20-sample preview list, so
     # every unreferenced registered artifact remains recyclable.
     candidate_ids = {str(item) for item in preview.get("unreferenced_ids") or []}
     if artifact_id not in candidate_ids:
-        raise ValueError("该产物仍有引用或未进入可回收候选")
+        raise ValueError(say("This artifact is still referenced or is not a trash candidate", "该产物仍有引用或未进入可回收候选"))
     root = content_data_path().resolve(strict=False)
     with _LOCK:
         items = _load_registry()
@@ -943,7 +944,7 @@ def recycle_registered_artifact(artifact_id: str) -> dict[str, Any]:
             raise FileNotFoundError(artifact_id)
         artifact_type = str(item.get("type") or "")
         if artifact_type not in {"chart", "export", "report"}:
-            raise ValueError("仅支持回收 chart/export/report 已登记产物")
+            raise ValueError(say("Only registered chart/export/report artifacts can be moved to the trash", "仅支持回收 chart/export/report 已登记产物"))
         relative = _safe_relative_path(str(item.get("path") or ""))
         target = (root / relative).resolve(strict=False)
         if not target.is_file() or not _within(target, root):
@@ -1020,18 +1021,18 @@ def restore_artifact_trash(trash_id: str) -> dict[str, Any]:
         raise FileNotFoundError(trash_id)
     manifest = _read_artifact_trash_manifest(group, root)
     if not manifest:
-        raise ValueError("产物回收站项目已损坏，无法恢复")
+        raise ValueError(say("The artifact trash item is corrupted and cannot be restored", "产物回收站项目已损坏，无法恢复"))
     trash_kind = str(manifest.get("kind") or "")
     kind = str(manifest.get("type") or "")
     filename = str(manifest.get("filename") or "")
     relative = _safe_relative_path(str(manifest.get("relative_path") or ""))
     managed = _managed_artifact_dirs()
     if not filename:
-        raise ValueError("产物回收站项目包含无效目标")
+        raise ValueError(say("The artifact trash item contains an invalid target", "产物回收站项目包含无效目标"))
     source = (group / Path(filename).name).resolve(strict=False)
     if trash_kind == "unregistered_artifact":
         if kind not in managed:
-            raise ValueError("产物回收站项目包含无效目标")
+            raise ValueError(say("The artifact trash item contains an invalid target", "产物回收站项目包含无效目标"))
         base = managed[kind].resolve(strict=False)
         destination = (base / relative).resolve(strict=False)
         boundary = base
@@ -1040,9 +1041,9 @@ def restore_artifact_trash(trash_id: str) -> dict[str, Any]:
         destination = (base / relative).resolve(strict=False)
         boundary = base
     if not source.is_file() or not _within(source, group) or not _within(destination, boundary):
-        raise ValueError("产物回收站项目包含无效文件")
+        raise ValueError(say("The artifact trash item contains an invalid file", "产物回收站项目包含无效文件"))
     if destination.exists():
-        raise ValueError(f"无法恢复：{destination.name} 已存在")
+        raise ValueError(say(f"Cannot restore: {destination.name} already exists", f"无法恢复：{destination.name} 已存在"))
     with _LOCK:
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, destination)

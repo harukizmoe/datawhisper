@@ -16,6 +16,7 @@ pct_of_total / cumulative_pct。
 import pandas as pd
 import numpy as np
 from typing import Optional, Tuple
+from compute.i18n import say
 
 
 # ── 主入口 ─────────────────────────────────────────────────────────────────
@@ -45,7 +46,8 @@ def run(
     if target_column not in df.columns:
         avail = ", ".join(df.columns[:20])
         raise ValueError(
-            f"列 '{target_column}' 不存在。可用列：{avail}"
+            say(f"Column '{target_column}' does not exist. Available columns: {avail}",
+                f"列 '{target_column}' 不存在。可用列：{avail}")
         )
 
     # ── 1. 数据清洗 ────────────────────────────────────────────────────────
@@ -58,7 +60,8 @@ def run(
 
     if n_valid < n_deciles:
         raise ValueError(
-            f"有效数据行数（{n_valid}）少于分桶数（{n_deciles}），无法完成分析。"
+            say(f"Valid rows ({n_valid}) are fewer than the number of buckets ({n_deciles}); cannot complete the analysis.",
+                f"有效数据行数（{n_valid}）少于分桶数（{n_deciles}），无法完成分析。")
         )
 
     # ── 2. 分桶 ───────────────────────────────────────────────────────────
@@ -170,38 +173,40 @@ def _build_markdown(
 ) -> str:
     lines = []
 
-    # 标题
-    lines.append(f"## 📊 十分位分析（Decile Analysis）— `{target_column}`\n")
+    lines.append(say(f"## 📊 Decile Analysis — `{target_column}`\n", f"## 📊 十分位分析（Decile Analysis）— `{target_column}`\n"))
 
     # 修复 1：丢桶警告
     if buckets_merged:
         lines.append(
-            f"> ⚠️ **注意**：因数据中存在大量重复值，实际分桶数为 **{n_deciles}**"
-            f"（请求 {requested_n}），部分分位边界已自动合并。\n"
+            say(f"> ⚠️ **Note**: because the data has many duplicate values, the actual number of buckets is **{n_deciles}** "
+                f"(requested {requested_n}); some quantile boundaries were merged automatically.\n",
+                f"> ⚠️ **注意**：因数据中存在大量重复值，实际分桶数为 **{n_deciles}**"
+                f"（请求 {requested_n}），部分分位边界已自动合并。\n")
         )
 
     # 修复 2：负总和警告
     if negative_total:
         lines.append(
-            f"> ⚠️ **注意**：`{target_column}` 总和为负值（{total_sum:,.2f}），"
-            f"占比列反映各桶对负总量的贡献比例，解读时请注意方向。\n"
+            say(f"> ⚠️ **Note**: the total of `{target_column}` is negative ({total_sum:,.2f}); "
+                f"the share column shows each bucket's contribution to the negative total, so mind the sign when interpreting.\n",
+                f"> ⚠️ **注意**：`{target_column}` 总和为负值（{total_sum:,.2f}），"
+                f"占比列反映各桶对负总量的贡献比例，解读时请注意方向。\n")
         )
 
     # 数据概况
-    lines.append("### 数据概况")
-    lines.append("| 项目 | 数值 |")
+    lines.append(say("### Data Overview", "### 数据概况"))
+    lines.append(say("| Item | Value |", "| 项目 | 数值 |"))
     lines.append("|------|------|")
-    lines.append(f"| 有效数据行 | {total_cnt:,} |")
-    lines.append(f"| 总计（{target_column}） | {total_sum:,.2f} |")
-    lines.append(f"| 均值 | {agg['mean'].mean():,.2f} |")
-    lines.append(f"| 分桶数 | {n_deciles} |")
+    lines.append(say(f"| Valid rows | {total_cnt:,} |", f"| 有效数据行 | {total_cnt:,} |"))
+    lines.append(say(f"| Total ({target_column}) | {total_sum:,.2f} |", f"| 总计（{target_column}） | {total_sum:,.2f} |"))
+    lines.append(say(f"| Mean | {agg['mean'].mean():,.2f} |", f"| 均值 | {agg['mean'].mean():,.2f} |"))
+    lines.append(say(f"| Buckets | {n_deciles} |", f"| 分桶数 | {n_deciles} |"))
     if n_dropped > 0:
-        lines.append(f"| 跳过空值 | {n_dropped:,} 行 |")
-    lines.append("")
+        lines.append(say(f"| Null rows skipped | {n_dropped:,} |", f"| 跳过空值 | {n_dropped:,} 行 |"))
 
     # 各桶汇总
-    lines.append("### 分桶统计")
-    lines.append("| 分位 | 值域范围 | 样本量 | 总计 | 均值 | 中位数 | 标准差 | 占比% | 累计% |")
+    lines.append(say("### Bucket Statistics", "### 分桶统计"))
+    lines.append(say("| Decile | Range | Count | Total | Mean | Median | Std | Share% | Cumulative% |", "| 分位 | 值域范围 | 样本量 | 总计 | 均值 | 中位数 | 标准差 | 占比% | 累计% |"))
     lines.append("|:----:|----------|-------:|-----:|-----:|-------:|-------:|------:|------:|")
     for _, row in agg.iterrows():
         lines.append(
@@ -229,30 +234,38 @@ def _build_markdown(
     bottom_pct = bottom_rows["pct_of_total"].sum()
     bottom_bucket_pct = bottom_n / n * 100
 
-    lines.append("### 💡 核心洞察")
+    lines.append(say("### 💡 Key Insights", "### 💡 核心洞察"))
     lines.append(
-        f"- **Pareto 效应**：排名最高的 {top_bucket_pct:.0f}% 分桶（D{n - top_n + 1}–D{n}）"
-        f"贡献了总 {target_column} 的 **{top_pct:.1f}%**"
+        say(f"- **Pareto effect**: the top {top_bucket_pct:.0f}% of buckets (D{n - top_n + 1}–D{n}) "
+            f"contribute **{top_pct:.1f}%** of total {target_column}",
+            f"- **Pareto 效应**：排名最高的 {top_bucket_pct:.0f}% 分桶（D{n - top_n + 1}–D{n}）"
+            f"贡献了总 {target_column} 的 **{top_pct:.1f}%**")
     )
     lines.append(
-        f"- **底部分位**：排名最低的 {bottom_bucket_pct:.0f}% 分桶（D1–D{bottom_n}）"
-        f"仅贡献 **{bottom_pct:.1f}%**"
+        say(f"- **Bottom buckets**: the lowest {bottom_bucket_pct:.0f}% of buckets (D1–D{bottom_n}) "
+            f"contribute only **{bottom_pct:.1f}%**",
+            f"- **底部分位**：排名最低的 {bottom_bucket_pct:.0f}% 分桶（D1–D{bottom_n}）"
+            f"仅贡献 **{bottom_pct:.1f}%**")
     )
 
     # 标准差最大的桶（最分散）
     max_std_row = agg.loc[agg["std"].idxmax()]
     lines.append(
-        f"- **最分散分位**：D{int(max_std_row['decile'])}（标准差 = {max_std_row['std']:,.2f}，"
-        f"值域 {max_std_row['range']}），内部数据差异最大"
+        say(f"- **Most dispersed bucket**: D{int(max_std_row['decile'])} (std = {max_std_row['std']:,.2f}, "
+            f"range {max_std_row['range']}), largest internal spread",
+            f"- **最分散分位**：D{int(max_std_row['decile'])}（标准差 = {max_std_row['std']:,.2f}，"
+            f"值域 {max_std_row['range']}），内部数据差异最大")
     )
     lines.append("")
 
     # 修复 5：表名与 OUTPUT_TABLES 保持一致（analysis_breakdown）
     if groupby_column and not breakdown_df.empty:
-        lines.append(f"### 分组维度（`{groupby_column}`）")
+        lines.append(say(f"### Grouping dimension (`{groupby_column}`)", f"### 分组维度（`{groupby_column}`）"))
         lines.append(
-            "交叉分析结果已存储于 `analysis_breakdown` 表，"
-            "可用于生成堆叠柱状图等可视化。"
+            say("The cross-tabulation is stored in the `analysis_breakdown` table "
+                "and can be used for visualisations such as stacked bar charts.",
+                "交叉分析结果已存储于 `analysis_breakdown` 表，"
+                "可用于生成堆叠柱状图等可视化。")
         )
         lines.append("")
 
@@ -262,8 +275,11 @@ def _build_markdown(
 # ── 描述信息（供 registry / agent 读取）──────────────────────────────────
 
 ANALYSIS_ID   = "Data_Decile_Analysis"
-ANALYSIS_NAME = "十分位分析（Decile Analysis）"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("Decile Analysis", "十分位分析（Decile Analysis）")
+ANALYSIS_DESC = say(
+    "Split a numeric metric into equal-frequency buckets and compute count/sum/mean/median/std/min/max/"
+    "range/share/cumulative share per bucket to verify the Pareto effect; suited to customer value tiering, sales distribution profiling, ESG score distributions, etc.",
     "将数值指标按大小等频分桶，计算每桶的 count/sum/mean/median/std/min/max/"
     "值域范围/占比/累计占比，验证 Pareto 效应，适用于客户价值分层、销售分布剖析、ESG 评分分布等场景。"
 )

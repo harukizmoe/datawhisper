@@ -32,6 +32,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -45,8 +46,12 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "长格式：x列(时间) + y列(排名/分数) + group列(实体名称) | 宽格式：首列为时间，其余列为实体数据"
-_DESC = "展示多个实体的排名随时间的变化，通过连接线展示排名变化趋势。适合展示相对排名而非绝对值。支持长格式和宽格式数据。"
+def _data_fmt() -> str:
+    return say("Long format: x column (time) + y column (rank/score) + group column (entity name) | Wide format: first column is time, remaining columns are entity data", "长格式：x列(时间) + y列(排名/分数) + group列(实体名称) | 宽格式：首列为时间，其余列为实体数据")
+
+
+def _desc() -> str:
+    return say("Shows how the ranks of multiple entities change over time, with connecting lines tracing the trend. Suited to relative ranking rather than absolute values. Supports long and wide data formats.", "展示多个实体的排名随时间的变化，通过连接线展示排名变化趋势。适合展示相对排名而非绝对值。支持长格式和宽格式数据。")
 
 # 麦肯锡配色方案
 MCKINSEY_COLORS = [
@@ -174,8 +179,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -188,7 +193,7 @@ def generate(
     x: str = "x",
     y: str = "y",
     group: str = "group",
-    title: str = "凹凸图",
+    title: Optional[str] = None,
     highlight: List[str] = None,
     **kwargs
 ) -> ChartResult:
@@ -203,9 +208,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
@@ -213,7 +218,7 @@ def generate(
     y_col = y_col if y_col is not None else y
     group_col = mapping.get("group")
     group_col = group_col if group_col is not None else group
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Bump Chart", "凹凸图"))
 
     # 新增：模式参数
     mode = options.get("mode", "full")  # "full" | "topn_anchor"
@@ -227,14 +232,14 @@ def generate(
     _x = x_col if x_col and x_col != "x" and x_col in df.columns else _auto_col(df, "x", exclude_set)
 
     if _x is None or _x not in df.columns:
-        warnings.append("找不到x列（时间）")
+        warnings.append(say("Cannot find x column (time)", "找不到x列（时间）"))
         return ChartResult(warnings=warnings)
 
     exclude_set.add(_x)
 
     # 检查是否为宽格式
     if _is_wide_format(df, _x):
-        warnings.append("检测到宽格式数据，自动转换为长格式")
+        warnings.append(say("Wide-format data detected; converted to long format automatically", "检测到宽格式数据，自动转换为长格式"))
         df = _wide_to_long(df, _x)
         y_col = "value"
         group_col = "group"
@@ -247,10 +252,10 @@ def generate(
     _group = group_col if group_col and group_col != "group" and group_col in df.columns else _auto_col(df, "group", exclude_set)
 
     if _y is None or _y not in df.columns:
-        warnings.append("找不到y列（排名/分数）")
+        warnings.append(say("Cannot find y column (rank/score)", "找不到y列（排名/分数）"))
         return ChartResult(warnings=warnings)
     if _group is None or _group not in df.columns:
-        warnings.append("找不到group列（实体名称）")
+        warnings.append(say("Cannot find group column (entity name)", "找不到group列（实体名称）"))
         return ChartResult(warnings=warnings)
 
     try:
@@ -260,7 +265,7 @@ def generate(
         df_plot = df_plot.dropna(subset=[_x, _y, _group])
 
         if df_plot.empty:
-            return ChartResult(warnings=["无有效数据"])
+            return ChartResult(warnings=[say("No valid data", "无有效数据")])
 
         # 判断 y 是否已是“排名列”
         y_name = str(_y).lower()
@@ -276,7 +281,7 @@ def generate(
 
         df_plot = df_plot.dropna(subset=["rank"])
         if df_plot.empty:
-            return ChartResult(warnings=["排名计算后无有效数据"])
+            return ChartResult(warnings=[say("No valid data after rank computation", "排名计算后无有效数据")])
 
         # 不强制 int，避免 dense/min 以外策略时丢精度
         df_plot["rank"] = pd.to_numeric(df_plot["rank"], errors="coerce")
@@ -297,7 +302,7 @@ def generate(
 
             anchor_df = df_plot[df_plot[_x] == anchor_x].copy()
             if anchor_df.empty:
-                warnings.append(f"anchor_x={anchor_x} 不存在，回退 full 模式")
+                warnings.append(say(f"anchor_x={anchor_x} does not exist; falling back to full mode", f"anchor_x={anchor_x} 不存在，回退 full 模式"))
             else:
                 keep_groups = (
                     anchor_df.sort_values("rank", ascending=True)
@@ -305,14 +310,14 @@ def generate(
                     .tolist()
                 )
                 df_plot = df_plot[df_plot[_group].isin(keep_groups)].copy()
-                warnings.append(f"topn_anchor: 追踪 {anchor_x} Top{top_n}，共 {len(keep_groups)} 个实体")
+                warnings.append(say(f"topn_anchor: tracking Top{top_n} at {anchor_x}, {len(keep_groups)} entities in total", f"topn_anchor: 追踪 {anchor_x} Top{top_n}，共 {len(keep_groups)} 个实体"))
 
         if df_plot.empty:
-            return ChartResult(warnings=["过滤后无数据"])
+            return ChartResult(warnings=[say("No data after filtering", "过滤后无数据")])
 
         n_groups = df_plot[_group].nunique()
         if n_groups > 15:
-            warnings.append(f"实体数过多({n_groups}个)，建议 ≤15")
+            warnings.append(say(f"Too many entities ({n_groups}); recommend ≤15", f"实体数过多({n_groups}个)，建议 ≤15"))
 
         # 绘图
         # 配色方案：优先用 options.color_scheme，回退到 MCKINSEY_COLORS
@@ -350,7 +355,7 @@ def generate(
                 hovertemplate=(
                     f"<b>{group_val}</b><br>"
                     f"{_x}: %{{x}}<br>"
-                    f"排名: %{{y}}<br>"
+                    f"{say('Rank', '排名')}: %{{y}}<br>"
                     f"{_y}: %{{customdata}}<extra></extra>"
                 ),
                 customdata=subset[_y]
@@ -361,7 +366,7 @@ def generate(
         fig.update_layout(
             title=title,
             xaxis_title=_x,
-            yaxis_title="排名",
+            yaxis_title=say("Rank", "排名"),
             font_family="Heiti SC, Microsoft YaHei, sans-serif",
             plot_bgcolor="white",
             paper_bgcolor="white",
@@ -390,13 +395,13 @@ def generate(
 
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
         if not chart_html or len(chart_html) < 100:
-            return ChartResult(warnings=["图表生成失败"])
+            return ChartResult(warnings=[say("Chart generation failed", "图表生成失败")])
 
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"图表生成失败: {e}"])
+        return ChartResult(warnings=[say(f"Chart generation failed: {e}", f"图表生成失败: {e}")])
 
-    html = _build_html(title, "bump_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "bump_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
 
     meta = {

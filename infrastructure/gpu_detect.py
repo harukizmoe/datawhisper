@@ -21,6 +21,7 @@ import subprocess
 import sys
 from typing import Dict, List
 
+from compute.i18n import say
 from infrastructure.paths import runtime_config_path
 
 log = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ def detect_nvidia() -> Dict:
         return {
             "kind": "none",
             "gpus": [],
-            "message": "未检测到 nvidia-smi：本机无 NVIDIA 独显，或驱动未安装",
+            "message": say("nvidia-smi not found: this machine has no NVIDIA discrete GPU, or the driver is not installed", "未检测到 nvidia-smi：本机无 NVIDIA 独显，或驱动未安装"),
         }
     try:
         proc = subprocess.run(
@@ -74,12 +75,12 @@ def detect_nvidia() -> Dict:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return {"kind": "none", "gpus": [], "message": f"nvidia-smi 执行失败: {exc}"}
+        return {"kind": "none", "gpus": [], "message": say(f"nvidia-smi failed to run: {exc}", f"nvidia-smi 执行失败: {exc}")}
     if proc.returncode != 0:
         return {
             "kind": "none",
             "gpus": [],
-            "message": f"nvidia-smi 返回非零: {proc.stderr.strip() or 'unknown'}",
+            "message": say(f"nvidia-smi returned a non-zero exit code: {proc.stderr.strip() or 'unknown'}", f"nvidia-smi 返回非零: {proc.stderr.strip() or 'unknown'}"),
         }
 
     gpus: List[Dict] = []
@@ -93,13 +94,13 @@ def detect_nvidia() -> Dict:
                 "utilization_pct": _to_int(parts[3]),
             })
     if not gpus:
-        return {"kind": "none", "gpus": [], "message": "nvidia-smi 无 GPU 输出"}
+        return {"kind": "none", "gpus": [], "message": say("nvidia-smi produced no GPU output", "nvidia-smi 无 GPU 输出")}
 
     total_mb = sum(g["memory_total_mb"] for g in gpus)
     return {
         "kind": "nvidia",
         "gpus": gpus,
-        "message": f"检测到 {len(gpus)} 块 NVIDIA 独显（显存合计 {total_mb} MB）",
+        "message": say(f"Detected {len(gpus)} NVIDIA discrete GPU(s) ({total_mb} MB VRAM in total)", f"检测到 {len(gpus)} 块 NVIDIA 独显（显存合计 {total_mb} MB）"),
     }
 
 
@@ -119,13 +120,13 @@ def detect_ollama(timeout: float = 0.6) -> Dict:
         return {
             "online": True,
             "models": models,
-            "message": f"Ollama 在线，发现 {len(models)} 个模型",
+            "message": say(f"Ollama is online; found {len(models)} model(s)", f"Ollama 在线，发现 {len(models)} 个模型"),
         }
     except Exception as exc:  # noqa: BLE001 - 探测必须全面降级
         return {
             "online": False,
             "models": [],
-            "message": f"Ollama 未运行（{exc.__class__.__name__}）",
+            "message": say(f"Ollama is not running ({exc.__class__.__name__})", f"Ollama 未运行（{exc.__class__.__name__}）"),
         }
 
 
@@ -207,7 +208,7 @@ def detect_cuda() -> Dict:
         return {
             "available": False,
             "device_count": 0,
-            "message": "未安装 PyTorch，无法使用本机 CUDA 训练",
+            "message": say("PyTorch is not installed; local CUDA training is unavailable", "未安装 PyTorch，无法使用本机 CUDA 训练"),
         }
     try:
         available = bool(torch.cuda.is_available())
@@ -217,15 +218,15 @@ def detect_cuda() -> Dict:
             "device_count": count,
             "cuda_version": getattr(torch.version, "cuda", None),
             "message": (
-                f"PyTorch CUDA 可用（{count} 块设备）" if available
-                else "PyTorch 未检测到可用 CUDA 设备"
+                say(f"PyTorch CUDA is available ({count} device(s))", f"PyTorch CUDA 可用（{count} 块设备）") if available
+                else say("PyTorch found no usable CUDA device", "PyTorch 未检测到可用 CUDA 设备")
             ),
         }
     except Exception as exc:  # pragma: no cover - third-party driver failures
         return {
             "available": False,
             "device_count": 0,
-            "message": f"CUDA 运行时探测失败: {exc.__class__.__name__}",
+            "message": say(f"CUDA runtime probe failed: {exc.__class__.__name__}", f"CUDA 运行时探测失败: {exc.__class__.__name__}"),
         }
 
 
@@ -265,7 +266,7 @@ def detect_all() -> Dict:
         nvidia = {
             "kind": "discrete_wmi",
             "gpus": discrete,
-            "message": f"WMI 检测到 {len(discrete)} 块独显（nvidia-smi 不可用，型号信息有限）",
+            "message": say(f"WMI detected {len(discrete)} discrete GPU(s) (nvidia-smi unavailable; model info is limited)", f"WMI 检测到 {len(discrete)} 块独显（nvidia-smi 不可用，型号信息有限）"),
         }
     # 没有 NVIDIA 独显但有集显时，更新 message
     if nvidia["kind"] == "none" and all_gpus:
@@ -275,7 +276,7 @@ def detect_all() -> Dict:
             nvidia = {
                 "kind": "integrated",
                 "gpus": all_gpus,
-                "message": f"检测到集显：{names}（不支持 CUDA，推理走云端/CPU）",
+                "message": say(f"Integrated GPU detected: {names} (CUDA not supported; inference runs in the cloud/on CPU)", f"检测到集显：{names}（不支持 CUDA，推理走云端/CPU）"),
             }
     return {
         "gpu": nvidia,

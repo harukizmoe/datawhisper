@@ -24,16 +24,23 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
 
+from compute.i18n import say
+
 
 # ── 模块元数据（供 registry 读取）─────────────────────────────────────────
 
 ANALYSIS_ID   = "Regression"
-ANALYSIS_NAME = "线性回归分析（Linear Regression）"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("Linear Regression Analysis", "线性回归分析（Linear Regression）")
+ANALYSIS_DESC = say(
+    "Performs linear or polynomial regression using ordinary least squares (OLS), with multiple features and ridge regularization. "
+    "Outputs a coefficient table (with t-statistics and p-values), a residual diagnostics table, and metrics such as R² / RMSE / MAE. "
+    "Pass the ridge coefficient lambda via the groupby_column parameter (default 0, i.e. plain OLS); "
+    "pass the polynomial degree via the n_deciles parameter (default 1, i.e. linear regression).",
     "使用最小二乘法（OLS）进行线性回归或多项式回归，支持多元特征与岭回归正则化。"
     "输出系数表（含 t 统计量与 p 值）、残差诊断表及 R² / RMSE / MAE 等评估指标。"
     "通过 groupby_column 参数传入岭回归系数 lambda（默认 0，即普通 OLS）；"
-    "通过 n_deciles 参数传入多项式阶数（默认 1，即线性回归）。"
+    "通过 n_deciles 参数传入多项式阶数（默认 1，即线性回归）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
@@ -133,7 +140,7 @@ def _encode_features(
                 base_feat_names.append(name)
 
     if not base_feat_names:
-        raise ValueError("预处理后无有效特征列，请检查输入数据。")
+        raise ValueError(say("No valid feature columns after preprocessing; please check the input data.", "预处理后无有效特征列，请检查输入数据。"))
 
     X_tr_base = pd.concat(encoded_train_parts, axis=1).values.astype(np.float64)
     X_te_base = pd.concat(encoded_test_parts,  axis=1).values.astype(np.float64)
@@ -399,23 +406,27 @@ def _build_md(
     test_rmse:   float,
     coef_df:     pd.DataFrame,
 ) -> str:
-    mode = f"多项式回归（阶数 {degree}）" if degree > 1 else "多元线性回归（OLS）"
+    mode = (
+        say(f"Polynomial regression (degree {degree})", f"多项式回归（阶数 {degree}）")
+        if degree > 1
+        else say("Multiple linear regression (OLS)", "多元线性回归（OLS）")
+    )
     if lam > 0:
-        mode += f" + 岭回归（λ={lam}）"
+        mode += say(f" + Ridge regression (λ={lam})", f" + 岭回归（λ={lam}）")
 
     L = [
-        f"## 线性回归分析 - `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 回归类型 | {mode} |",
-        f"| 训练样本 | {n_train} |",
-        f"| 测试样本 | {n_test} |",
-        f"| 特征数量 | {n_features} |",
+        say(f"## Linear Regression Analysis - `{target_col}`\n", f"## 线性回归分析 - `{target_col}`\n"),
+        say("### Model Overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Regression type | {mode} |", f"| 回归类型 | {mode} |"),
+        say(f"| Training samples | {n_train} |", f"| 训练样本 | {n_train} |"),
+        say(f"| Test samples | {n_test} |", f"| 测试样本 | {n_test} |"),
+        say(f"| Number of features | {n_features} |", f"| 特征数量 | {n_features} |"),
         f"| Ridge λ  | {lam} |",
-        f"| 多项式阶数 | {degree} |",
+        say(f"| Polynomial degree | {degree} |", f"| 多项式阶数 | {degree} |"),
         "",
-        "### 拟合优度",
-        "| 指标 | 训练集 | 测试集 |",
+        say("### Goodness of Fit", "### 拟合优度"),
+        say("| Metric | Train | Test |", "| 指标 | 训练集 | 测试集 |"),
         "|------|--------|--------|",
         f"| **R²** | **{train_r2:.4f}** | **{test_r2:.4f}** |",
         f"| RMSE  | {train_rmse:.4f} | {test_rmse:.4f} |",
@@ -425,8 +436,8 @@ def _build_md(
     # ── 系数表（前 10）──────────────────────────────────────────────────────
     feat_only = coef_df[coef_df["feature"] != "(intercept)"].head(10)
     L += [
-        "### 特征系数（按 |t| 排序，前 10）",
-        "| 排名 | 特征 | 系数 | t 统计量 | p 值 | 显著 | VIF |",
+        say("### Feature Coefficients (sorted by |t|, top 10)", "### 特征系数（按 |t| 排序，前 10）"),
+        say("| Rank | Feature | Coefficient | t-statistic | p-value | Significant | VIF |", "| 排名 | 特征 | 系数 | t 统计量 | p 值 | 显著 | VIF |"),
         "|:----:|------|-----:|--------:|-----:|:----:|----:|",
     ]
     for _, row in feat_only.iterrows():
@@ -440,43 +451,51 @@ def _build_md(
 
     # ── 核心洞察 ────────────────────────────────────────────────────────────
     sig_feats = feat_only[feat_only["significant"] == "✓"]
-    L.append("### 核心洞察")
+    L.append(say("### Key Insights", "### 核心洞察"))
 
     if test_r2 >= 0.8:
-        L.append(f"- 测试集 R² = **{test_r2:.4f}**，模型拟合优秀，可解释 {test_r2:.1%} 的目标方差。")
+        L.append(say(f"- Test R² = **{test_r2:.4f}**; the model fits very well and explains {test_r2:.1%} of the target variance.", f"- 测试集 R² = **{test_r2:.4f}**，模型拟合优秀，可解释 {test_r2:.1%} 的目标方差。"))
     elif test_r2 >= 0.5:
-        L.append(f"- 测试集 R² = **{test_r2:.4f}**，模型有一定解释力，可考虑增加更多特征或提高多项式阶数。")
+        L.append(say(f"- Test R² = **{test_r2:.4f}**; the model has some explanatory power. Consider adding more features or raising the polynomial degree.", f"- 测试集 R² = **{test_r2:.4f}**，模型有一定解释力，可考虑增加更多特征或提高多项式阶数。"))
     else:
-        L.append(f"- 测试集 R² = **{test_r2:.4f}**，线性关系较弱，建议检查数据或尝试非线性模型。")
+        L.append(say(f"- Test R² = **{test_r2:.4f}**; the linear relationship is weak. Check the data or try a nonlinear model.", f"- 测试集 R² = **{test_r2:.4f}**，线性关系较弱，建议检查数据或尝试非线性模型。"))
 
     overfit_gap = train_r2 - test_r2
     if overfit_gap > 0.15:
         L.append(
-            f"- 过拟合警告：训练/测试 R² 相差 {overfit_gap:.4f}，"
-            f"建议增大岭回归系数（groupby_column 参数）或减少多项式阶数。"
+            say(
+                f"- Overfitting warning: train/test R² differ by {overfit_gap:.4f}. "
+                f"Consider increasing the ridge coefficient (groupby_column parameter) or reducing the polynomial degree.",
+                f"- 过拟合警告：训练/测试 R² 相差 {overfit_gap:.4f}，"
+                f"建议增大岭回归系数（groupby_column 参数）或减少多项式阶数。",
+            )
         )
 
     if not sig_feats.empty:
         top = sig_feats.iloc[0]
-        direction = "正向" if top["coefficient"] > 0 else "负向"
+        direction = say("positive", "正向") if top["coefficient"] > 0 else say("negative", "负向")
         L.append(
-            f"- 最显著特征：`{top['feature']}`（系数 {top['coefficient']:+.4f}，"
-            f"p={top['p_value']:.4f}，{direction}影响目标变量）。"
+            say(
+                f"- Most significant feature: `{top['feature']}` (coefficient {top['coefficient']:+.4f}, "
+                f"p={top['p_value']:.4f}, {direction} effect on the target variable).",
+                f"- 最显著特征：`{top['feature']}`（系数 {top['coefficient']:+.4f}，"
+                f"p={top['p_value']:.4f}，{direction}影响目标变量）。",
+            )
         )
     else:
-        L.append("- 无特征在 p<0.05 水平上显著，建议检查数据质量或特征选择。")
+        L.append(say("- No feature is significant at the p<0.05 level; check data quality or feature selection.", "- 无特征在 p<0.05 水平上显著，建议检查数据质量或特征选择。"))
 
     # VIF 多重共线性警告
     high_vif = feat_only[feat_only["vif"].apply(lambda v: v is not None and v > 10)]
     if not high_vif.empty:
         names = ", ".join(f"`{r['feature']}`" for _, r in high_vif.iterrows())
-        L.append(f"- 多重共线性警告：{names} VIF > 10，建议考虑删除冗余特征或使用岭回归。")
+        L.append(say(f"- Multicollinearity warning: {names} have VIF > 10; consider dropping redundant features or using ridge regression.", f"- 多重共线性警告：{names} VIF > 10，建议考虑删除冗余特征或使用岭回归。"))
 
     L += [
         "",
-        "> 系数表存储于 `analysis_result`，绘图方法：Bar_Chart，x=feature，y=coefficient。",
-        "> 残差诊断数据存储于 `analysis_breakdown`，绘图方法：Scatter_Plot，x=y_pred，y=std_residual。",
-        "> 综合指标存储于 `analysis_metrics`（metric / train_value / test_value）。",
+        say("> The coefficient table is stored in `analysis_result`; chart method: Bar_Chart, x=feature, y=coefficient.", "> 系数表存储于 `analysis_result`，绘图方法：Bar_Chart，x=feature，y=coefficient。"),
+        say("> Residual diagnostics are stored in `analysis_breakdown`; chart method: Scatter_Plot, x=y_pred, y=std_residual.", "> 残差诊断数据存储于 `analysis_breakdown`，绘图方法：Scatter_Plot，x=y_pred，y=std_residual。"),
+        say("> Overall metrics are stored in `analysis_metrics` (metric / train_value / test_value).", "> 综合指标存储于 `analysis_metrics`（metric / train_value / test_value）。"),
         "",
     ]
     return "\n".join(L)
@@ -522,21 +541,29 @@ def run(
 
     if target_column not in df.columns:
         raise ValueError(
-            f"目标列 '{target_column}' 不存在。"
-            f"可用列：{', '.join(df.columns[:20])}"
+            say(
+                f"Target column '{target_column}' does not exist. "
+                f"Available columns: {', '.join(df.columns[:20])}",
+                f"目标列 '{target_column}' 不存在。"
+                f"可用列：{', '.join(df.columns[:20])}",
+            )
         )
 
     if not pd.api.types.is_numeric_dtype(df[target_column]):
         raise ValueError(
-            f"目标列 '{target_column}' 不是数值类型，线性回归要求连续数值目标变量。"
-            f"若需分类分析，请使用 Logistic_Regression 模块。"
+            say(
+                f"Target column '{target_column}' is not numeric; linear regression requires a continuous numeric target. "
+                f"For classification, use the Logistic_Regression module.",
+                f"目标列 '{target_column}' 不是数值类型，线性回归要求连续数值目标变量。"
+                f"若需分类分析，请使用 Logistic_Regression 模块。",
+            )
         )
 
     # ── 预处理 ────────────────────────────────────────────────────────────
     df = _fill_missing(df, target_column)
 
     if len(df) < 3:
-        raise ValueError(f"数据行数不足（{len(df)} 行），无法进行回归分析。")
+        raise ValueError(say(f"Not enough data rows ({len(df)} rows) to run regression analysis.", f"数据行数不足（{len(df)} 行），无法进行回归分析。"))
 
     # ── 训练 / 测试分割 ───────────────────────────────────────────────────
     train_df, test_df = _split(df)

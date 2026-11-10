@@ -25,6 +25,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -37,8 +38,18 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "市列 + 地区名列 + 数值列1 [+ 数值列2(可选)]"
-_DESC = "散点图：第一列数值着色，第二列数值控制点大小。"
+def _data_fmt() -> str:
+    return say(
+        "City column + region name column + value column 1 [+ value column 2 (optional)]",
+        "市列 + 地区名列 + 数值列1 [+ 数值列2(可选)]",
+    )
+
+
+def _desc() -> str:
+    return say(
+        "Scatter plot: the first value column sets color, the second controls point size.",
+        "散点图：第一列数值着色，第二列数值控制点大小。",
+    )
 
 
 def _fuzzy_match_region(name: str) -> str:
@@ -122,7 +133,7 @@ def generate(
     city: str = None,
     label: str = None,
     value: str = None,
-    title: str = "点密度地图",
+    title: str = None,
     **kwargs,
 ) -> ChartResult:
     """
@@ -145,9 +156,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     city_hint = mapping.get("city")
     city_hint = city_hint if city_hint is not None else city
@@ -155,7 +166,7 @@ def generate(
     lbl_hint = lbl_hint if lbl_hint is not None else label
     val_hint = mapping.get("value")
     val_hint = val_hint if val_hint is not None else value
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Dot Density Map", "点密度地图"))
 
     # ── 列识别 ────────────────────────────────────────────
     used: set = set()
@@ -184,14 +195,14 @@ def generate(
     if _label:
         used.add(_label)
     else:
-        return ChartResult(warnings=["找不到地区名列 [label]"])
+        return ChartResult(warnings=[say("Region name column [label] not found", "找不到地区名列 [label]")])
 
     # 识别数值列（可能有多个）
     _value1 = _detect_value_col(df, used, val_hint)
     if _value1:
         used.add(_value1)
     else:
-        return ChartResult(warnings=["找不到数值列 [value]"])
+        return ChartResult(warnings=[say("Value column [value] not found", "找不到数值列 [value]")])
 
     _value2 = _detect_value_col(df, used)  # 第二个数值列（可选）
 
@@ -220,7 +231,7 @@ def generate(
             val1 = round(float(row[_value1]), 2)
         except Exception as e:
             log.warning("[chart] 图表生成异常: %s", e)
-            warnings_.append(f"行解析失败: {e}")
+            warnings_.append(say(f"Row parsing failed: {e}", f"行解析失败: {e}"))
             continue
 
         # 查询 pyecharts 内置坐标库（COORDINATES 是 FuzzyDict，支持模糊匹配）
@@ -243,11 +254,11 @@ def generate(
         val1_list.append(val1)
 
     if missing_regions:
-        warnings_.append(f"以下地区未找到坐标（已跳过）: {', '.join(missing_regions[:10])}"
-                         + (f" 等{len(missing_regions)}处" if len(missing_regions) > 10 else ""))
+        warnings_.append(say(f"Regions without coordinates (skipped): {', '.join(missing_regions[:10])}", f"以下地区未找到坐标（已跳过）: {', '.join(missing_regions[:10])}")
+                         + (say(f" and {len(missing_regions) - 10} more", f" 等{len(missing_regions)}处") if len(missing_regions) > 10 else ""))
 
     if not scatter_data:
-        return ChartResult(warnings=["没有有效数据点，请检查地区名是否在 pyecharts 坐标库中"])
+        return ChartResult(warnings=[say("No valid data points; check that region names exist in the pyecharts coordinate library", "没有有效数据点，请检查地区名是否在 pyecharts 坐标库中")])
 
     vmin1, vmax1 = min(val1_list), max(val1_list)
 
@@ -292,10 +303,10 @@ def generate(
         tooltip_opts=opts.TooltipOpts(trigger="item", formatter="{b}"),
     )
 
-    sub_parts = [f"共 {len(scatter_data)} 个地区（maptype: {maptype}）"]
-    sub_parts.append(f"字段: {_value1} · 范围: {vmin1:.2f} ~ {vmax1:.2f}")
+    sub_parts = [say(f"{len(scatter_data)} regions (maptype: {maptype})", f"共 {len(scatter_data)} 个地区（maptype: {maptype}）")]
+    sub_parts.append(say(f"Field: {_value1} · Range: {vmin1:.2f} ~ {vmax1:.2f}", f"字段: {_value1} · 范围: {vmin1:.2f} ~ {vmax1:.2f}"))
     if _value2:
-        sub_parts.append(f"附加: {_value2}")
+        sub_parts.append(say(f"Additional: {_value2}", f"附加: {_value2}"))
 
     raw_html = geo.render_embed()
 

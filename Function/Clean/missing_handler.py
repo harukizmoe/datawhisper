@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from typing import List, Optional, Tuple
 
+from compute.i18n import say
+
 
 def fill_missing(
     df: pd.DataFrame,
@@ -28,29 +30,29 @@ def fill_missing(
         target = numeric_all
 
     if not target:
-        return df.copy(), "⚠️ 未找到可处理的数值列。"
+        return df.copy(), say("⚠️ No numeric columns to process were found.", "⚠️ 未找到可处理的数值列。")
 
     before = df[target].isnull().sum()
     cleaned = df.copy()
 
     if method == "zero":
         cleaned[target] = cleaned[target].fillna(0)
-        method_cn = "填 0"
+        method_cn = say("fill with 0", "填 0")
     elif method == "mean":
         for col in target:
             cleaned[col] = cleaned[col].fillna(cleaned[col].mean())
-        method_cn = "填均值"
+        method_cn = say("fill with mean", "填均值")
     elif method == "median":
         for col in target:
             cleaned[col] = cleaned[col].fillna(cleaned[col].median())
-        method_cn = "填中位数"
+        method_cn = say("fill with median", "填中位数")
     else:
-        return df.copy(), f"❌ 未知方法 '{method}'，支持：zero / mean / median"
+        return df.copy(), say(f"❌ Unknown method '{method}'; supported: zero / mean / median", f"❌ 未知方法 '{method}'，支持：zero / mean / median")
 
     after = cleaned[target].isnull().sum()
     total_filled = int((before - after).sum())
 
-    rows = ["| 列名 | 处理前缺失 | 处理后缺失 | 填充数 |",
+    rows = [say("| Column | Missing before | Missing after | Filled |", "| 列名 | 处理前缺失 | 处理后缺失 | 填充数 |"),
             "|------|-----------|-----------|--------|"]
     for col in target:
         diff = int(before[col] - after[col])
@@ -58,9 +60,14 @@ def fill_missing(
             rows.append(f"| {col} | {int(before[col])} | {int(after[col])} | {diff} |")
 
     summary = (
-        f"## 缺失值处理完成（{method_cn}）\n"
-        f"- 处理列数：{len(target)}\n"
-        f"- 共填充 {total_filled} 个单元格\n\n"
+        say(
+            f"## Missing value handling complete ({method_cn})\n"
+            f"- Columns processed: {len(target)}\n"
+            f"- Cells filled: {total_filled}\n\n",
+            f"## 缺失值处理完成（{method_cn}）\n"
+            f"- 处理列数：{len(target)}\n"
+            f"- 共填充 {total_filled} 个单元格\n\n",
+        )
         + "\n".join(rows)
     )
     return cleaned, summary

@@ -24,11 +24,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
-
-_DATA_FMT = "labels列(节点名称) + values列(数值) + 可选parents列(父级)"
-_DESC = "用圆形扇区表示占比，支持多层级嵌套展示。适合展示有层级且数量较多的分类数据。"
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -87,6 +85,8 @@ def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
 
 def _build_html(title: str, chart_name: str, library: str,
                 data_fmt: str, desc: str, embed: str) -> str:
+    lbl_fmt = say("Data format:", "数据格式：")
+    lbl_desc = say("Description:", "说明：")
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -165,8 +165,8 @@ body {{
 </div>
 </div>
 <div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{lbl_fmt}</strong>{data_fmt}<br>
+<strong>{lbl_desc}</strong>{desc}
 </div>
 </div>
 </body>
@@ -302,7 +302,7 @@ def generate(
     mapping: Dict[str, str] = None,
     options: Dict[str, Any] = None,
     excel_path: str = None,
-    title: str = "旭日图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -366,14 +366,14 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     if df is None or df.empty:
-        return ChartResult(warnings=["输入数据为空"])
+        return ChartResult(warnings=[say("Input data is empty", "输入数据为空")])
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Sunburst Diagram", "旭日图"))
 
     color_scheme_name = options.get("color_scheme", "mckinsey")
     color_scheme = get_color_scheme(color_scheme_name)
@@ -405,7 +405,7 @@ def generate(
             num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
             val_col = num_cols[-1] if num_cols else None
         if val_col is None:
-            return ChartResult(warnings=["找不到数值列 (values)"])
+            return ChartResult(warnings=[say("Value column (values) not found", "找不到数值列 (values)")])
 
         work_df = df.copy()
         work_df[lbl_col] = work_df[lbl_col].astype(str).str.strip()
@@ -413,16 +413,16 @@ def generate(
         work_df[val_col] = pd.to_numeric(work_df[val_col], errors="coerce")
         invalid_n = int(work_df[val_col].isna().sum())
         if invalid_n > 0:
-            warnings.append(f"警告：{val_col} 列有 {invalid_n} 行无法转为数值，已忽略")
+            warnings.append(say(f"Warning: {val_col} column has {invalid_n} rows that cannot be converted to numbers; ignored", f"警告：{val_col} 列有 {invalid_n} 行无法转为数值，已忽略"))
 
         # 零/负值叶节点会被丢弃（sunburst 要求正数），需明确警告
         nonpos_n = int((work_df[val_col] <= 0).sum())
         if nonpos_n > 0:
-            warnings.append(f"警告：{val_col} 列有 {nonpos_n} 行 ≤0，已忽略（旭日图需正数）")
+            warnings.append(say(f"Warning: {val_col} column has {nonpos_n} rows ≤0; ignored (sunburst requires positive values)", f"警告：{val_col} 列有 {nonpos_n} 行 ≤0，已忽略（旭日图需正数）"))
         work_df = work_df[work_df[val_col].notna() & (work_df[val_col] > 0)].copy()
 
         if work_df.empty:
-            return ChartResult(warnings=[f"错误：{val_col} 列无有效数据（需为正数）"])
+            return ChartResult(warnings=[say(f"Error: {val_col} column has no valid data (must be positive)", f"错误：{val_col} 列无有效数据（需为正数）")])
 
         # 空字符串 parent 视为根节点
         ids = work_df[lbl_col].astype(str).tolist()
@@ -432,7 +432,7 @@ def generate(
         level_cols = [lbl_col, par_col]
         values_col = val_col
 
-        warnings.append(f"使用扁平层级映射：labels={lbl_col}, parents={par_col}, values={val_col}")
+        warnings.append(say(f"Using flat hierarchy mapping: labels={lbl_col}, parents={par_col}, values={val_col}", f"使用扁平层级映射：labels={lbl_col}, parents={par_col}, values={val_col}"))
     else:
         # ── 多层级列推断格式（原逻辑）──
         # 尊重 mapping.values（若有），否则取最后一列/最后数值列
@@ -447,34 +447,34 @@ def generate(
                 values_col = num_cols[-1] if num_cols else None
 
         if values_col is None:
-            return ChartResult(warnings=["找不到数值列（最后一列或最后一个数值列）"])
+            return ChartResult(warnings=[say("Value column not found (last column or last numeric column)", "找不到数值列（最后一列或最后一个数值列）")])
 
         work_df = df.copy()
         work_df[values_col] = pd.to_numeric(work_df[values_col], errors="coerce")
         invalid_n = int(work_df[values_col].isna().sum())
         if invalid_n > 0:
-            warnings.append(f"警告：{values_col} 列有 {invalid_n} 行无法转为数值，已忽略")
+            warnings.append(say(f"Warning: {values_col} column has {invalid_n} rows that cannot be converted to numbers; ignored", f"警告：{values_col} 列有 {invalid_n} 行无法转为数值，已忽略"))
         nonpos_n = int((work_df[values_col] <= 0).sum())
         if nonpos_n > 0:
-            warnings.append(f"警告：{values_col} 列有 {nonpos_n} 行 ≤0，已忽略（旭日图需正数）")
+            warnings.append(say(f"Warning: {values_col} column has {nonpos_n} rows ≤0; ignored (sunburst requires positive values)", f"警告：{values_col} 列有 {nonpos_n} 行 ≤0，已忽略（旭日图需正数）"))
         work_df = work_df[work_df[values_col].notna() & (work_df[values_col] > 0)].copy()
 
         if work_df.empty:
-            return ChartResult(warnings=[f"错误：{values_col} 列无有效数据（需为正数）"])
+            return ChartResult(warnings=[say(f"Error: {values_col} column has no valid data (must be positive)", f"错误：{values_col} 列无有效数据（需为正数）")])
 
         # 除 values 外，按列顺序取文本列作为层级列
         level_cols = [c for c in work_df.columns if c != values_col and _is_text_col(work_df[c])]
 
         if not level_cols:
-            return ChartResult(warnings=["找不到可用于层级的文本列"])
+            return ChartResult(warnings=[say("No text column available for hierarchy levels", "找不到可用于层级的文本列")])
 
         # 只取前3层
         level_cols = level_cols[:3]
 
         ids, labels, parents, values = _build_tree(work_df, level_cols, values_col)
         if not ids:
-            return ChartResult(warnings=["错误：构建 sunburst 树失败（无有效节点）"])
-        warnings.append(f"按列顺序自动识别层级：{level_cols}")
+            return ChartResult(warnings=[say("Error: failed to build sunburst tree (no valid nodes)", "错误：构建 sunburst 树失败（无有效节点）")])
+        warnings.append(say(f"Hierarchy levels auto-detected by column order: {level_cols}", f"按列顺序自动识别层级：{level_cols}"))
 
     colors = (marker_colors * (len(labels) // len(marker_colors) + 1))[:len(labels)]
 
@@ -528,7 +528,7 @@ def generate(
 
     fig_id = f"sunburst-{uuid.uuid4().hex}"
     fig_json = json.dumps({"data": [trace_data], "layout": layout_data}, ensure_ascii=False)
-
+    render_fail_msg = say("Chart rendering failed; open the console to see the error.", "图表渲染失败，请打开控制台查看错误。")
     chart_html = f"""<div>
     <script>window.PlotlyConfig = {{MathJaxConfig: 'local'}};</script>
     <script charset="utf-8" src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -545,14 +545,19 @@ def generate(
                 console.error("Sunburst render error:", e);
                 var el = document.getElementById('{fig_id}');
                 if (el) {{
-                    el.innerHTML = '<div style="color:#c00;padding:12px;">图表渲染失败，请打开控制台查看错误。</div>';
+                    el.innerHTML = '<div style="color:#c00;padding:12px;">{render_fail_msg}</div>';
                 }}
             }}
         }})();
     </script>
 </div>"""
 
-    html = _build_html(title, "sunburst", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "sunburst", "plotly",
+                       say("labels column (node names) + values column (numbers) + optional parents column (parent level)",
+                           "labels列(节点名称) + values列(数值) + 可选parents列(父级)"),
+                       say("Uses circular sectors to show proportions and supports multi-level nesting. Suited to hierarchical categorical data with many items.",
+                           "用圆形扇区表示占比，支持多层级嵌套展示。适合展示有层级且数量较多的分类数据。"),
+                       chart_html)
 
     meta = {
         "chart_id": "sunburst",

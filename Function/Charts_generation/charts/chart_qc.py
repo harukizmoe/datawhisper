@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from compute.i18n import say
+
 log = logging.getLogger(__name__)
 
 __all__ = ["CHART_BUDGETS", "DEFAULT_BUDGETS", "qc_figures"]
@@ -118,11 +120,11 @@ def qc_figures(
     warnings: List[str] = []
     try:
         prior = " ".join(str(w) for w in (prior_warnings or []))
-        module_flagged_categories = "类别过多" in prior or "类别数" in prior
+        module_flagged_categories = "类别过多" in prior or "类别数" in prior or "too many categories" in prior.lower() or "category count" in prior.lower()
         if not figures:
             # 有 newPlot 却没解析出 figure，说明 JSON 形态异常
             if html and "Plotly.newPlot" in html:
-                warnings.append("plotly figure 解析失败，未能执行自动质检（不影响渲染）")
+                warnings.append(say("Failed to parse the plotly figure, so automatic QC was not run (rendering is unaffected)", "plotly figure 解析失败，未能执行自动质检（不影响渲染）"))
             return warnings
 
         budget = _budget_for(chart_type)
@@ -131,7 +133,7 @@ def qc_figures(
         for fig in figures:
             traces = [t for t in (fig.get("data") or []) if isinstance(t, dict)]
             if not traces:
-                warnings.append("图表没有任何数据系列（trace），渲染结果可能为空白")
+                warnings.append(say("The chart has no data series (trace); the rendered result may be blank", "图表没有任何数据系列（trace），渲染结果可能为空白"))
                 continue
 
             # ── 标题 ──
@@ -144,7 +146,7 @@ def qc_figures(
             else:
                 title_text = ""
             if not title_text and "<h1" not in (html or ""):
-                warnings.append("图表缺少标题，请通过 generate_chart 的 title 参数补充")
+                warnings.append(say("The chart has no title; add one via the title parameter of generate_chart", "图表缺少标题，请通过 generate_chart 的 title 参数补充"))
 
             # ── 重复系列名 / 系列计数 ──
             # 只看图例可见的 trace：showlegend=False 的 trace 是结构组件
@@ -156,9 +158,10 @@ def qc_figures(
             names = [str(t.get("name")).strip() for t in legend_traces if t.get("name")]
             dupes = sorted({n for n in names if names.count(n) > 1})
             if dupes:
-                warnings.append(
-                    f"存在重复系列名: {', '.join(dupes)}，图例无法区分，建议在 SQL 中重命名后重新生成"
-                )
+                warnings.append(say(
+                    f"Duplicate series names: {', '.join(dupes)}; the legend cannot tell them apart. Rename them in the SQL and regenerate",
+                    f"存在重复系列名: {', '.join(dupes)}，图例无法区分，建议在 SQL 中重命名后重新生成",
+                ))
 
             # ── 空 / NULL 类别标签 ──
             # 只有含字符串的轴才按类别轴检查：全 None 的幽灵 trace
@@ -173,9 +176,10 @@ def qc_figures(
                     1 for c in cats if str(c).strip().lower() in _BAD_LABELS
                 )
             if bad_labels:
-                warnings.append(
-                    f"存在 {bad_labels} 个空/NULL 类别标签，建议 SQL 加 WHERE 过滤后重新生成"
-                )
+                warnings.append(say(
+                    f"There are {bad_labels} empty/NULL category labels; add a WHERE filter in the SQL and regenerate",
+                    f"存在 {bad_labels} 个空/NULL 类别标签，建议 SQL 加 WHERE 过滤后重新生成",
+                ))
 
             # ── 复杂度预算 ──
             # 类别预算只对类别型 trace 生效：折线/散点的 x 是连续时间/数值轴，
@@ -189,31 +193,36 @@ def qc_figures(
             limit_categories = budget["categories"]
             limit_series = budget["series"]
             if n_categories > limit_categories and not module_flagged_categories:
-                warnings.append(
+                warnings.append(say(
+                    f"Category count {n_categories} exceeds the complexity budget {limit_categories} for {chart_key}; "
+                    f"aggregate in the SQL to Top {max(limit_categories - 1, 1)} + 'Other' and regenerate",
                     f"类别数 {n_categories} 超过 {chart_key} 的复杂度预算 {limit_categories}，"
-                    f"建议 SQL 聚合为 Top {max(limit_categories - 1, 1)} + '其他' 后重新生成"
-                )
+                    f"建议 SQL 聚合为 Top {max(limit_categories - 1, 1)} + '其他' 后重新生成",
+                ))
             if n_series > limit_series:
-                warnings.append(
+                warnings.append(say(
+                    f"Series count {n_series} exceeds the complexity budget {limit_series} for {chart_key}; "
+                    "keep only the key series or split into several charts",
                     f"系列数 {n_series} 超过 {chart_key} 的复杂度预算 {limit_series}，"
-                    "建议只保留关键系列或拆分为多张图"
-                )
+                    "建议只保留关键系列或拆分为多张图",
+                ))
             if chart_key in {"scatter_plot", "bubble_plot", "connected_scatter"}:
                 n_points = max(
                     (len(t.get("x") or []) for t in traces if isinstance(t.get("x"), list)),
                     default=0,
                 )
                 if n_points > budget["points"]:
-                    warnings.append(
-                        f"散点数 {n_points} 过多（建议 ≤{budget['points']}），建议采样或聚合后重新生成"
-                    )
+                    warnings.append(say(
+                        f"Too many points ({n_points}; recommended ≤{budget['points']}); sample or aggregate and regenerate",
+                        f"散点数 {n_points} 过多（建议 ≤{budget['points']}），建议采样或聚合后重新生成",
+                    ))
 
             # ── 单点折线 ──
             for t in traces:
                 if str(t.get("type") or "") == "scatter" and "lines" in str(t.get("mode") or ""):
                     xs = t.get("x")
                     if isinstance(xs, list) and len(xs) == 1:
-                        warnings.append("折线图只有 1 个数据点，无法展示趋势，建议扩大时间范围")
+                        warnings.append(say("The line chart has only 1 data point and cannot show a trend; widen the time range", "折线图只有 1 个数据点，无法展示趋势，建议扩大时间范围"))
                         break
     except Exception as exc:  # pragma: no cover —— QC 兜底
         log.debug(f"chart QC skipped due to internal error: {exc}")

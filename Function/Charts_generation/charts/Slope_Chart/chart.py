@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,7 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "group列 + start列 + end列"
-_DESC = "用连线斜率展示从起点到终点的变化，适合比较两个时间点间的差异。"
+
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -106,7 +106,7 @@ def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
 def _build_html(title: str, chart_name: str, library: str,
                 data_fmt: str, desc: str, embed: str) -> str:
     return f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="{say('en', 'zh-CN')}"><head><meta charset="UTF-8">
 <title>{title}</title>
 <style>
 body{{font-family:"Heiti SC","Microsoft YaHei",sans-serif;margin:40px;background:#fafafa}}
@@ -119,8 +119,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -148,7 +148,7 @@ def generate(
     group: str = "group",
     start: str = "start",
     end: str = "end",
-    title: str = "斜率图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -161,11 +161,13 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     title = options.get("title", title)
+    if title is None:
+        title = say("Slope Chart", "斜率图")
 
     # Support x/y mapping (LLM typically sends x=group, y=[start,end])
     x_col = mapping.get("x")
@@ -204,14 +206,14 @@ def generate(
 
     for role, col_ in [("group", _group), ("start", _start), ("end", _end)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _group not in df.columns or _start not in df.columns or _end not in df.columns:
         return ChartResult(warnings=warnings)
 
     # 检查数据行数
     if len(df) > 30:
-        warnings.append(f"实体数 {len(df)} 超过建议上限 30，图表可能过于拥挤")
+        warnings.append(say(f"Entity count {len(df)} exceeds the recommended limit of 30; the chart may be crowded", f"实体数 {len(df)} 超过建议上限 30，图表可能过于拥挤"))
 
     fig = go.Figure()
 
@@ -229,9 +231,9 @@ def generate(
     before = len(df_sorted)
     df_sorted = df_sorted.dropna(subset=[_start, _end])
     if before != len(df_sorted):
-        warnings.append(f"已忽略 {before - len(df_sorted)} 行无法解析为数值的 start/end 数据")
+        warnings.append(say(f"Ignored {before - len(df_sorted)} row(s) whose start/end values could not be parsed as numbers", f"已忽略 {before - len(df_sorted)} 行无法解析为数值的 start/end 数据"))
     if df_sorted.empty:
-        return ChartResult(warnings=warnings + ["start/end 列不含可用数值"])
+        return ChartResult(warnings=warnings + [say("The start/end columns contain no usable numeric values", "start/end 列不含可用数值")])
     df_sorted["_change"] = df_sorted[_end] - df_sorted[_start]
     df_sorted = df_sorted.sort_values("_change", ascending=False)
     
@@ -252,9 +254,9 @@ def generate(
             marker=dict(size=9, color=color),
             hovertemplate=(
                 f"<b>{row[_group]}</b><br>"
-                "时间点: %{x}<br>"
-                "数值: %{y:.2f}<br>"
-                f"变化: {change:+.2f}<extra></extra>"
+                + say("Time point", "时间点") + ": %{x}<br>"
+                + say("Value", "数值") + ": %{y:.2f}<br>"
+                + say("Change", "变化") + f": {change:+.2f}<extra></extra>"
             ),
             showlegend=False,
         ))
@@ -292,7 +294,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "slope_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "slope_chart", "plotly", say("group column + start column + end column", "group列 + start列 + end列"), say("Uses line slopes to show change from start to end; suited to comparing differences between two time points.", "用连线斜率展示从起点到终点的变化，适合比较两个时间点间的差异。"), chart_html)
 
     meta = {
         "chart_id": "slope_chart",

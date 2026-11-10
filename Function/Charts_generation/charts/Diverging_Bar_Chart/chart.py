@@ -20,6 +20,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -34,8 +35,20 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 __all__ = ["generate"]
 import logging
 logger = logging.getLogger(__name__)
-_DATA_FMT = "单列模式: item列 + value列 | 多列模式: item列 + 负值列(多个) + 正值列(多个)"
-_DESC = "以零点为基准左右展开，正值向右（蓝色），负值向左（红色）。支持单列模式和李克特量表多列模式。"
+
+
+def _data_fmt() -> str:
+    return say(
+        "Single-column mode: item column + value column | Multi-column mode: item column + negative columns (multiple) + positive columns (multiple)",
+        "单列模式: item列 + value列 | 多列模式: item列 + 负值列(多个) + 正值列(多个)",
+    )
+
+
+def _desc() -> str:
+    return say(
+        "Expands left and right from zero: positive values go right (blue), negative values go left (red). Supports single-column mode and multi-column Likert-scale mode.",
+        "以零点为基准左右展开，正值向右（蓝色），负值向左（红色）。支持单列模式和李克特量表多列模式。",
+    )
 
 def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -75,7 +88,7 @@ def _get_1d_series(df: pd.DataFrame, col: str, warnings: list, role: str = "valu
     """
     s = df[col]
     if isinstance(s, pd.DataFrame):
-        warnings.append(f"{role}列[{col}]命中多列，已自动取第一列")
+        warnings.append(say(f"{role} column [{col}] matched multiple columns; using the first", f"{role}列[{col}]命中多列，已自动取第一列"))
         logger.warning(f"[Diverging_Bar_Chart] column '{col}' resolved to DataFrame, using first column.")
         s = s.iloc[:, 0]
     return s
@@ -116,6 +129,8 @@ def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
 
 
 def _build_html(title: str, chart_name: str, library: str, data_fmt: str, desc: str, embed: str) -> str:
+    lbl_fmt = say("Data format:", "数据格式：")
+    lbl_desc = say("Description:", "说明：")
     return f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <title>{title}</title>
@@ -130,8 +145,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{lbl_fmt}</strong>{data_fmt}<br>
+<strong>{lbl_desc}</strong>{desc}
 </div></body></html>"""
 
 
@@ -156,7 +171,7 @@ def generate(
     value: str = "value",
     negative_cols: Optional[List[str]] = None,
     positive_cols: Optional[List[str]] = None,
-    title: str = "对比条形图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings = []
@@ -168,9 +183,9 @@ def generate(
             try:
                 df = pd.read_excel(excel_path)
             except Exception as e:
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
     df = _sanitize_columns(df)
     logger.info(f"[Diverging_Bar_Chart] incoming columns={df.columns.tolist()}")
     logger.info(f"[Diverging_Bar_Chart] mapping={mapping}, item={item}, value={value}")
@@ -183,7 +198,7 @@ def generate(
     item_col = item_col if item_col is not None else item
     value_col = mapping.get("value")
     value_col = value_col if value_col is not None else value
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Diverging Bar Chart", "对比条形图"))
 
     _item = _auto_col(
         df,
@@ -193,7 +208,7 @@ def generate(
     )
     
     if _item is None or _item not in df.columns:
-        return ChartResult(warnings=["找不到必填字段 [item]"])
+        return ChartResult(warnings=[say("Required field [item] not found", "找不到必填字段 [item]")])
 
     # 检测数据格式
     fmt = _detect_format(df, _item)
@@ -218,7 +233,7 @@ def generate(
         )
 
         if _value is None or _value not in df.columns:
-            return ChartResult(warnings=["找不到必填字段 [value]"])
+            return ChartResult(warnings=[say("Required field [value] not found", "找不到必填字段 [value]")])
 
         return _generate_single_column(df, _item, _value, title, warnings, _scheme, _palette)
 
@@ -228,7 +243,7 @@ def _generate_single_column(df: pd.DataFrame, item_col: str, value_col: str, tit
     try:
         d = df[[item_col, value_col]].copy()
     except Exception as e:
-        return ChartResult(warnings=warnings + [f"选择列失败: {e}"])
+        return ChartResult(warnings=warnings + [say(f"Failed to select columns: {e}", f"选择列失败: {e}")])
 
     d = d.dropna(subset=[item_col])
 
@@ -242,7 +257,7 @@ def _generate_single_column(df: pd.DataFrame, item_col: str, value_col: str, tit
     d = d[d[item_col] != ""]
 
     if len(d) == 0:
-        return ChartResult(warnings=warnings + ["处理后无有效数据"])
+        return ChartResult(warnings=warnings + [say("No valid data after processing", "处理后无有效数据")])
 
     # 按绝对值排序
     d = d.sort_values(value_col, key=lambda s: s.abs())
@@ -261,7 +276,7 @@ def _generate_single_column(df: pd.DataFrame, item_col: str, value_col: str, tit
             x=positive[value_col],
             orientation='h',
             marker=dict(color=_pos_color),
-            name='正值',
+            name=say('Positive', '正值'),
             hovertemplate='<b>%{y}</b><br>%{x:.2f}<extra></extra>'
         ))
 
@@ -271,14 +286,14 @@ def _generate_single_column(df: pd.DataFrame, item_col: str, value_col: str, tit
             x=negative[value_col],
             orientation='h',
             marker=dict(color=_neg_color),
-            name='负值',
+            name=say('Negative', '负值'),
             hovertemplate='<b>%{y}</b><br>%{x:.2f}<extra></extra>'
         ))
 
     fig.update_layout(
         title=title,
-        xaxis_title='数值',
-        yaxis_title='项目',
+        xaxis_title=say('Value', '数值'),
+        yaxis_title=say('Item', '项目'),
         barmode='relative',
         plot_bgcolor='white',
         paper_bgcolor='white',
@@ -296,7 +311,7 @@ def _generate_single_column(df: pd.DataFrame, item_col: str, value_col: str, tit
     fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "diverging_bar", "plotly", _DATA_FMT, "单列模式", chart_html)
+    html = _build_html(title, "diverging_bar", "plotly", _data_fmt(), say("Single-column mode", "单列模式"), chart_html)
 
     meta = {
         "chart_id": "diverging_bar",
@@ -320,7 +335,7 @@ def _generate_multi_column(df: pd.DataFrame, item_col: str, title: str, warnings
     num_cols = [c for c in d.columns if c != item_col and pd.api.types.is_numeric_dtype(d[c])]
 
     if len(num_cols) < 2:
-        return ChartResult(warnings=["多列模式需要至少2个数值列"])
+        return ChartResult(warnings=[say("Multi-column mode requires at least 2 numeric columns", "多列模式需要至少2个数值列")])
 
     # 转换为数值
     for col in num_cols:
@@ -331,14 +346,14 @@ def _generate_multi_column(df: pd.DataFrame, item_col: str, title: str, warnings
     before = len(d)
     d = d.dropna(subset=num_cols)
     if before != len(d):
-        warnings.append(f"已忽略 {before - len(d)} 行含缺失数值的数据")
+        warnings.append(say(f"Ignored {before - len(d)} rows with missing values", f"已忽略 {before - len(d)} 行含缺失数值的数据"))
 
     # 分离负值列和正值列
     negative_cols = [c for c in num_cols if (d[c] < 0).any()]
     positive_cols = [c for c in num_cols if (d[c] > 0).any()]
 
     if not negative_cols or not positive_cols:
-        return ChartResult(warnings=["需要同时包含负值列和正值列"])
+        return ChartResult(warnings=[say("Both negative and positive value columns are required", "需要同时包含负值列和正值列")])
 
     # 计算累积值
     d['negative_sum'] = d[negative_cols].sum(axis=1)
@@ -389,8 +404,8 @@ def _generate_multi_column(df: pd.DataFrame, item_col: str, title: str, warnings
 
     fig.update_layout(
         title=title,
-        xaxis_title='数值',
-        yaxis_title='项目',
+        xaxis_title=say('Value', '数值'),
+        yaxis_title=say('Item', '项目'),
         barmode='relative',
         plot_bgcolor='white',
         paper_bgcolor='white',
@@ -409,7 +424,7 @@ def _generate_multi_column(df: pd.DataFrame, item_col: str, title: str, warnings
     fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "diverging_bar", "plotly", _DATA_FMT, "多列模式（李克特量表）", chart_html)
+    html = _build_html(title, "diverging_bar", "plotly", _data_fmt(), say("Multi-column mode (Likert scale)", "多列模式（李克特量表）"), chart_html)
 
 
     meta = {

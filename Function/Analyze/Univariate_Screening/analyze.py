@@ -25,11 +25,15 @@ Univariate Screening Regression
 import numpy as np
 import pandas as pd
 from typing import Any, Dict, Optional, Tuple
+from compute.i18n import say
 
 # ── 模块元数据 ─────────────────────────────────────────────────────────────
 ANALYSIS_ID   = "Univariate_Screening"
-ANALYSIS_NAME = "逐变量回归筛选（Univariate Screening）"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("Univariate regression screening (Univariate Screening)", "逐变量回归筛选（Univariate Screening）")
+ANALYSIS_DESC = say(
+    "Run a simple OLS regression of the target on each candidate predictor separately, outputting coefficient, standard error, "
+    "t-statistic, p-value and R², summarised by significance (default p<0.05). Suitable for pre-screening variables before multivariable modelling.",
     "对每个候选自变量分别与目标变量做简单 OLS 回归，输出系数、标准误、t 统计量、"
     "p 值、R²，并按显著性（默认 p<0.05）分类汇总。适用于多元建模前的变量预筛选。"
 )
@@ -152,12 +156,14 @@ def run(
 
     # ── 校验目标变量 ───────────────────────────────────────────────────────
     if target_column not in df.columns:
-        raise ValueError(f"目标变量 '{target_column}' 不在数据表中。"
-                         f"可用列：{list(df.columns)}")
+        raise ValueError(say(f"Target variable '{target_column}' is not in the table. "
+                             f"Available columns: {list(df.columns)}",
+                             f"目标变量 '{target_column}' 不在数据表中。"
+                             f"可用列：{list(df.columns)}"))
 
     y_raw = pd.to_numeric(df[target_column], errors="coerce")
     if y_raw.isna().all():
-        raise ValueError(f"目标变量 '{target_column}' 无有效数值。")
+        raise ValueError(say(f"Target variable '{target_column}' has no valid numeric values.", f"目标变量 '{target_column}' 无有效数值。"))
 
     y = y_raw.to_numpy(dtype=float)
 
@@ -169,7 +175,7 @@ def run(
         and not df[c].isna().all()
     ]
     if not candidate_cols:
-        raise ValueError("数据中没有可用的数值型候选自变量（已排除目标变量）。")
+        raise ValueError(say("No usable numeric candidate predictors in the data (target variable excluded).", "数据中没有可用的数值型候选自变量（已排除目标变量）。"))
 
     # ── 逐变量回归 ────────────────────────────────────────────────────────
     rows = []
@@ -215,8 +221,8 @@ def run(
         "p_value", "stars", "r_squared", "n_obs", "direction",
     ]].copy()
     analysis_result.columns = [
-        "变量", "系数", "标准误", "t统计量",
-        "p值", "显著性", "R²", "有效观测数", "方向",
+        say("Variable", "变量"), say("Coefficient", "系数"), say("Std. error", "标准误"), say("t-statistic", "t统计量"),
+        say("p-value", "p值"), say("Significance", "显著性"), "R²", say("Valid observations", "有效观测数"), say("Direction", "方向"),
     ]
 
     # analysis_breakdown — 仅显著变量（p < alpha），按 p 值升序
@@ -239,13 +245,13 @@ def run(
     best_r2     = round(best_r2_row["r_squared"].iloc[0], 6) if not best_r2_row.empty else None
 
     analysis_metrics = pd.DataFrame([
-        {"指标": "目标变量",          "值": target_column},
-        {"指标": "显著性阈值 α",       "值": str(alpha)},
-        {"指标": "候选自变量总数",      "值": str(n_total)},
-        {"指标": f"显著变量数 (p<{alpha})", "值": str(n_sig)},
-        {"指标": "不显著变量数",        "值": str(n_insig)},
-        {"指标": "最高单变量 R²",       "值": str(best_r2)},
-        {"指标": "R² 最高变量",         "值": best_var},
+        {say("Metric", "指标"): say("Target variable", "目标变量"),          say("Value", "值"): target_column},
+        {say("Metric", "指标"): say("Significance threshold α", "显著性阈值 α"),       say("Value", "值"): str(alpha)},
+        {say("Metric", "指标"): say("Total candidate predictors", "候选自变量总数"),      say("Value", "值"): str(n_total)},
+        {say("Metric", "指标"): say(f"Significant variables (p<{alpha})", f"显著变量数 (p<{alpha})"), say("Value", "值"): str(n_sig)},
+        {say("Metric", "指标"): say("Non-significant variables", "不显著变量数"),        say("Value", "值"): str(n_insig)},
+        {say("Metric", "指标"): say("Highest single-variable R²", "最高单变量 R²"),       say("Value", "值"): str(best_r2)},
+        {say("Metric", "指标"): say("Variable with highest R²", "R² 最高变量"),         say("Value", "值"): best_var},
     ])
 
     return {

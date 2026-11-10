@@ -26,6 +26,7 @@ import math
 import os
 import re
 from pathlib import Path
+from compute.i18n import say
 from infrastructure.paths import content_data_path
 import jieba
 from Function.Knowledge.neural_embedder import (
@@ -577,7 +578,7 @@ class KnowledgeBase:
             "SELECT id FROM knowledge_categories ORDER BY id LIMIT 1"
         ).fetchone()
         if not fallback:
-            raise ValueError("请先创建业务分类")
+            raise ValueError(say("Please create a business category first", "请先创建业务分类"))
         return int(fallback["id"])
 
     def list_categories(self) -> list[dict]:
@@ -588,7 +589,7 @@ class KnowledgeBase:
     def add_category(self, name: str, enabled: int = 1) -> dict:
         name = (name or "").strip()
         if not name:
-            raise ValueError("分类名称不能为空")
+            raise ValueError(say("The category name must not be empty", "分类名称不能为空"))
         cur = self._conn.execute(
             """INSERT INTO knowledge_categories (name, enabled, updated_at)
                VALUES (?, ?, ?)
@@ -615,7 +616,7 @@ class KnowledgeBase:
         if "name" in updates:
             updates["name"] = str(updates["name"] or "").strip()
             if not updates["name"]:
-                raise ValueError("分类名称不能为空")
+                raise ValueError(say("The category name must not be empty", "分类名称不能为空"))
         if not updates:
             return self.get_category_by_id(cid)
         updates["updated_at"] = self._now()
@@ -631,7 +632,7 @@ class KnowledgeBase:
         """Delete a non-default category and all of its indexed knowledge."""
         cid = int(cid)
         if not self.get_category_by_id(cid):
-            raise LookupError("业务分类不存在")
+            raise LookupError(say("The business category does not exist", "业务分类不存在"))
 
         tables = {
             "metrics": "metrics",
@@ -678,7 +679,7 @@ class KnowledgeBase:
         blobs, so they are intentionally cleared here.
         """
         if not isinstance(snapshot, dict):
-            raise ValueError("知识库快照格式无效")
+            raise ValueError(say("The knowledge base snapshot format is invalid", "知识库快照格式无效"))
 
         raw_categories = snapshot.get("categories") or []
         category_rows = []
@@ -694,7 +695,7 @@ class KnowledgeBase:
         if not category_rows:
             category_rows.append((DEFAULT_CATEGORY_NAME, 1))
         if len(category_rows) > 100:
-            raise ValueError("业务分类数量超过上限")
+            raise ValueError(say("The number of business categories exceeds the limit", "业务分类数量超过上限"))
 
         records_by_kind = {
             "metrics": snapshot.get("metrics") or [],
@@ -703,7 +704,7 @@ class KnowledgeBase:
         }
         if any(not isinstance(rows, list) or len(rows) > 2000
                for rows in records_by_kind.values()):
-            raise ValueError("知识库条目数量超过上限或格式无效")
+            raise ValueError(say("The number of knowledge base entries exceeds the limit or the format is invalid", "知识库条目数量超过上限或格式无效"))
 
         try:
             self._conn.execute("BEGIN")

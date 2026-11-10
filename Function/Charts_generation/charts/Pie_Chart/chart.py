@@ -23,11 +23,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
 
-_DATA_FMT = "names列 + values列"
-_DESC = "展示各部分占整体的比例，适合数量≤5的分类。"
+
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -110,8 +110,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -123,7 +123,7 @@ def generate(
     excel_path: str = None,
     names: str = "name",
     values: str = "value",
-    title: str = "饼图",
+    title: str = None,
     color_scheme: str = "mckinsey",
     **kwargs
 ) -> ChartResult:
@@ -145,9 +145,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 调度器把 aliases 归一化：labels→label、values→value（chart_generate.py:76-80）。
     # 同时保留旧别名 names/name/values 以兼容直接调用与旧 payload。
@@ -165,6 +165,8 @@ def generate(
     if values_col is None:
         values_col = values
     title = options.get("title", title)
+    if title is None:
+        title = say("Pie Chart", "饼图")
 
     _names = _auto_col(df, names_col, "label", "name", "names", "产品", "类别", "category")
     # 查找 values 列时排除已选中的 names 列，避免两者映射到同一列
@@ -173,7 +175,7 @@ def generate(
 
     for role, col_ in [("names", _names), ("values", _values)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _names not in df.columns or _values not in df.columns:
         return ChartResult(warnings=warnings)
@@ -182,13 +184,13 @@ def generate(
     # 1. 检查数据点数量
     n_rows = len(df)
     if n_rows < 2:
-        warnings.append(f"⚠️ 数据点过少（{n_rows}个）。建议至少2个数据点。")
+        warnings.append(say(f"⚠️ Too few data points ({n_rows}). At least 2 are recommended.", f"⚠️ 数据点过少（{n_rows}个）。建议至少2个数据点。"))
     
     # 2. 检查类别数量
     if n_rows > 7:
-        warnings.append(f"⚠️ 类别过多（{n_rows}个）。建议≤7个类别，否则会导致视觉混乱。建议用柱状图。")
+        warnings.append(say(f"⚠️ Too many categories ({n_rows}). Keep the category count ≤7 to avoid visual clutter; consider a bar chart.", f"⚠️ 类别过多（{n_rows}个）。建议≤7个类别，否则会导致视觉混乱。建议用柱状图。"))
     elif n_rows > 5:
-        warnings.append(f"⚠️ 类别较多（{n_rows}个）。建议≤5个类别以获得最佳视觉效果。")
+        warnings.append(say(f"⚠️ A fairly large number of categories ({n_rows}). ≤5 categories is recommended for the best visual result.", f"⚠️ 类别较多（{n_rows}个）。建议≤5个类别以获得最佳视觉效果。"))
     
     # 3. 检查负数 / NaN（先转数值再判断，避免把 NaN 误报成“负数”）
     try:
@@ -196,25 +198,25 @@ def generate(
         neg_mask = values_numeric < 0
         nan_mask = values_numeric.isna()
         if neg_mask.any():
-            warnings.append("⚠️ 数据中包含负数。饼图不支持负数，请过滤或转换数据。")
+            warnings.append(say("⚠️ Data contains negative values. The pie chart does not support negatives; please filter or transform the data.", "⚠️ 数据中包含负数。饼图不支持负数，请过滤或转换数据。"))
         if nan_mask.any() and not neg_mask.any():
-            warnings.append(f"⚠️ 数据中包含 {int(nan_mask.sum())} 个无法解析为数值的空值，已自动删除。")
+            warnings.append(say(f"⚠️ Data contains {int(nan_mask.sum())} empty value(s) that could not be parsed as numbers; they were removed automatically.", f"⚠️ 数据中包含 {int(nan_mask.sum())} 个无法解析为数值的空值，已自动删除。"))
         # 过滤负数与 NaN
         keep = values_numeric.notna() & (values_numeric >= 0)
         if (~keep).any():
             df = df[keep].copy()
             if len(df) == 0:
-                return ChartResult(warnings=warnings + ["❌ 过滤后无有效数据"])
+                return ChartResult(warnings=warnings + [say("❌ No valid data after filtering", "❌ 过滤后无有效数据")])
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"⚠️ 数值转换失败: {e}")
+        warnings.append(say(f"⚠️ Numeric conversion failed: {e}", f"⚠️ 数值转换失败: {e}"))
     
     # 4. 检查空值
     if df[_names].isna().any() or df[_values].isna().any():
-        warnings.append("⚠️ 数据中包含空值，已自动删除。")
+        warnings.append(say("⚠️ Data contains empty values; they were removed automatically.", "⚠️ 数据中包含空值，已自动删除。"))
         df = df.dropna(subset=[_names, _values])
         if len(df) == 0:
-            return ChartResult(warnings=warnings + ["❌ 删除空值后无有效数据"])
+            return ChartResult(warnings=warnings + [say("❌ No valid data after removing empty values", "❌ 删除空值后无有效数据")])
 
     # 按数值大小降序排列
     df = df.sort_values(by=_values, ascending=False)
@@ -223,7 +225,7 @@ def generate(
         labels=df[_names].astype(str).tolist(),
         values=df[_values].astype(float).tolist(),
         marker=dict(colors=colors),
-        hovertemplate=f'<b>%{{label}}</b><br>{_values}: %{{value}}<br>占比: %{{percent}}<extra></extra>',
+        hovertemplate=f"<b>%{{label}}</b><br>{_values}: %{{value}}<br>{say('Share', '占比')}: %{{percent}}<extra></extra>",
     )])
     
     fig.update_layout(
@@ -233,7 +235,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "pie", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "pie", "plotly", say("names column + values column", "names列 + values列"), say("Shows each part's share of the whole; suitable for categories numbering ≤5.", "展示各部分占整体的比例，适合数量≤5的分类。"), chart_html)
 
     meta = {
         "chart_id": "pie",

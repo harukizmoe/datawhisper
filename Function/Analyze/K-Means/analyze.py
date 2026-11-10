@@ -25,17 +25,25 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
+from compute.i18n import say
+
 
 # ── 模块元数据（供 registry 读取）─────────────────────────────────────────
 
 ANALYSIS_ID   = "K_Means"
-ANALYSIS_NAME = "K-Means 聚类分析"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("K-Means Clustering Analysis", "K-Means 聚类分析")
+ANALYSIS_DESC = say(
+    "Runs K-Means clustering on numeric features (K-Means++ initialization, Z-score normalization). "
+    "Automatically computes the elbow curve (SSE) and silhouette score to help choose the optimal K. "
+    "Specify the number of clusters K via the n_deciles parameter (default 3); "
+    "select all numeric columns needed for clustering in the SQL; "
+    "optionally pass a label column via groupby_column (used to inspect the dominant category of each cluster; not used for clustering).",
     "对数值型特征执行 K-Means 聚类（K-Means++ 初始化，Z-score 标准化）。"
     "自动计算肘部曲线（SSE）和轮廓系数，辅助选择最优 K。"
     "通过 n_deciles 参数指定簇数 K（默认 3）；"
     "SQL 中选取所有聚类所需数值列；"
-    "通过 groupby_column 可选填标签列（用于查看各簇的主导类别，不参与聚类）。"
+    "通过 groupby_column 可选填标签列（用于查看各簇的主导类别，不参与聚类）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
@@ -415,21 +423,21 @@ def _build_md(
     feat_str      = ", ".join(feature_cols[:8]) + ("..." if len(feature_cols) > 8 else "")
 
     L = [
-        f"## K-Means 聚类分析 — K={k}，特征：{feat_str}\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 样本数 | {n:,} |",
-        f"| 特征数 | {len(feature_cols)} |",
-        f"| 计算设备 | {compute_device} |",
-        f"| 簇数 K | {k} |",
-        f"| 总惯性（SSE，标准化空间） | {inertia:,.4f} |",
-        f"| 轮廓系数 | **{sil_score:.4f}** |",
-        f"| 推荐 K（肘部法则+轮廓系数） | **{best_k}** |",
+        say(f"## K-Means Clustering Analysis — K={k}, features: {feat_str}\n", f"## K-Means 聚类分析 — K={k}，特征：{feat_str}\n"),
+        say("### Model Overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Samples | {n:,} |", f"| 样本数 | {n:,} |"),
+        say(f"| Features | {len(feature_cols)} |", f"| 特征数 | {len(feature_cols)} |"),
+        say(f"| Compute device | {compute_device} |", f"| 计算设备 | {compute_device} |"),
+        say(f"| Number of clusters K | {k} |", f"| 簇数 K | {k} |"),
+        say(f"| Total inertia (SSE, normalized space) | {inertia:,.4f} |", f"| 总惯性（SSE，标准化空间） | {inertia:,.4f} |"),
+        say(f"| Silhouette score | **{sil_score:.4f}** |", f"| 轮廓系数 | **{sil_score:.4f}** |"),
+        say(f"| Recommended K (elbow method + silhouette) | **{best_k}** |", f"| 推荐 K（肘部法则+轮廓系数） | **{best_k}** |"),
         "",
     ]
 
     # ── 各簇摘要 ──────────────────────────────────────────────────────────
-    L.append("### 各簇摘要")
+    L.append(say("### Cluster Summary", "### 各簇摘要"))
     avg_hdr  = " | ".join(f"avg_{c}" for c in disp_feats)
     avg_sep  = " | ".join(["-----:"] * len(disp_feats))
     has_pur  = "dominant_label" in result_df.columns
@@ -437,10 +445,10 @@ def _build_md(
         avg_hdr += " | ..."
         avg_sep += " | ---"
 
-    header = f"| 簇 | 样本量 | 占比 | {avg_hdr}"
+    header = say(f"| Cluster | Size | Share | {avg_hdr}", f"| 簇 | 样本量 | 占比 | {avg_hdr}")
     sep    = f"|:--:|------:|-----:|{avg_sep}"
     if has_pur:
-        header += " | 主标签 | 纯度% |"
+        header += say(" | Dominant label | Purity% |", " | 主标签 | 纯度% |")
         sep    += " | --- | ---: |"
     else:
         header += " |"
@@ -464,19 +472,19 @@ def _build_md(
 
     # ── 肘部法则表 ────────────────────────────────────────────────────────
     L += [
-        "### 肘部法则 & 轮廓系数",
-        "| K | 惯性（SSE） | 轮廓系数 | 备注 |",
+        say("### Elbow Method & Silhouette Score", "### 肘部法则 & 轮廓系数"),
+        say("| K | Inertia (SSE) | Silhouette | Note |", "| K | 惯性（SSE） | 轮廓系数 | 备注 |"),
         "|:--:|----------:|--------:|------|",
     ]
     for _, row in elbow_df.iterrows():
         sil_str = f"{row['silhouette']:.4f}" if row["silhouette"] is not None else "—"
         note = ""
         if int(row["k"]) == k and int(row["k"]) == best_k:
-            note = "当前 K = 推荐 K"
+            note = say("Current K = Recommended K", "当前 K = 推荐 K")
         elif int(row["k"]) == k:
-            note = "当前 K"
+            note = say("Current K", "当前 K")
         elif int(row["k"]) == best_k:
-            note = "推荐 K"
+            note = say("Recommended K", "推荐 K")
         L.append(f"| {int(row['k'])} | {row['inertia']:,.4f} | {sil_str} | {note} |")
     L.append("")
 
@@ -485,25 +493,33 @@ def _build_md(
     smallest = result_df.loc[result_df["count"].idxmin()]
 
     L += [
-        "### 核心洞察",
-        f"- **最大簇**：C{int(biggest['cluster'])}，占 **{biggest['pct']:.1f}%**（{int(biggest['count']):,} 条）",
-        f"- **最小簇**：C{int(smallest['cluster'])}，占 {smallest['pct']:.1f}%（{int(smallest['count']):,} 条）",
+        say("### Key Insights", "### 核心洞察"),
+        say(f"- **Largest cluster**: C{int(biggest['cluster'])}, **{biggest['pct']:.1f}%** of samples ({int(biggest['count']):,} rows)", f"- **最大簇**：C{int(biggest['cluster'])}，占 **{biggest['pct']:.1f}%**（{int(biggest['count']):,} 条）"),
+        say(f"- **Smallest cluster**: C{int(smallest['cluster'])}, {smallest['pct']:.1f}% of samples ({int(smallest['count']):,} rows)", f"- **最小簇**：C{int(smallest['cluster'])}，占 {smallest['pct']:.1f}%（{int(smallest['count']):,} 条）"),
     ]
     if sil_score >= 0.70:
-        L.append(f"- 轮廓系数 **{sil_score:.4f}**：簇间分离优秀，当前 K={k} 是良好选择。")
+        L.append(say(f"- Silhouette score **{sil_score:.4f}**: excellent cluster separation; the current K={k} is a good choice.", f"- 轮廓系数 **{sil_score:.4f}**：簇间分离优秀，当前 K={k} 是良好选择。"))
     elif sil_score >= 0.50:
-        L.append(f"- 轮廓系数 **{sil_score:.4f}**：簇间分离合理。")
+        L.append(say(f"- Silhouette score **{sil_score:.4f}**: reasonable cluster separation.", f"- 轮廓系数 **{sil_score:.4f}**：簇间分离合理。"))
     elif sil_score >= 0.25:
-        L.append(f"- 轮廓系数 **{sil_score:.4f}**：簇间存在一定重叠，可尝试 K={best_k}。")
+        L.append(say(f"- Silhouette score **{sil_score:.4f}**: some overlap between clusters; consider trying K={best_k}.", f"- 轮廓系数 **{sil_score:.4f}**：簇间存在一定重叠，可尝试 K={best_k}。"))
     else:
         L.append(
-            f"- 轮廓系数 **{sil_score:.4f}**：簇间重叠较多，"
-            f"建议改用 K={best_k} 或重新筛选聚类特征。"
+            say(
+                f"- Silhouette score **{sil_score:.4f}**: considerable overlap between clusters; "
+                f"consider using K={best_k} or re-selecting the clustering features.",
+                f"- 轮廓系数 **{sil_score:.4f}**：簇间重叠较多，"
+                f"建议改用 K={best_k} 或重新筛选聚类特征。",
+            )
         )
     if best_k != k:
         L.append(
-            f"- 肘部/轮廓系数推荐 **K={best_k}**，"
-            f"可将 n_deciles={best_k} 重新运行。"
+            say(
+                f"- The elbow method / silhouette score recommends **K={best_k}**; "
+                f"you can re-run with n_deciles={best_k}.",
+                f"- 肘部/轮廓系数推荐 **K={best_k}**，"
+                f"可将 n_deciles={best_k} 重新运行。",
+            )
         )
 
     # 各簇特征摘要（前 3 特征）
@@ -511,24 +527,31 @@ def _build_md(
         f1, f2 = feature_cols[0], feature_cols[1]
         for _, row in result_df.iterrows():
             L.append(
-                f"- C{int(row['cluster'])}：{f1}={row[f'avg_{f1}']:.2f}"
-                f"，{f2}={row[f'avg_{f2}']:.2f}"
-                + (f"，{feature_cols[2]}={row[f'avg_{feature_cols[2]}']:.2f}"
+                say(
+                    f"- C{int(row['cluster'])}: {f1}={row[f'avg_{f1}']:.2f}"
+                    f", {f2}={row[f'avg_{f2}']:.2f}",
+                    f"- C{int(row['cluster'])}：{f1}={row[f'avg_{f1}']:.2f}"
+                    f"，{f2}={row[f'avg_{f2}']:.2f}",
+                )
+                + (say(f", {feature_cols[2]}={row[f'avg_{feature_cols[2]}']:.2f}",
+                       f"，{feature_cols[2]}={row[f'avg_{feature_cols[2]}']:.2f}")
                    if len(feature_cols) >= 3 else "")
             )
 
     L += [
         "",
-        "### 可视化建议",
-        "> 以下三张表已写入数据源，可直接用于 generate_chart：",
+        say("### Visualization Suggestions", "### 可视化建议"),
+        say("> The following three tables have been written to the data source and can be used directly with generate_chart:", "> 以下三张表已写入数据源，可直接用于 generate_chart："),
         "",
-        "| 图表 | 数据源 | 字段映射 |",
+        say("| Chart | Data source | Field mapping |", "| 图表 | 数据源 | 字段映射 |"),
         "|------|--------|---------|",
-        "| Bar_Chart（簇大小） | analysis_result | x=cluster, y=count |",
-        (f"| Scatter_Plot（簇分布） | analysis_breakdown "
-         f"| x={feature_cols[0]}, y={feature_cols[1] if len(feature_cols) > 1 else feature_cols[0]}, color=cluster |"),
-        "| Line_Chart（肘部曲线） | analysis_elbow | x=k, y=inertia |",
-        "| Line_Chart（轮廓系数） | analysis_elbow | x=k, y=silhouette |",
+        say("| Bar_Chart (cluster size) | analysis_result | x=cluster, y=count |", "| Bar_Chart（簇大小） | analysis_result | x=cluster, y=count |"),
+        say(f"| Scatter_Plot (cluster distribution) | analysis_breakdown "
+            f"| x={feature_cols[0]}, y={feature_cols[1] if len(feature_cols) > 1 else feature_cols[0]}, color=cluster |",
+            f"| Scatter_Plot（簇分布） | analysis_breakdown "
+            f"| x={feature_cols[0]}, y={feature_cols[1] if len(feature_cols) > 1 else feature_cols[0]}, color=cluster |"),
+        say("| Line_Chart (elbow curve) | analysis_elbow | x=k, y=inertia |", "| Line_Chart（肘部曲线） | analysis_elbow | x=k, y=inertia |"),
+        say("| Line_Chart (silhouette score) | analysis_elbow | x=k, y=silhouette |", "| Line_Chart（轮廓系数） | analysis_elbow | x=k, y=silhouette |"),
         "",
     ]
 
@@ -575,14 +598,18 @@ def run(
 
     if not feature_cols:
         raise ValueError(
-            "没有找到可用的数值型特征列。"
-            "请在 SQL 中选取数值列（如 age, income, spending）后再运行 K-Means。"
+            say(
+                "No usable numeric feature columns were found. "
+                "Select numeric columns in the SQL (e.g. age, income, spending) before running K-Means.",
+                "没有找到可用的数值型特征列。"
+                "请在 SQL 中选取数值列（如 age, income, spending）后再运行 K-Means。",
+            )
         )
 
     n = len(df)
     K = min(K, n - 1, 20)
     if K < 2:
-        raise ValueError(f"有效样本数 {n} 过少，无法完成聚类（至少需要 3 行）。")
+        raise ValueError(say(f"Too few valid samples ({n}) to cluster (at least 3 rows are required).", f"有效样本数 {n} 过少，无法完成聚类（至少需要 3 行）。"))
 
     # 预处理 & 标准化
     df            = _fill_numeric(df, feature_cols)
@@ -599,10 +626,10 @@ def run(
             # Driver resets and VRAM allocation failures must not make an
             # otherwise valid analysis fail; NumPy remains the safe baseline.
             labels, centroids_n, inertia = _kmeans(X, K)
-            compute_device = "CPU（CUDA 执行失败后回退 NumPy）"
+            compute_device = say("CPU (NumPy fallback after CUDA execution failure)", "CPU（CUDA 执行失败后回退 NumPy）")
     else:
         labels, centroids_n, inertia = _kmeans(X, K)
-        compute_device = "CPU（NumPy 回退）"
+        compute_device = say("CPU (NumPy fallback)", "CPU（NumPy 回退）")
 
     # 轮廓系数（在最终结果上评估）
     sil = _silhouette_score(X, labels)

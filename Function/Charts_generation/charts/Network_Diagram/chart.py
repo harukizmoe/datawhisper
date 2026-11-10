@@ -23,6 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -37,8 +38,7 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "source列 + target列 + [weight列]"
-_DESC = "用节点和连边表示网络关系，支持权重编码边的粗细，并显示边权重。"
+
 
 # 配色：专业蓝系 + 绿系 + 紫系 + 中性色
 _NODE_COLORS = [
@@ -105,8 +105,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -117,25 +117,25 @@ def _validate_network_data(df: pd.DataFrame, src_col: str, tgt_col: str, weight_
     # 检查自环
     self_loops = df[df[src_col] == df[tgt_col]]
     if len(self_loops) > 0:
-        warnings.append(f"检测到 {len(self_loops)} 条自环，已保留")
+        warnings.append(say(f"Detected {len(self_loops)} self-loop(s); kept", f"检测到 {len(self_loops)} 条自环，已保留"))
 
     # 检查重复边
     edge_counts = df.groupby([src_col, tgt_col]).size()
     duplicates = edge_counts[edge_counts > 1]
     if len(duplicates) > 0:
-        warnings.append(f"检测到 {len(duplicates)} 条重复边，已自动合并")
+        warnings.append(say(f"Detected {len(duplicates)} duplicate edge(s); merged automatically", f"检测到 {len(duplicates)} 条重复边，已自动合并"))
 
     # 检查权重
     if weight_col and weight_col in df.columns:
         weights = pd.to_numeric(df[weight_col], errors="coerce")
         invalid_weights = df[(weights.isna()) | (weights <= 0)]
         if len(invalid_weights) > 0:
-            warnings.append(f"检测到 {len(invalid_weights)} 条无效/零值/负值权重，已过滤或修正")
+            warnings.append(say(f"Detected {len(invalid_weights)} invalid/zero/negative weight(s); filtered or corrected", f"检测到 {len(invalid_weights)} 条无效/零值/负值权重，已过滤或修正"))
 
     # 检查节点数
     all_nodes = set(df[src_col].unique()) | set(df[tgt_col].unique())
     if len(all_nodes) > 100:
-        warnings.append(f"节点数过多（{len(all_nodes)} 个），可能导致图表混乱")
+        warnings.append(say(f"Too many nodes ({len(all_nodes)}); the chart may become cluttered", f"节点数过多（{len(all_nodes)} 个），可能导致图表混乱"))
 
     return warnings
 
@@ -249,7 +249,7 @@ def generate(
     source: str = "source",
     target: str = "target",
     weight: Optional[str] = None,
-    title: str = "网络图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -262,9 +262,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     src_col = mapping.get("source")
     src_col = src_col if src_col is not None else source
@@ -273,6 +273,8 @@ def generate(
     weight_col = mapping.get("weight")
     weight_col = weight_col if weight_col is not None else weight
     title = options.get("title", title)
+    if title is None:
+        title = say("Network Diagram", "网络图")
 
     # 链式 exclude：target 排除已解析的 source，避免无 hint 时两者回退到
     # 同一 strs[0]，groupby([src, tgt]) 撞列报错
@@ -293,7 +295,7 @@ def generate(
 
     for role, col in [("source", _src), ("target", _tgt)]:
         if col is None or col not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _src not in df.columns or _tgt not in df.columns:
         return ChartResult(warnings=warnings)
@@ -322,7 +324,7 @@ def generate(
         d = d.drop_duplicates()
 
     if len(d) == 0:
-        return ChartResult(warnings=warnings + ["处理后无有效数据"])
+        return ChartResult(warnings=warnings + [say("No valid data after processing", "处理后无有效数据")])
 
     # 构建节点和边
     all_nodes = sorted(list(set(d[_src].unique()) | set(d[_tgt].unique())))
@@ -380,9 +382,9 @@ def generate(
             mode="lines",
             line=dict(width=edge_widths[i], color=edge_color),
             hovertemplate=(
-                f"源节点: {all_nodes[s]}<br>"
-                f"目标节点: {all_nodes[t]}<br>"
-                f"权重: {weight_text if weight_text else 'N/A'}"
+                f"{say('Source', '源节点')}: {all_nodes[s]}<br>"
+                f"{say('Target', '目标节点')}: {all_nodes[t]}<br>"
+                f"{say('Weight', '权重')}: {weight_text if weight_text else 'N/A'}"
                 f"<extra></extra>"
             ),
             showlegend=False
@@ -448,7 +450,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "network_diagram", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "network_diagram", "plotly", say("source column + target column + [weight column]", "source列 + target列 + [weight列]"), say("Nodes and edges represent network relationships; edge thickness encodes weight, and edge weights are displayed.", "用节点和连边表示网络关系，支持权重编码边的粗细，并显示边权重。"), chart_html)
 
 
     meta = {

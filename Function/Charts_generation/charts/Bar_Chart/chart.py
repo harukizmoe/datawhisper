@@ -35,6 +35,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
@@ -43,8 +44,12 @@ FONT_PATH = os.environ.get("CHARTS_FONT_PATH") or os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "AlibabaPuHuiTi-3-55-Regular.ttf"
 )
 
-_DATA_FMT = "x列(类别) + y列(数值)"
-_DESC = "通过矩形高度编码数值，最常用的比较图表。建议按值降序，y轴从0开始。"
+def _data_fmt() -> str:
+    return say("x column (category) + y column (numeric)", "x列(类别) + y列(数值)")
+
+
+def _desc() -> str:
+    return say("Encodes values by rectangle height, the most common comparison chart. Sort by value descending and start the y-axis at 0.", "通过矩形高度编码数值，最常用的比较图表。建议按值降序，y轴从0开始。")
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -124,8 +129,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -138,7 +143,7 @@ def generate(
     x: str = "x",
     y: str = "y",
     orientation: str = "v",
-    title: str = "柱状图",
+    title: str = None,
     color: str = "#4C78A8",
     sort: bool = True,
     top_n: int = None,
@@ -155,9 +160,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     # ── 字段解析 ────────────────────────────────────────
     x_col = mapping.get("x")
@@ -165,6 +170,8 @@ def generate(
     y_col = mapping.get("y")
     y_col = y_col if y_col is not None else y
     title = options.get("title", title)
+    if title is None:
+        title = say("Bar Chart", "柱状图")
     orientation = options.get("orientation", orientation)
     sort = options.get("sort", sort)
     top_n = options.get("top_n", top_n)
@@ -178,10 +185,10 @@ def generate(
     _y = _auto_col(df, y_col, "y", "数值", "value", "amount", "num", "count")
 
     if _x is None or _x not in df.columns:
-        warnings.append("找不到必填字段 [x]")
+        warnings.append(say("Required field [x] not found", "找不到必填字段 [x]"))
         return ChartResult(warnings=warnings)
     if _y is None or _y not in df.columns:
-        warnings.append("找不到必填字段 [y]")
+        warnings.append(say("Required field [y] not found", "找不到必填字段 [y]"))
         return ChartResult(warnings=warnings)
 
     # 数据处理
@@ -190,7 +197,7 @@ def generate(
     df_plot = df_plot.dropna()
     
     if df_plot.empty:
-        warnings.append("数据为空")
+        warnings.append(say("Data is empty", "数据为空"))
         return ChartResult(warnings=warnings)
     
     if sort:
@@ -219,7 +226,7 @@ def generate(
                       margin=dict(l=40, r=40, t=60, b=40))
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "bar_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "bar_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
     meta = {
         "chart_id": "bar_chart",

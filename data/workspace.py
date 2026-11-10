@@ -33,6 +33,7 @@ from typing import Dict, Optional, List
 from .system_workspace import SystemWorkspace
 from .workspace_metadata import WorkspaceMetadataStore, workspace_metadata_store
 from infrastructure.paths import content_data_path, content_data_root, resource_path, resource_root
+from compute.i18n import say
 
 log = logging.getLogger(__name__)
 
@@ -111,32 +112,32 @@ def validate_workdir(path_str: str) -> tuple[bool, str, Optional[Path]]:
       - ok=True 时 message 为空，resolved_path 是 resolve 后的绝对路径
     """
     if not path_str or not path_str.strip():
-        return False, "工作目录路径不能为空。", None
+        return False, say("Workspace path must not be empty.", "工作目录路径不能为空。"), None
 
     try:
         candidate = Path(path_str).expanduser().resolve(strict=True)
     except FileNotFoundError:
-        return False, f"路径不存在：{path_str}", None
+        return False, say(f"Path does not exist: {path_str}", f"路径不存在：{path_str}"), None
     except (OSError, RuntimeError) as e:
-        return False, f"路径解析失败：{e}", None
+        return False, say(f"Failed to resolve path: {e}", f"路径解析失败：{e}"), None
 
     # 必须是目录
     if not candidate.is_dir():
-        return False, f"路径不是目录：{candidate}", None
+        return False, say(f"Path is not a directory: {candidate}", f"路径不是目录：{candidate}"), None
 
     # 必须可读
     if not os.access(candidate, os.R_OK):
-        return False, f"目录不可读：{candidate}", None
+        return False, say(f"Directory is not readable: {candidate}", f"目录不可读：{candidate}"), None
 
     # 命中始终黑名单（系统目录等）
     if _is_blocked_path(candidate):
-        return False, f"安全限制：不允许挂载系统/敏感目录：{candidate}", None
+        return False, say(f"Security restriction: mounting system/sensitive directories is not allowed: {candidate}", f"安全限制：不允许挂载系统/敏感目录：{candidate}"), None
 
     # 不允许挂载项目根目录自身（避免 Agent 读写源码）
     proj_root = Path(__file__).parent.parent.resolve()
     try:
         candidate.relative_to(proj_root)
-        return False, f"不允许挂载项目根目录：{candidate}", None
+        return False, say(f"Mounting the project root directory is not allowed: {candidate}", f"不允许挂载项目根目录：{candidate}"), None
     except ValueError:
         pass
 
@@ -490,7 +491,7 @@ class WorkspaceManager:
         if not ok:
             return False, msg, None
         if permission not in {"read_only", "read_write"}:
-            return False, "工作目录权限无效。", None
+            return False, say("Invalid workspace permission.", "工作目录权限无效。"), None
 
         try:
             metadata = self.metadata_store.open_or_create(
@@ -502,7 +503,7 @@ class WorkspaceManager:
                 ),
             )
         except (OSError, RuntimeError) as e:
-            return False, f"无法挂载工作目录：{e}", None
+            return False, say(f"Unable to mount workspace: {e}", f"无法挂载工作目录：{e}"), None
 
         with self._lock:
             previous_id = self._session_bindings.get(session_id)
@@ -513,7 +514,7 @@ class WorkspaceManager:
             if runtime is not None and runtime.workdir != resolved:
                 return (
                     False,
-                    "该工作区仍在其他路径使用中，请先卸载现有会话后再挂载移动后的目录。",
+                    say("This workspace is still in use at another path. Unmount the existing session before mounting the moved directory.", "该工作区仍在其他路径使用中，请先卸载现有会话后再挂载移动后的目录。"),
                     None,
                 )
 
@@ -529,7 +530,7 @@ class WorkspaceManager:
                         extra_roots=list(self._default_extra_roots),
                     )
                 except OSError as e:
-                    return False, f"无法挂载工作目录：{e}", None
+                    return False, say(f"Unable to mount workspace: {e}", f"无法挂载工作目录：{e}"), None
                 self._runtimes_by_workspace[metadata.workspace_id] = runtime
 
             is_new_binding = self._session_bindings.get(session_id) != metadata.workspace_id
@@ -758,23 +759,23 @@ class WorkspaceManager:
         with self._lock:
             runtime = self._runtimes_by_workspace.get(workspace_id)
             if runtime is not None and runtime.session_ref_count:
-                return False, "工作目录仍有会话连接，请先卸载后再移除记录。", None
+                return False, say("The workspace still has connected sessions. Unmount it before removing the record.", "工作目录仍有会话连接，请先卸载后再移除记录。"), None
             if runtime is not None and runtime.job_ref_count:
-                return False, "工作目录仍有任务执行，请等待完成或取消任务后再移除记录。", None
+                return False, say("The workspace still has running tasks. Wait for them to finish or cancel them before removing the record.", "工作目录仍有任务执行，请等待完成或取消任务后再移除记录。"), None
             entry = self.metadata_store.forget(workspace_id)
             if entry is None:
-                return False, "工作目录不在发现列表中。", None
+                return False, say("The workspace is not in the discovery list.", "工作目录不在发现列表中。"), None
             self._path_authorizations.pop(workspace_id, None)
             return True, "", entry
 
     def update_permission(self, session_id: str, permission: str) -> tuple[bool, str, Optional[WorkspaceRuntime]]:
         if permission not in {"read_only", "read_write"}:
-            return False, "工作目录权限无效。", None
+            return False, say("Invalid workspace permission.", "工作目录权限无效。"), None
         with self._lock:
             workspace_id = self._session_bindings.get(session_id)
             runtime = self._runtimes_by_workspace.get(workspace_id) if workspace_id else None
             if runtime is None:
-                return False, "未挂载工作目录。", None
+                return False, say("No workspace is mounted.", "未挂载工作目录。"), None
             self._session_permissions[session_id] = permission
             self._recompute_permission_locked(workspace_id)
             return True, "", runtime

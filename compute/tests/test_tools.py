@@ -102,6 +102,8 @@ class Client:
 
     def __init__(self, env: dict, log_path: Path):
         self._log = open(log_path, "w")
+        # 基线录制是中文输出：回放用例把它设成 "zh"。
+        self.lang: str | None = None
         self.worker = Worker("compute", env=env, stderr=self._log)
         self._ids = itertools.count(1)
         self.seen: list[dict] = []
@@ -109,7 +111,8 @@ class Client:
 
     def send(self, method: str, params: dict) -> int:
         rid = next(self._ids)
-        self.worker.request(rid, method, params)
+        # 服务端用 `_lang` 传界面语言；没有 `lang` 时不带，走英文默认。
+        self.worker.request(rid, method, params if self.lang is None else {"_lang": self.lang, **params})
         return rid
 
     def wait(self, rid: int, timeout: float = TOOL_TIMEOUT) -> dict:
@@ -199,6 +202,7 @@ class BaselineParityTest(ToolsTestBase):
             cwd=REPO, env=cls.env, check=True, capture_output=True,
         )
         cls.normalize = Normalizer(cls.data_root, [SESSION_ID], {})
+        cls.client.lang = "zh"  # 录制的输出是中文
 
     def test_recorded_calls_match(self):
         compared = {name: 0 for name in BUSINESS_TOOLS}
@@ -283,7 +287,7 @@ class WorkerBehaviourTest(ToolsTestBase):
             "context": self.context(source_id), "args": {"table_name": table}})
         resp = self.client.wait(rid)
         self.assertIn("result", resp, resp.get("error"))
-        self.assertTrue(resp["result"]["text"].startswith(f"### 数据概况 · `{table}`"))
+        self.assertTrue(resp["result"]["text"].startswith(f"### Data profile · `{table}`"))
         progress = [n["progress"] for n in self.client.notes(rid, "progress")]
         self.assertEqual(progress, [10, 40, 100])
         self.assertTrue(resp["result"]["charts"])

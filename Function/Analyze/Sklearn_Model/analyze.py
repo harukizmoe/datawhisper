@@ -25,23 +25,32 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
 
+from compute.i18n import say
+
 
 # ── 模块元数据（供 registry 读取）─────────────────────────────────────────
 
 ANALYSIS_ID   = "Sklearn_Model"
-ANALYSIS_NAME = "机器学习建模（Scikit-learn）"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("Machine Learning Modeling (Scikit-learn)", "机器学习建模（Scikit-learn）")
+ANALYSIS_DESC = say(
+    "General-purpose machine learning modeling with scikit-learn: classification (random forest / logistic regression), "
+    "regression (random forest / linear / ridge), and clustering (KMeans), with automatic preprocessing of missing values and categorical features. "
+    "Outputs evaluation metrics, feature importance or clustering results, and a Markdown report. "
+    "Pass the model type via the groupby_column parameter (rf / lr / lm / ridge / kmeans, default rf); "
+    "pass the number of clusters k or the random seed via the n_deciles parameter (default 42). "
+    "Requires the optional dependency: pip install -r requirements/ml.txt",
     "使用 scikit-learn 进行通用机器学习建模：分类（随机森林/逻辑回归）、"
     "回归（随机森林/线性/岭回归）、聚类（KMeans），自动预处理缺失值与类别特征，"
     "输出评估指标、特征重要性或聚类结果及 Markdown 报告。"
     "通过 groupby_column 参数传入模型类型（rf / lr / lm / ridge / kmeans，默认 rf）；"
     "通过 n_deciles 参数传入聚类数 k 或随机种子（默认 42）。"
-    "需要安装可选依赖：pip install -r requirements/ml.txt"
+    "需要安装可选依赖：pip install -r requirements/ml.txt",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
     "groupby_column (model: rf / lr / lm / ridge / kmeans, default rf)",
-    "n_deciles (kmeans 聚类数 或 随机种子, default 42)",
+    say("n_deciles (kmeans: number of clusters, or random seed, default 42)", "n_deciles (kmeans 聚类数 或 随机种子, default 42)"),
 ]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
 
@@ -89,7 +98,7 @@ def _encode_X(X: pd.DataFrame, seed: int = _DEFAULT_SEED) -> Tuple[np.ndarray, L
             parts.append(le.fit_transform(X[col].astype(str)).reshape(-1, 1))
             names.append(f"{col}(encoded)")
     if not parts:
-        raise ValueError("预处理后无有效特征列，请检查输入数据。")
+        raise ValueError(say("No valid feature columns after preprocessing; please check the input data.", "预处理后无有效特征列，请检查输入数据。"))
     return np.hstack(parts).astype(np.float64), names
 
 
@@ -235,19 +244,23 @@ def _build_md(
     n_train: int, n_test: int, n_features: int,
     metrics_df: pd.DataFrame, extra: Dict[str, Any],
 ) -> str:
-    task_cn = {"classification": "分类", "regression": "回归", "clustering": "聚类"}[task]
+    task_cn = {
+        "classification": say("Classification", "分类"),
+        "regression": say("Regression", "回归"),
+        "clustering": say("Clustering", "聚类"),
+    }[task]
     L = [
-        f"## 机器学习建模 - `{target_col or '(无监督聚类)'}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 任务类型 | {task_cn} |",
-        f"| 模型 | {model_label} |",
-        f"| 训练样本 | {n_train} |",
-        f"| 测试样本 | {n_test} |",
-        f"| 特征数量 | {n_features} |",
+        say(f"## Machine Learning Modeling - `{target_col or '(unsupervised clustering)'}`\n", f"## 机器学习建模 - `{target_col or '(无监督聚类)'}`\n"),
+        say("### Model Overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Task type | {task_cn} |", f"| 任务类型 | {task_cn} |"),
+        say(f"| Model | {model_label} |", f"| 模型 | {model_label} |"),
+        say(f"| Training samples | {n_train} |", f"| 训练样本 | {n_train} |"),
+        say(f"| Test samples | {n_test} |", f"| 测试样本 | {n_test} |"),
+        say(f"| Number of features | {n_features} |", f"| 特征数量 | {n_features} |"),
         "",
-        "### 评估指标",
-        "| 指标 | 值 |", "|------|-----|",
+        say("### Evaluation Metrics", "### 评估指标"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
     ]
     for _, row in metrics_df.iterrows():
         L.append(f"| {row['metric']} | **{row['value']}** |")
@@ -255,19 +268,19 @@ def _build_md(
     if task in ("classification", "regression") and extra.get("importance") is not None:
         imp = extra["importance"]
         if not imp.empty:
-            L += ["### 特征重要性", "| 排名 | 特征 | 重要性占比 |", "|:----:|------|----------:|"]
+            L += [say("### Feature Importance", "### 特征重要性"), say("| Rank | Feature | Importance share |", "| 排名 | 特征 | 重要性占比 |"), "|:----:|------|----------:|"]
             for _, row in imp.iterrows():
                 bar = "|" * max(1, int(row["importance_pct"] / 5))
                 L.append(f"| {int(row['rank'])} | `{row['feature']}` | {row['importance_pct']:.1f}% {bar} |")
             L.append("")
     if task == "clustering" and extra.get("dist") is not None:
         dist = extra["dist"]
-        L += ["### 聚类样本分布", "| 簇 | 样本数 | 占比 |", "|---:|------:|-----:|"]
+        L += [say("### Cluster Sample Distribution", "### 聚类样本分布"), say("| Cluster | Samples | Share |", "| 簇 | 样本数 | 占比 |"), "|---:|------:|-----:|"]
         for _, row in dist.iterrows():
             L.append(f"| {row['cluster']} | {row['count']} | {row['pct']}% |")
         L.append("")
     if task == "regression":
-        L.append("> 逐样本预测与残差见 `analysis_metrics` 表（actual / predicted / residual）。")
+        L.append(say("> Per-sample predictions and residuals are in the `analysis_metrics` table (actual / predicted / residual).", "> 逐样本预测与残差见 `analysis_metrics` 表（actual / predicted / residual）。"))
     L.append("")
     return "\n".join(L)
 
@@ -303,8 +316,12 @@ def run(
         import sklearn  # noqa: F401  延迟导入：核心包不携带 sklearn
     except ImportError:
         raise ImportError(
-            "scikit-learn 未安装。机器学习建模需要可选依赖，请先执行："
-            "pip install -r requirements/ml.txt"
+            say(
+                "scikit-learn is not installed. Machine learning modeling requires an optional dependency; please run first: "
+                "pip install -r requirements/ml.txt",
+                "scikit-learn 未安装。机器学习建模需要可选依赖，请先执行："
+                "pip install -r requirements/ml.txt",
+            )
         )
 
     from sklearn.model_selection import train_test_split
@@ -319,7 +336,7 @@ def run(
     if task == "clustering":
         X = df if target_column not in df.columns else df.drop(columns=[target_column])
         if X.shape[1] < 1:
-            raise ValueError("聚类需要至少一个特征列。")
+            raise ValueError(say("Clustering requires at least one feature column.", "聚类需要至少一个特征列。"))
         X_arr, names = _encode_X(X)
         clf = _pick_model("clustering", model, seed)
         labels = clf.fit_predict(X_arr)
@@ -331,20 +348,20 @@ def run(
             {"metric": "n_features", "value": len(names)},
         ])
         markdown = _build_md(
-            task, "KMeans", target_column or "(无监督聚类)",
+            task, "KMeans", target_column or say("(unsupervised clustering)", "(无监督聚类)"),
             len(df), 0, len(names), result_df, {"dist": dist},
         )
         return result_df, dist, center_df, markdown
 
     if target_column not in df.columns:
         raise ValueError(
-            f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}"
+            say(f"Target column '{target_column}' does not exist. Available columns: {', '.join(df.columns[:20])}", f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}")
         )
 
     y_series = df[target_column]
     X = df.drop(columns=[target_column])
     if X.shape[1] < 1:
-        raise ValueError("至少需要一个特征列。")
+        raise ValueError(say("At least one feature column is required.", "至少需要一个特征列。"))
 
     X_arr, names = _encode_X(X)
     y_arr, classes = _encode_y(y_series)

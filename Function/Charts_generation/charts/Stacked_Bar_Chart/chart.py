@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -34,9 +35,6 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
         ]}
 
 __all__ = ["generate"]
-
-_DATA_FMT = "x列(类别) + 分组列 + y列(数值) 或 宽格式(行标签 + 多个数值列)"
-_DESC = "多个分组堆叠在同一柱内，适合比较各部分对整体的贡献。支持宽格式数据自动转换。"
 
 # 配色：蓝系 + 中性色 + 强调色
 _MCKINSEY_COLORS = [
@@ -161,8 +159,8 @@ def _convert_wide_to_long(df: pd.DataFrame, id_col: str,
     df_long = df.melt(
         id_vars=[id_col],
         value_vars=value_cols,
-        var_name="分类",
-        value_name="数值"
+        var_name=say("Category", "分类"),
+        value_name=say("Value", "数值")
     )
     
     return df_long
@@ -170,6 +168,8 @@ def _convert_wide_to_long(df: pd.DataFrame, id_col: str,
 
 def _build_html(title: str, chart_name: str, library: str,
                 data_fmt: str, desc: str, embed: str) -> str:
+    lbl_fmt = say("Data format:", "数据格式：")
+    lbl_desc = say("Description:", "说明：")
     return f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <title>{title}</title>
@@ -184,8 +184,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{lbl_fmt}</strong>{data_fmt}<br>
+<strong>{lbl_desc}</strong>{desc}
 </div></body></html>"""
 
 
@@ -198,7 +198,7 @@ def generate(
     x: str = "x",
     y: str = "y",
     color: str = "color",
-    title: str = "堆叠柱状图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -211,9 +211,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
@@ -221,7 +221,7 @@ def generate(
     y_col = y_col if y_col is not None else y
     color_col = mapping.get("color")
     color_col = color_col if color_col is not None else (mapping.get("series") if mapping.get("series") is not None else color)
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Stacked Bar Chart", "堆叠柱状图"))
 
     # ── 检测并转换宽格式数据 ──────────────────────────────
     if _detect_wide_format(df, mapping):
@@ -243,10 +243,10 @@ def generate(
         
         # 转换后的长格式：id_col, 分类, 数值
         _x = id_col  # 行标签作为 x
-        _y = "数值"  # 数值列
-        _color = "分类"  # 分类作为堆叠
+        _y = say("Value", "数值")  # 数值列
+        _color = say("Category", "分类")  # 分类作为堆叠
         
-        warnings.append(f"自动转换宽格式数据：{id_col} (x) × 分类 (stack) × 数值 (y)")
+        warnings.append(say(f"Wide-format data converted automatically: {id_col} (x) × Category (stack) × Value (y)", f"自动转换宽格式数据：{id_col} (x) × 分类 (stack) × 数值 (y)"))
     else:
         # 长格式数据：正常处理
         _x = _auto_col(df, x_col, "x", "季度", "时间", "类别", "行标签")
@@ -264,13 +264,13 @@ def generate(
 
     for role, col_ in [("x", _x), ("y", _y)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _x is None or _x not in df.columns:
-        warnings.append("找不到必填字段 [x]")
+        warnings.append(say("Required field [x] not found", "找不到必填字段 [x]"))
         return ChartResult(warnings=warnings)
     if _y is None or _y not in df.columns:
-        warnings.append("找不到必填字段 [y]")
+        warnings.append(say("Required field [y] not found", "找不到必填字段 [y]"))
         return ChartResult(warnings=warnings)
 
     if _color and _color not in df.columns:
@@ -283,9 +283,9 @@ def generate(
     before = len(df)
     df = df.dropna(subset=[_y])
     if before != len(df):
-        warnings.append(f"已忽略 {before - len(df)} 行无法解析为数值的 y 数据")
+        warnings.append(say(f"Ignored {before - len(df)} rows whose y data could not be parsed as numbers", f"已忽略 {before - len(df)} 行无法解析为数值的 y 数据"))
     if df.empty:
-        return ChartResult(warnings=warnings + ["y 列不含可用数值"])
+        return ChartResult(warnings=warnings + [say("The y column contains no usable numeric values", "y 列不含可用数值")])
 
     # 配色方案：优先用 options.color_scheme，回退到 _MCKINSEY_COLORS
     _scheme = get_color_scheme(options.get("color_scheme", "mckinsey"))
@@ -316,7 +316,12 @@ def generate(
     fig.update_yaxes(showgrid=True, gridcolor="#E6E9EF", zeroline=False)
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "stacked_bar", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "stacked_bar", "plotly",
+                       say("x column (category) + group column + y column (value), or wide format (row label + multiple value columns)",
+                           "x列(类别) + 分组列 + y列(数值) 或 宽格式(行标签 + 多个数值列)"),
+                       say("Multiple groups are stacked within the same bar, suited to comparing each part's contribution to the whole. Wide-format data is converted automatically.",
+                           "多个分组堆叠在同一柱内，适合比较各部分对整体的贡献。支持宽格式数据自动转换。"),
+                       chart_html)
 
 
     meta = {

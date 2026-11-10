@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from compute.i18n import say
 from infrastructure.paths import content_data_path
 
 
@@ -142,33 +143,36 @@ class WorkspaceMetadata:
     @classmethod
     def from_dict(cls, raw: object) -> "WorkspaceMetadata":
         if not isinstance(raw, dict):
-            raise CorruptWorkspaceMetadata("workspace.json 根节点必须是对象。")
+            raise CorruptWorkspaceMetadata(say("The workspace.json root must be an object.", "workspace.json 根节点必须是对象。"))
         version = raw.get("schema_version")
         if not isinstance(version, int):
-            raise CorruptWorkspaceMetadata("workspace.json 缺少有效 schema_version。")
+            raise CorruptWorkspaceMetadata(say("workspace.json is missing a valid schema_version.", "workspace.json 缺少有效 schema_version。"))
         if version > WORKSPACE_SCHEMA_VERSION:
             raise FutureWorkspaceMetadata(
-                f"工作区元数据版本 {version} 高于当前支持版本 {WORKSPACE_SCHEMA_VERSION}。"
+                say(
+                    f"Workspace metadata version {version} is newer than the supported version {WORKSPACE_SCHEMA_VERSION}.",
+                    f"工作区元数据版本 {version} 高于当前支持版本 {WORKSPACE_SCHEMA_VERSION}。",
+                )
             )
         if version < 1:
-            raise CorruptWorkspaceMetadata(f"不支持的工作区元数据版本：{version}")
+            raise CorruptWorkspaceMetadata(say(f"Unsupported workspace metadata version: {version}", f"不支持的工作区元数据版本：{version}"))
         workspace_id = raw.get("workspace_id")
         if not is_workspace_uuid(workspace_id):
-            raise CorruptWorkspaceMetadata("workspace.json 的 workspace_id 不是有效 UUID v4。")
+            raise CorruptWorkspaceMetadata(say("The workspace_id in workspace.json is not a valid UUID v4.", "workspace.json 的 workspace_id 不是有效 UUID v4。"))
         required_strings = ("name", "root_path", "permission", "created_at", "last_opened_at")
         if any(not isinstance(raw.get(key), str) or not raw[key] for key in required_strings):
-            raise CorruptWorkspaceMetadata("workspace.json 缺少必需字段。")
+            raise CorruptWorkspaceMetadata(say("workspace.json is missing required fields.", "workspace.json 缺少必需字段。"))
         if raw["permission"] not in {"read_only", "read_write"}:
-            raise CorruptWorkspaceMetadata("workspace.json 的 permission 无效。")
+            raise CorruptWorkspaceMetadata(say("The permission in workspace.json is invalid.", "workspace.json 的 permission 无效。"))
         revision = raw.get("metadata_revision")
         if not isinstance(revision, int) or revision < 1:
-            raise CorruptWorkspaceMetadata("workspace.json 的 metadata_revision 无效。")
+            raise CorruptWorkspaceMetadata(say("The metadata_revision in workspace.json is invalid.", "workspace.json 的 metadata_revision 无效。"))
         legacy = raw.get("legacy") or {}
         if not isinstance(legacy, dict):
-            raise CorruptWorkspaceMetadata("workspace.json 的 legacy 无效。")
+            raise CorruptWorkspaceMetadata(say("The legacy value in workspace.json is invalid.", "workspace.json 的 legacy 无效。"))
         cloned_from = raw.get("cloned_from_workspace_id")
         if cloned_from is not None and not is_workspace_uuid(cloned_from):
-            raise CorruptWorkspaceMetadata("workspace.json 的 cloned_from_workspace_id 无效。")
+            raise CorruptWorkspaceMetadata(say("The cloned_from_workspace_id in workspace.json is invalid.", "workspace.json 的 cloned_from_workspace_id 无效。"))
         return cls(
             workspace_id=workspace_id,
             name=raw["name"],
@@ -197,7 +201,7 @@ class WorkspaceMetadataStore:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise CorruptWorkspaceMetadata(f"无法读取工作区元数据：{exc}") from exc
+            raise CorruptWorkspaceMetadata(say(f"Cannot read the workspace metadata: {exc}", f"无法读取工作区元数据：{exc}")) from exc
         return WorkspaceMetadata.from_dict(raw)
 
     def _read_index(self) -> dict[str, Any]:
@@ -315,18 +319,18 @@ class WorkspaceMetadataStore:
         """Rename display metadata only; never rename or move the root directory."""
         raw_name = str(name or "")
         if any(ord(char) < 32 for char in raw_name):
-            raise WorkspaceMetadataError("工作目录显示名称不能包含控制字符。")
+            raise WorkspaceMetadataError(say("The workspace display name must not contain control characters.", "工作目录显示名称不能包含控制字符。"))
         clean_name = " ".join(raw_name.split())
         if not clean_name or len(clean_name) > 80:
-            raise WorkspaceMetadataError("工作目录显示名称长度必须为 1-80 个字符。")
+            raise WorkspaceMetadataError(say("The workspace display name must be 1-80 characters long.", "工作目录显示名称长度必须为 1-80 个字符。"))
         if not is_workspace_uuid(workspace_id):
-            raise WorkspaceMetadataError("工作目录身份无效。")
+            raise WorkspaceMetadataError(say("The workspace identity is invalid.", "工作目录身份无效。"))
 
         with _path_lock(self.index_path):
             index = self._read_index()
             entry = index.get("workspaces", {}).get(workspace_id)
         if not isinstance(entry, dict) or not entry.get("root_path"):
-            raise WorkspaceMetadataError("工作目录不在发现索引中。")
+            raise WorkspaceMetadataError(say("The workspace is not in the discovery index.", "工作目录不在发现索引中。"))
         metadata_path = self.metadata_path(Path(entry["root_path"]))
         lock_paths = sorted((metadata_path, self.index_path), key=lambda p: _normal_path(p))
         first, second = (_path_lock(path) for path in lock_paths)
@@ -334,11 +338,11 @@ class WorkspaceMetadataStore:
             index = self._read_index()
             entry = index.get("workspaces", {}).get(workspace_id)
             if not isinstance(entry, dict) or not entry.get("root_path"):
-                raise WorkspaceMetadataError("工作目录不在发现索引中。")
+                raise WorkspaceMetadataError(say("The workspace is not in the discovery index.", "工作目录不在发现索引中。"))
             metadata_path = self.metadata_path(Path(entry["root_path"]))
             metadata = self._read_metadata(metadata_path)
             if metadata.workspace_id != workspace_id:
-                raise WorkspaceMetadataError("工作目录身份与发现索引不一致。")
+                raise WorkspaceMetadataError(say("The workspace identity does not match the discovery index.", "工作目录身份与发现索引不一致。"))
             metadata.name = clean_name
             metadata.metadata_revision += 1
             _atomic_json_write(metadata_path, metadata.to_dict())
@@ -357,7 +361,7 @@ class WorkspaceMetadataStore:
     ) -> WorkspaceMetadata:
         root_path = Path(root).resolve(strict=True)
         if permission not in {"read_only", "read_write"}:
-            raise WorkspaceMetadataError("工作目录权限无效。")
+            raise WorkspaceMetadataError(say("The workspace permission is invalid.", "工作目录权限无效。"))
         metadata_path = self.metadata_path(root_path)
 
         # Lock both files in a stable order. The in-process locks prevent two

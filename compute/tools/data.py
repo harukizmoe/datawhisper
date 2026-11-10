@@ -8,6 +8,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from ..i18n import say
+
 log = logging.getLogger(__name__)
 
 _TIME_SERIES_PREFIX = "Time_Series_"
@@ -127,16 +129,16 @@ class DataToolsMixin:
         refs: list[dict] = []
         for m in results.get("metrics", []):
             refs.append({
-                "type": "指标",
+                "type": say("Metric", "指标"),
                 "title": m.get("name", ""),
-                "source": m.get("alias", "") or "指标定义",
+                "source": m.get("alias", "") or say("Metric definition", "指标定义"),
                 "snippet": m.get("definition", "") or m.get("notes", ""),
                 "score": m.get("vector_score", ""),
             })
 
         for r in results.get("rules", []):
             refs.append({
-                "type": "规则",
+                "type": say("Rule", "规则"),
                 "title": r.get("rule_id", ""),
                 "source": (r.get("severity") or "warning").upper(),
                 "snippet": r.get("description", "") or r.get("condition", ""),
@@ -145,16 +147,16 @@ class DataToolsMixin:
 
         for n in results.get("notes", []):
             refs.append({
-                "type": "背景",
+                "type": say("Background", "背景"),
                 "title": n.get("topic", ""),
-                "source": n.get("tags", "") or "背景知识",
+                "source": n.get("tags", "") or say("Background knowledge", "背景知识"),
                 "snippet": n.get("content", ""),
                 "score": n.get("vector_score", ""),
             })
 
         for d in results.get("documents", []):
             refs.append({
-                "type": "文档",
+                "type": say("Document", "文档"),
                 "title": f"{d.get('source_name', 'unknown')} #chunk-{d.get('chunk_index', 0)}",
                 "source": d.get("source_name", ""),
                 "snippet": d.get("content", ""),
@@ -294,7 +296,10 @@ class DataToolsMixin:
         return result
 
     def _data_refs_for_sql(self, sql: str, src, row_count: int | None = None) -> list[dict]:
-        source_name = getattr(src, "name", "未知数据源") if src else "未知数据源"
+        source_name = (
+            getattr(src, "name", say("Unknown data source", "未知数据源")) if src
+            else say("Unknown data source", "未知数据源")
+        )
         tables = []
         for pattern in (
             r'(?i)\bfrom\s+"([^"]+)"',
@@ -313,8 +318,8 @@ class DataToolsMixin:
                 seen.add(t)
                 clean_tables.append(t)
         return [{
-            "type": "数据查询",
-            "title": ", ".join(clean_tables[:6]) or "SQL 查询",
+            "type": say("Data query", "数据查询"),
+            "title": ", ".join(clean_tables[:6]) or say("SQL query", "SQL 查询"),
             "source": source_name,
             "snippet": " ".join((sql or "").split())[:320],
             "rows": row_count,
@@ -391,7 +396,8 @@ class DataToolsMixin:
         # 拒绝写操作，让影子路径（请求线程）保持为唯一的写入通道。
         from data.sources._utils import is_write_sql
         if is_write_sql(sql):
-            return pd.DataFrame(), "写操作不支持在后台 job 中执行（内存缓存路径）。"
+            return pd.DataFrame(), say("Write operations cannot run in a background job (in-memory cache path).",
+                                       "写操作不支持在后台 job 中执行（内存缓存路径）。")
 
         conn = None
         try:
@@ -435,9 +441,9 @@ class DataToolsMixin:
         db_path_snapshot = Path(db_path)
 
         def _worker(ctx):
-            ctx.set_progress(10, "正在准备查询")
+            ctx.set_progress(10, say("Preparing query", "正在准备查询"))
             ctx.check_canceled()
-            ctx.set_progress(45, "正在执行 SQL 查询")
+            ctx.set_progress(45, say("Running SQL query", "正在执行 SQL 查询"))
             df, error = self._execute_query_in_fresh_db(
                 db_path_snapshot, sql_snapshot, db_lock
             )
@@ -446,7 +452,7 @@ class DataToolsMixin:
                 result_holder["error"] = error
             else:
                 result_holder["df"] = df
-            ctx.set_progress(100, "查询完成")
+            ctx.set_progress(100, say("Query complete", "查询完成"))
             return {
                 "rows": 0 if error else len(df),
                 "source": getattr(src, "name", ""),
@@ -460,7 +466,7 @@ class DataToolsMixin:
         )
         refs = self._data_refs_for_sql(sql, src, None)
         if job.get("status") == "canceled":
-            return "查询已取消。", refs
+            return say("Query canceled.", "查询已取消。"), refs
         if job.get("status") != "succeeded":
             return f"SQL Error: {job.get('error') or 'background job failed'}", refs
         if result_holder.get("error"):
@@ -487,7 +493,7 @@ class DataToolsMixin:
         log.info("[tools] create_analysis_table  table=%s  source=%s",
                  table_name, getattr(src, "name", "?"))
         refs = self._data_refs_for_sql(sql, src, None)
-        refs[0]["type"] = "分析表"
+        refs[0]["type"] = say("Analysis table", "分析表")
         refs[0]["title"] = table_name
         return result, refs
 
@@ -499,7 +505,7 @@ class DataToolsMixin:
             return "No data source connected.", []
 
         refs = self._data_refs_for_sql(sql, src, None)
-        refs[0]["type"] = "分析表"
+        refs[0]["type"] = say("Analysis table", "分析表")
         refs[0]["title"] = table_name
 
         can_job = self._job_runner is not None and hasattr(src, "_db_lock")
@@ -515,13 +521,13 @@ class DataToolsMixin:
         sql_snapshot = str(rewritten_sql or "")
 
         def _worker(ctx):
-            ctx.set_progress(10, "正在准备分析表")
+            ctx.set_progress(10, say("Preparing analysis table", "正在准备分析表"))
             ctx.check_canceled()
-            ctx.set_progress(40, "正在执行建表 SQL")
+            ctx.set_progress(40, say("Running table-creation SQL", "正在执行建表 SQL"))
             result = src.create_analysis_table(sql_snapshot, table_snapshot)
             ctx.check_canceled()
             result_holder["text"] = result
-            ctx.set_progress(100, "分析表创建完成")
+            ctx.set_progress(100, say("Analysis table created", "分析表创建完成"))
             return {"table": table_snapshot, "source": getattr(src, "name", "")}
 
         job = yield from self._run_as_job(
@@ -530,7 +536,7 @@ class DataToolsMixin:
             label=table_snapshot,
         )
         if job.get("status") == "canceled":
-            return "分析表创建已取消。", refs
+            return say("Analysis table creation canceled.", "分析表创建已取消。"), refs
         if job.get("status") != "succeeded":
             return f"Error building analysis table: {job.get('error') or 'background job failed'}", refs
         self._schema_cache = None
@@ -625,9 +631,9 @@ class DataToolsMixin:
         self, table_names: list, confirm: bool = False,
     ) -> str:
         if not confirm:
-            return "❌ 删除分析表需要 confirm=true。"
+            return say("❌ Deleting analysis tables requires confirm=true.", "❌ 删除分析表需要 confirm=true。")
         if not self.data_source:
-            return "❌ 请先连接数据源。"
+            return say("❌ Connect a data source first.", "❌ 请先连接数据源。")
         clean_names = []
         seen = set()
         for name in table_names or []:
@@ -636,7 +642,7 @@ class DataToolsMixin:
                 clean_names.append(value)
                 seen.add(value)
         if not clean_names:
-            return "❌ 请提供至少一个要删除的分析表名。"
+            return say("❌ Provide at least one analysis table name to delete.", "❌ 请提供至少一个要删除的分析表名。")
 
         deleted = []
         skipped = []
@@ -649,19 +655,20 @@ class DataToolsMixin:
         if deleted:
             self._schema_cache = None
 
-        lines = ["🗑️ 表清理结果"]
+        lines = [say("🗑️ Table cleanup result", "🗑️ 表清理结果")]
         if deleted:
-            lines.extend(["", "已删除的分析表："])
+            lines.extend(["", say("Deleted analysis tables:", "已删除的分析表：")])
             lines.extend(f"- `{name}`" for name in deleted)
         if skipped:
-            lines.extend(["", "未删除的表："])
-            lines.extend(f"- `{name}`：{reason}" for name, reason in skipped)
+            lines.extend(["", say("Tables not deleted:", "未删除的表：")])
+            lines.extend(f"- `{name}`{say(': ', '：')}{reason}" for name, reason in skipped)
         if not skipped:
             lines.append("")
-            lines.append("✅ 指定分析表已清理完成。")
+            lines.append(say("✅ The specified analysis tables have been cleaned up.", "✅ 指定分析表已清理完成。"))
         else:
             lines.append("")
-            lines.append("说明：只允许删除可证明为分析/派生表的对象；原始源表和无法判定的表会被保护。")
+            lines.append(say("Note: only objects provably identified as analysis/derived tables can be deleted; raw source tables and tables that cannot be classified are protected.",
+                             "说明：只允许删除可证明为分析/派生表的对象；原始源表和无法判定的表会被保护。"))
         return "\n".join(lines)
 
     # ── DataFrame → DataSource 写入器（向后兼容）─────────────────────────────
@@ -857,8 +864,10 @@ class DataToolsMixin:
         except Exception as exc:
             return (
                 markdown
-                + f"\n\n⚠️ **结果表写入失败**：{exc}\n"
-                "分析计算已完成，但结果无法存为可查询表格，请联系开发者。"
+                + say(f"\n\n⚠️ **Failed to write result tables**: {exc}\n"
+                      "The analysis finished, but the results could not be saved as queryable tables. Please contact the developer.",
+                      f"\n\n⚠️ **结果表写入失败**：{exc}\n"
+                      "分析计算已完成，但结果无法存为可查询表格，请联系开发者。")
             )
 
         if analysis_name == "K_Means" and "cluster" in breakdown_df.columns:
@@ -891,7 +900,19 @@ class DataToolsMixin:
             cols_preview = ", ".join(str(c) for c in labeled_df.columns[:8])
             if len(labeled_df.columns) > 8:
                 cols_preview += ", ..."
-            return (
+            return say(
+                "\n\n---\n"
+                "### 📌 Data label table `cluster_labels`\n"
+                "The clustering result (`cluster` column) has been written back to the raw data, "
+                "producing a label table with all original fields:\n\n"
+                f"**Columns:** `{cols_preview}`\n\n"
+                "It can be used directly in later analysis, for example:\n"
+                "```sql\n"
+                "-- View the detailed records of each cluster\n"
+                "SELECT * FROM cluster_labels WHERE cluster = 0 LIMIT 20\n\n"
+                "-- Average of a field per cluster\n"
+                "SELECT cluster, AVG(target_col) AS avg_val FROM cluster_labels GROUP BY cluster\n"
+                "```",
                 "\n\n---\n"
                 "### 📌 数据标签表 `cluster_labels`\n"
                 f"已将聚类结果（cluster 列）回写到原始数据，"
@@ -903,7 +924,7 @@ class DataToolsMixin:
                 "SELECT * FROM cluster_labels WHERE cluster = 0 LIMIT 20\n\n"
                 "-- 统计各簇某字段的均值\n"
                 "SELECT cluster, AVG(target_col) AS avg_val FROM cluster_labels GROUP BY cluster\n"
-                "```"
+                "```",
             )
         except Exception:
             return ""
@@ -943,9 +964,9 @@ class DataToolsMixin:
                     return None
                 d = int(d)
                 if d == 1:
-                    suffix = "（最低）"
+                    suffix = say(" (lowest)", "（最低）")
                 elif d == actual_n:
-                    suffix = "（最高）"
+                    suffix = say(" (highest)", "（最高）")
                 else:
                     suffix = ""
                 return f"D{str(d).zfill(width)}{suffix}"
@@ -957,7 +978,20 @@ class DataToolsMixin:
             cols_preview = ", ".join(str(c) for c in labeled_df.columns[:8])
             if len(labeled_df.columns) > 8:
                 cols_preview += ", ..."
-            return (
+            return say(
+                "\n\n---\n"
+                "### 📌 Data label table `decile_labels`\n"
+                "The decile labels (`decile` + `decile_label`) have been written back to the raw data, "
+                f"{len(labeled_df)} rows in total:\n\n"
+                f"**Columns:** `{cols_preview}`\n\n"
+                "It can be exported directly or used for further analysis, for example:\n"
+                "```sql\n"
+                "-- View the raw records of a decile\n"
+                f"SELECT * FROM decile_labels WHERE decile = 10 LIMIT 20\n\n"
+                "-- Average per decile\n"
+                f"SELECT decile, decile_label, AVG({target_column}) AS avg_val\n"
+                "FROM decile_labels GROUP BY decile, decile_label ORDER BY decile\n"
+                "```",
                 "\n\n---\n"
                 "### 📌 数据标签表 `decile_labels`\n"
                 f"已将十分位标签（`decile` + `decile_label`）回写到原始数据，"
@@ -970,7 +1004,7 @@ class DataToolsMixin:
                 "-- 各分位均值汇总\n"
                 f"SELECT decile, decile_label, AVG({target_column}) AS avg_val\n"
                 "FROM decile_labels GROUP BY decile, decile_label ORDER BY decile\n"
-                "```"
+                "```",
             )
         except Exception:
             return ""
@@ -1068,16 +1102,16 @@ class DataToolsMixin:
         result_holder = {}
 
         def _worker(ctx):
-            ctx.set_progress(10, "正在准备图表数据")
+            ctx.set_progress(10, say("Preparing chart data", "正在准备图表数据"))
             ctx.check_canceled()
-            ctx.set_progress(35, "正在渲染图表")
+            ctx.set_progress(35, say("Rendering chart", "正在渲染图表"))
             result = self._render_chart_from_df(
                 df_snapshot, chart_type_snapshot, mapping_snapshot,
                 title_snapshot, highlight_snapshot, size_snapshot, scheme_snapshot
             )
             ctx.check_canceled()
             result_holder["chart"] = result
-            ctx.set_progress(100, "图表生成完成")
+            ctx.set_progress(100, say("Chart generation complete", "图表生成完成"))
             return {
                 "chart_type": chart_type_snapshot,
                 "input_rows": len(df_snapshot),
@@ -1124,36 +1158,36 @@ class DataToolsMixin:
     def _profile_dataframe(self, df, table_name: str, columns: list = None) -> dict:
         from Function.Clean.data_profile import profile
         text, charts = profile(df, columns or None)
-        return {"text": f"### 数据概况 · `{table_name}`\n\n" + text, "charts": charts}
+        return {"text": say(f"### Data profile · `{table_name}`\n\n", f"### 数据概况 · `{table_name}`\n\n") + text, "charts": charts}
 
     def _tool_profile_data(self, table_name: str = "", columns: list = None) -> dict:
         if not self.data_source:
-            return {"text": "❌ 请先连接数据源。", "charts": []}
+            return {"text": say("❌ Connect a data source first.", "❌ 请先连接数据源。"), "charts": []}
 
         tname = table_name or self._get_first_raw_table()
         if not tname:
-            return {"text": "❌ 数据源中没有可用的表格。", "charts": []}
+            return {"text": say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。"), "charts": []}
 
         df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
         if err or df is None or df.empty:
-            return {"text": f"❌ 读取表 '{tname}' 失败：{err}", "charts": []}
+            return {"text": say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}"), "charts": []}
 
         try:
             return self._profile_dataframe(df, tname, columns)
         except Exception as exc:
-            return {"text": f"❌ 数据概况生成失败：{exc}", "charts": []}
+            return {"text": say(f"❌ Data profile generation failed: {exc}", f"❌ 数据概况生成失败：{exc}"), "charts": []}
 
     def _tool_profile_data_with_jobs(self, table_name: str = "", columns: list = None):
         if not self.data_source:
-            return {"text": "❌ 请先连接数据源。", "charts": []}
+            return {"text": say("❌ Connect a data source first.", "❌ 请先连接数据源。"), "charts": []}
 
         tname = table_name or self._get_first_raw_table()
         if not tname:
-            return {"text": "❌ 数据源中没有可用的表格。", "charts": []}
+            return {"text": say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。"), "charts": []}
 
         df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
         if err or df is None or df.empty:
-            return {"text": f"❌ 读取表 '{tname}' 失败：{err}", "charts": []}
+            return {"text": say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}"), "charts": []}
 
         should_job = (
             self._job_runner is not None
@@ -1166,7 +1200,7 @@ class DataToolsMixin:
             try:
                 return self._profile_dataframe(df, tname, columns)
             except Exception as exc:
-                return {"text": f"❌ 数据概况生成失败：{exc}", "charts": []}
+                return {"text": say(f"❌ Data profile generation failed: {exc}", f"❌ 数据概况生成失败：{exc}"), "charts": []}
 
         df_snapshot = df.copy(deep=True)
         columns_snapshot = list(columns or [])
@@ -1174,13 +1208,13 @@ class DataToolsMixin:
         result_holder = {}
 
         def _worker(ctx):
-            ctx.set_progress(10, "正在准备数据概况")
+            ctx.set_progress(10, say("Preparing data profile", "正在准备数据概况"))
             ctx.check_canceled()
-            ctx.set_progress(40, "正在计算字段统计")
+            ctx.set_progress(40, say("Computing column statistics", "正在计算字段统计"))
             result = self._profile_dataframe(df_snapshot, table_snapshot, columns_snapshot)
             ctx.check_canceled()
             result_holder["profile"] = result
-            ctx.set_progress(100, "数据概况生成完成")
+            ctx.set_progress(100, say("Data profile complete", "数据概况生成完成"))
             return {
                 "table": table_snapshot,
                 "input_rows": len(df_snapshot),
@@ -1194,10 +1228,12 @@ class DataToolsMixin:
             label=f"{table_snapshot} · {len(df_snapshot)} rows",
         )
         if job.get("status") == "canceled":
-            return {"text": "数据概况生成已取消。", "charts": []}
+            return {"text": say("Data profile generation canceled.", "数据概况生成已取消。"), "charts": []}
         if job.get("status") != "succeeded":
-            return {"text": f"❌ 数据概况生成失败：{job.get('error') or 'background job failed'}", "charts": []}
-        return result_holder.get("profile", {"text": "❌ 数据概况生成失败：后台结果不可用。", "charts": []})
+            return {"text": say(f"❌ Data profile generation failed: {job.get('error') or 'background job failed'}",
+                                f"❌ 数据概况生成失败：{job.get('error') or 'background job failed'}"), "charts": []}
+        return result_holder.get("profile", {"text": say("❌ Data profile generation failed: background result unavailable.",
+                                                          "❌ 数据概况生成失败：后台结果不可用。"), "charts": []})
 
     def _clean_dataframe(
         self,
@@ -1219,12 +1255,13 @@ class DataToolsMixin:
             return winsorize(df, lower_pct, upper_pct, columns)
         if operation == "trimming":
             if not trim_column:
-                raise ValueError("trimming 操作需要指定 trim_column。")
+                raise ValueError(say("The trimming operation requires trim_column.", "trimming 操作需要指定 trim_column。"))
             if min_val is None or max_val is None:
-                raise ValueError("trimming 操作需要同时指定 min_val 和 max_val。")
+                raise ValueError(say("The trimming operation requires both min_val and max_val.", "trimming 操作需要同时指定 min_val 和 max_val。"))
             from Function.Clean.trimming import trim
             return trim(df, trim_column, float(min_val), float(max_val))
-        raise ValueError(f"未知操作 '{operation}'，支持：fill_na / winsorize / trimming")
+        raise ValueError(say(f"Unknown operation '{operation}'; supported: fill_na / winsorize / trimming",
+                             f"未知操作 '{operation}'，支持：fill_na / winsorize / trimming"))
 
     def _tool_clean_data(
         self,
@@ -1240,15 +1277,15 @@ class DataToolsMixin:
         output_table: str = "cleaned_data",
     ) -> str:
         if not self.data_source:
-            return "❌ 请先连接数据源。"
+            return say("❌ Connect a data source first.", "❌ 请先连接数据源。")
 
         tname = table_name or self._get_first_raw_table()
         if not tname:
-            return "❌ 数据源中没有可用的表格。"
+            return say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。")
 
         df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
         if err or df is None or df.empty:
-            return f"❌ 读取表 '{tname}' 失败：{err}"
+            return say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}")
 
         try:
             cleaned_df, summary = self._clean_dataframe(
@@ -1256,17 +1293,18 @@ class DataToolsMixin:
                 trim_column, min_val, max_val,
             )
         except Exception as exc:
-            return f"❌ 清洗失败：{exc}"
+            return say(f"❌ Cleaning failed: {exc}", f"❌ 清洗失败：{exc}")
 
         try:
             self._write_analysis_df(cleaned_df, output_table)
             self._schema_cache = None
         except Exception as exc:
-            return summary + f"\n\n⚠️ 结果表写入失败：{exc}"
+            return summary + say(f"\n\n⚠️ Failed to write the result table: {exc}", f"\n\n⚠️ 结果表写入失败：{exc}")
 
         return (
             summary
-            + f"\n\n✅ 清洗结果已保存为表 `{output_table}`，可直接用于后续分析和图表生成。"
+            + say(f"\n\n✅ The cleaned result was saved as table `{output_table}` and can be used directly for later analysis and chart generation.",
+                  f"\n\n✅ 清洗结果已保存为表 `{output_table}`，可直接用于后续分析和图表生成。")
         )
 
     def _tool_clean_data_with_jobs(
@@ -1283,15 +1321,15 @@ class DataToolsMixin:
         output_table: str = "cleaned_data",
     ):
         if not self.data_source:
-            return "❌ 请先连接数据源。"
+            return say("❌ Connect a data source first.", "❌ 请先连接数据源。")
 
         tname = table_name or self._get_first_raw_table()
         if not tname:
-            return "❌ 数据源中没有可用的表格。"
+            return say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。")
 
         df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
         if err or df is None or df.empty:
-            return f"❌ 读取表 '{tname}' 失败：{err}"
+            return say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}")
 
         should_job = self._job_runner is not None and len(df) >= _CLEAN_JOB_ROW_THRESHOLD
         if not should_job:
@@ -1301,7 +1339,7 @@ class DataToolsMixin:
                     trim_column, min_val, max_val,
                 )
             except Exception as exc:
-                return f"❌ 清洗失败：{exc}"
+                return say(f"❌ Cleaning failed: {exc}", f"❌ 清洗失败：{exc}")
         else:
             df_snapshot = df.copy(deep=True)
             columns_snapshot = list(columns or [])
@@ -1317,9 +1355,9 @@ class DataToolsMixin:
             result_holder = {}
 
             def _worker(ctx):
-                ctx.set_progress(10, "正在准备清洗数据")
+                ctx.set_progress(10, say("Preparing data for cleaning", "正在准备清洗数据"))
                 ctx.check_canceled()
-                ctx.set_progress(45, "正在执行清洗计算")
+                ctx.set_progress(45, say("Running cleaning computation", "正在执行清洗计算"))
                 cleaned, summary_text = self._clean_dataframe(
                     df_snapshot,
                     params["operation"],
@@ -1334,7 +1372,7 @@ class DataToolsMixin:
                 ctx.check_canceled()
                 result_holder["cleaned_df"] = cleaned
                 result_holder["summary"] = summary_text
-                ctx.set_progress(100, "清洗计算完成")
+                ctx.set_progress(100, say("Cleaning computation complete", "清洗计算完成"))
                 return {
                     "operation": params["operation"],
                     "input_rows": len(df_snapshot),
@@ -1347,21 +1385,23 @@ class DataToolsMixin:
                 label=f"{operation} · {len(df_snapshot)} rows",
             )
             if job.get("status") == "canceled":
-                return "数据清洗已取消。"
+                return say("Data cleaning canceled.", "数据清洗已取消。")
             if job.get("status") != "succeeded":
-                return f"❌ 清洗失败：{job.get('error') or 'background job failed'}"
+                return say(f"❌ Cleaning failed: {job.get('error') or 'background job failed'}",
+                           f"❌ 清洗失败：{job.get('error') or 'background job failed'}")
             cleaned_df = result_holder.get("cleaned_df")
             summary = result_holder.get("summary", "")
             if cleaned_df is None:
-                return "❌ 清洗失败：后台结果不可用。"
+                return say("❌ Cleaning failed: background result unavailable.", "❌ 清洗失败：后台结果不可用。")
 
         try:
             self._write_analysis_df(cleaned_df, output_table)
             self._schema_cache = None
         except Exception as exc:
-            return summary + f"\n\n⚠️ 结果表写入失败：{exc}"
+            return summary + say(f"\n\n⚠️ Failed to write the result table: {exc}", f"\n\n⚠️ 结果表写入失败：{exc}")
 
         return (
             summary
-            + f"\n\n✅ 清洗结果已保存为表 `{output_table}`，可直接用于后续分析和图表生成。"
+            + say(f"\n\n✅ The cleaned result was saved as table `{output_table}` and can be used directly for later analysis and chart generation.",
+                  f"\n\n✅ 清洗结果已保存为表 `{output_table}`，可直接用于后续分析和图表生成。")
         )

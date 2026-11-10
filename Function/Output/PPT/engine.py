@@ -23,6 +23,8 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.oxml.ns import qn
 
+from compute.i18n import say
+
 from .constants import *
 from .core import (
     _clean_shape, set_ea_font,
@@ -163,10 +165,12 @@ class MckEngine:
         add_page_number(s, self._page, self.total)
         return s
 
-    def toc(self, title='目录', items=None, source=''):
+    def toc(self, title=None, items=None, source=''):
         """#6 Table of Contents — numbered items with descriptions.
         items: list of (num, title, description)
         """
+        if title is None:
+            title = say("Contents", "目录")
         s = self._ns()
         add_action_title(s, title)
         iy = Inches(1.5)
@@ -233,7 +237,7 @@ class MckEngine:
         if detail_items:
             add_rect(s, LM, Inches(4.5), CW, Inches(2.2), BG_GRAY)
             add_text(s, LM + Inches(0.3), Inches(4.6), Inches(1.8), Inches(0.4),
-                     '解决路径' if not unit else '详细说明',
+                     say('Resolution path', '解决路径') if not unit else say('Details', '详细说明'),
                      font_size=BODY_SIZE, font_color=NAVY, bold=True)
             add_text(s, LM + Inches(0.3), Inches(5.1), CW - Inches(0.6), Inches(1.4),
                      detail_items, font_size=BODY_SIZE, line_spacing=Pt(8))
@@ -337,7 +341,7 @@ class MckEngine:
         return s
 
     def table_insight(self, title, headers, rows, insights,
-                      col_widths=None, insight_title='启示：',
+                      col_widths=None, insight_title=None,
                       source='', bottom_bar=None):
         """Table + right insight panel — McKinsey editorial layout.
 
@@ -356,6 +360,8 @@ class MckEngine:
         insight_title : str — title for the right panel (default '启示：').
         """
         import re
+        if insight_title is None:
+            insight_title = say("Insights:", "启示：")
         s = self._ns()
         add_action_title(s, title)
 
@@ -500,7 +506,7 @@ class MckEngine:
         """
         s = self._ns()
         add_action_title(s, title)
-        headers = ['技术领域', '评分', '成熟度']
+        headers = [say('Technology area', '技术领域'), say('Score', '评分'), say('Maturity', '成熟度')]
         add_text(s, LM, CONTENT_TOP + Inches(0.1), Inches(4.0), Inches(0.4),
                  headers[0], font_size=BODY_SIZE, font_color=MED_GRAY, bold=True)
         add_text(s, Inches(5.0), CONTENT_TOP + Inches(0.1), Inches(1.5), Inches(0.4),
@@ -1158,7 +1164,7 @@ class MckEngine:
         add_action_title(s, title)
         left_w = Inches(7.5)
         add_text(s, LM, CONTENT_TOP + Inches(0.1), left_w, Inches(0.4),
-                 '协同机制分析', font_size=SUB_HEADER_SIZE, font_color=NAVY, bold=True)
+                 say('Synergy mechanism analysis', '协同机制分析'), font_size=SUB_HEADER_SIZE, font_color=NAVY, bold=True)
         add_hline(s, LM, CONTENT_TOP + Inches(0.6), left_w, LINE_GRAY)
         add_text(s, LM, CONTENT_TOP + Inches(0.8), left_w, Inches(4.0),
                  left_text, font_size=BODY_SIZE, line_spacing=Pt(4))
@@ -1592,7 +1598,7 @@ class MckEngine:
                      alignment=PP_ALIGN.CENTER)
             add_hline(s, cx + Inches(0.3), Inches(4.9), cw_card - Inches(0.6), LINE_GRAY)
             add_text(s, cx + Inches(0.15), Inches(5.1), cw_card - Inches(0.3), Inches(0.4),
-                     f'负责人：{owner}', font_size=BODY_SIZE, font_color=MED_GRAY,
+                     say(f'Owner: {owner}', f'负责人：{owner}'), font_size=BODY_SIZE, font_color=MED_GRAY,
                      alignment=PP_ALIGN.CENTER)
         self._footer(s, source)
         return s
@@ -1634,10 +1640,10 @@ class MckEngine:
         add_action_title(s, title)
         if status_map is None:
             status_map = {
-                'active':  ('→ 活跃', ACCENT_GREEN, LIGHT_GREEN),
-                'risk':    ('△ 困难', ACCENT_ORANGE, LIGHT_ORANGE),
-                'pending': ('○ 早期', MED_GRAY, BG_GRAY),
-                'done':    ('✓ 完成', ACCENT_BLUE, LIGHT_BLUE),
+                'active':  (say('→ Active', '→ 活跃'), ACCENT_GREEN, LIGHT_GREEN),
+                'risk':    (say('△ Difficult', '△ 困难'), ACCENT_ORANGE, LIGHT_ORANGE),
+                'pending': (say('○ Early', '○ 早期'), MED_GRAY, BG_GRAY),
+                'done':    (say('✓ Done', '✓ 完成'), ACCENT_BLUE, LIGHT_BLUE),
             }
         hx = LM
         hy = CONTENT_TOP + Inches(0.1)
@@ -2225,20 +2231,20 @@ class MckEngine:
         s = self._ns()
         add_action_title(s, title)
         sc_map = {
-            'on': (ACCENT_GREEN, '达标'),
-            'risk': (ACCENT_ORANGE, '关注'),
-            'off': (ACCENT_RED, '滞后'),
+            'on': (ACCENT_GREEN, say("On target", '达标')),
+            'risk': (ACCENT_ORANGE, say("Watch", '关注')),
+            'off': (ACCENT_RED, say("Behind", '滞后')),
         }
         # Headers
         hy = Inches(1.3)
-        add_text(s, LM, hy, Inches(3.5), Inches(0.35), 'KPI指标',
+        add_text(s, LM, hy, Inches(3.5), Inches(0.35), say("KPI", 'KPI指标'),
                  font_size=SMALL_SIZE, font_color=MED_GRAY, bold=True)
-        add_text(s, LM + Inches(3.5), hy, Inches(6.0), Inches(0.35), '进度',
+        add_text(s, LM + Inches(3.5), hy, Inches(6.0), Inches(0.35), say("Progress", '进度'),
                  font_size=SMALL_SIZE, font_color=MED_GRAY, bold=True)
-        add_text(s, LM + Inches(9.5), hy, Inches(1.2), Inches(0.35), '达成率',
+        add_text(s, LM + Inches(9.5), hy, Inches(1.2), Inches(0.35), say("Achievement", '达成率'),
                  font_size=SMALL_SIZE, font_color=MED_GRAY, bold=True,
                  alignment=PP_ALIGN.CENTER)
-        add_text(s, LM + Inches(10.7), hy, Inches(1.0), Inches(0.35), '状态',
+        add_text(s, LM + Inches(10.7), hy, Inches(1.0), Inches(0.35), say("Status", '状态'),
                  font_size=SMALL_SIZE, font_color=MED_GRAY, bold=True,
                  alignment=PP_ALIGN.CENTER)
         add_hline(s, LM, hy + Inches(0.35), CW, BLACK, Pt(0.75))
@@ -2266,7 +2272,7 @@ class MckEngine:
         if summary:
             add_rect(s, LM, Inches(6.0), CW, Inches(0.7), BG_GRAY)
             add_text(s, LM + Inches(0.3), Inches(6.0), Inches(1.5), Inches(0.7),
-                     '总结', font_size=BODY_SIZE, font_color=NAVY, bold=True,
+                     say("Summary", '总结'), font_size=BODY_SIZE, font_color=NAVY, bold=True,
                      anchor=MSO_ANCHOR.MIDDLE)
             add_text(s, LM + Inches(2.0), Inches(6.0), CW - Inches(2.3), Inches(0.7),
                      summary, font_size=BODY_SIZE, font_color=DARK_GRAY,
@@ -2331,9 +2337,9 @@ class MckEngine:
         gl = LM + Inches(1.8); gt = Inches(1.5)
         gcw = Inches(3.0); gch = Inches(1.1)
         if y_labels is None:
-            y_labels = ['高概率', '中概率', '低概率']
+            y_labels = [say('High probability', '高概率'), say('Medium probability', '中概率'), say('Low probability', '低概率')]
         if x_labels is None:
-            x_labels = ['低影响', '中影响', '高影响']
+            x_labels = [say('Low impact', '低影响'), say('Medium impact', '中影响'), say('High impact', '高影响')]
         for r in range(3):
             add_text(s, LM, gt + r * gch, Inches(1.6), gch, y_labels[r],
                      font_size=Pt(13), font_color=DARK_GRAY, bold=True,
@@ -2356,7 +2362,7 @@ class MckEngine:
         if notes:
             add_rect(s, LM, Inches(5.1), CW, Inches(1.6), BG_GRAY)
             add_text(s, LM + Inches(0.3), Inches(5.15), Inches(1.5), Inches(0.3),
-                     '应对措施', font_size=BODY_SIZE, font_color=NAVY, bold=True)
+                     say("Countermeasures", '应对措施'), font_size=BODY_SIZE, font_color=NAVY, bold=True)
             add_text(s, LM + Inches(0.3), Inches(5.5), CW - Inches(0.6), Inches(1.1),
                      notes, font_size=BODY_SIZE, font_color=DARK_GRAY, line_spacing=Pt(4))
         self._footer(s, source)
@@ -2436,7 +2442,7 @@ class MckEngine:
         add_action_title(s, title)
         c1w = Inches(2.8); colw = Inches(2.5); rh = Inches(0.6)
         tl = LM; ty = Inches(1.3)
-        add_text(s, tl, ty, c1w, rh, '评估维度',
+        add_text(s, tl, ty, c1w, rh, say("Evaluation dimension", '评估维度'),
                  font_size=Pt(13), font_color=NAVY, bold=True, anchor=MSO_ANCHOR.MIDDLE)
         for j, opt in enumerate(options):
             add_text(s, tl + c1w + j * colw, ty, colw, rh, opt,
@@ -2556,7 +2562,7 @@ class MckEngine:
         if summary:
             add_rect(s, LM, sum_y, CW, sum_h, BG_GRAY)
             add_text(s, LM + Inches(0.3), sum_y, Inches(1.5), sum_h,
-                     '趋势分析', font_size=BODY_SIZE, font_color=NAVY, bold=True,
+                     say("Trend analysis", '趋势分析'), font_size=BODY_SIZE, font_color=NAVY, bold=True,
                      anchor=MSO_ANCHOR.MIDDLE)
             add_text(s, LM + Inches(2.0), sum_y, CW - Inches(2.3), sum_h,
                      summary, font_size=BODY_SIZE, font_color=DARK_GRAY,
@@ -2609,7 +2615,7 @@ class MckEngine:
                          labels[i], font_size=FOOTNOTE_SIZE, font_color=MED_GRAY,
                          alignment=PP_ALIGN.CENTER)
             add_hline(s, dcl, dcb, Inches(10.5), LINE_GRAY, Pt(0.5))
-            legend = chart_data.get('legend', [('实际', NAVY), ('目标', BG_GRAY)])
+            legend = chart_data.get('legend', [(say('Actual', '实际'), NAVY), (say('Target', '目标'), BG_GRAY)])
             for li, (ln, lc) in enumerate(legend):
                 lx = LM + Inches(9.0) + li * Inches(1.3)
                 add_rect(s, lx, dcy, Inches(0.3), Inches(0.15), lc)
@@ -2618,7 +2624,7 @@ class MckEngine:
         if summary:
             add_rect(s, LM, Inches(5.6), CW, Inches(0.9), BG_GRAY)
             add_text(s, LM + Inches(0.3), Inches(5.6), Inches(1.5), Inches(0.9),
-                     '关键发现', font_size=BODY_SIZE, font_color=NAVY, bold=True,
+                     say("Key findings", '关键发现'), font_size=BODY_SIZE, font_color=NAVY, bold=True,
                      anchor=MSO_ANCHOR.MIDDLE)
             summary_items = summary if isinstance(summary, list) else [summary]
             add_text(s, LM + Inches(2.0), Inches(5.6), CW - Inches(2.3), Inches(0.9),
@@ -2690,11 +2696,15 @@ class MckEngine:
         self._footer(s, source)
         return s
 
-    def stakeholder_map(self, title, quadrants, x_label='影响力 →',
-                        y_label='关注度 ↑', summary=None, source=''):
+    def stakeholder_map(self, title, quadrants, x_label=None,
+                        y_label=None, summary=None, source=''):
         """#59 Stakeholder Map — 2×2 quadrant with stakeholder lists.
         quadrants: list of 4 (label_cn, label_en, bg_color, members:list[str]).
         """
+        if x_label is None:
+            x_label = say("Influence →", "影响力 →")
+        if y_label is None:
+            y_label = say("Attention ↑", "关注度 ↑")
         s = self._ns()
         add_action_title(s, title)
         sgl = LM + Inches(2.0); sgt = Inches(1.5)
@@ -2802,11 +2812,11 @@ class MckEngine:
         rh = Inches(0.95); mcw = Inches(4.0)
         bx = LM + Inches(0.5); ax = LM + Inches(6.5)
         dx = ax + mcw + Inches(0.3)
-        add_text(s, bx, Inches(1.3), mcw, Inches(0.3), '之前',
+        add_text(s, bx, Inches(1.3), mcw, Inches(0.3), say("Before", '之前'),
                  font_size=Pt(13), font_color=MED_GRAY, alignment=PP_ALIGN.CENTER)
-        add_text(s, ax, Inches(1.3), mcw, Inches(0.3), '之后',
+        add_text(s, ax, Inches(1.3), mcw, Inches(0.3), say("After", '之后'),
                  font_size=Pt(13), font_color=MED_GRAY, alignment=PP_ALIGN.CENTER)
-        add_text(s, dx, Inches(1.3), Inches(1.5), Inches(0.3), '变化',
+        add_text(s, dx, Inches(1.3), Inches(1.5), Inches(0.3), say("Change", '变化'),
                  font_size=Pt(13), font_color=MED_GRAY, alignment=PP_ALIGN.CENTER)
         for i, (label, before, after, delta) in enumerate(metrics):
             ry = Inches(1.8) + i * rh
@@ -2906,7 +2916,7 @@ class MckEngine:
             if itype == 'key':
                 add_rect(s, rx + Inches(0.1), ry + Inches(0.12),
                          Inches(1.0), rh - Inches(0.24), LIGHT_BLUE)
-                add_text(s, rx + Inches(0.1), ry, Inches(1.0), rh, '★ 重点',
+                add_text(s, rx + Inches(0.1), ry, Inches(1.0), rh, say("★ Key", '★ 重点'),
                          font_size=Pt(11), font_color=ACCENT_BLUE, bold=True,
                          alignment=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
             if i < len(items) - 1:

@@ -3,11 +3,23 @@
 配色方案管理模块
 支持多种企业配色方案（McKinsey、BCG、Bain、EY）
 """
+from compute.i18n import say
+
+
+# 配色方案描述属于用户可见文案，按请求语言在调用时取值，不能放进导入期常量
+def get_scheme_description(scheme_id):
+    """返回配色方案的说明文案（随当前界面语言）。"""
+    return {
+        "mckinsey": say("McKinsey blue palette", "麦肯锡蓝色配色"),
+        "bcg": say("BCG green palette", "波士顿咨询绿色配色"),
+        "bain": say("Bain red palette", "贝恩红色配色"),
+        "ey": say("EY yellow palette", "安永黄色配色"),
+    }.get(scheme_id, "")
+
 
 COLOR_SCHEMES = {
     "mckinsey": {
         "name": "McKinsey Blue",
-        "description": "麦肯锡蓝色配色",
         "colors": [
             "#003B71",  # 麦肯锡深蓝 - 品牌主色
             "#005CAB",  # 中蓝 - 标题/强调
@@ -29,7 +41,6 @@ COLOR_SCHEMES = {
     },
     "bcg": {
         "name": "BCG Green",
-        "description": "波士顿咨询绿色配色",
         "colors": [
             "#006C5B",  # 深绿 - 主色
             "#009879",  # 中绿 - 次色
@@ -49,7 +60,6 @@ COLOR_SCHEMES = {
     },
     "bain": {
         "name": "Bain Red",
-        "description": "贝恩红色配色",
         "colors": [
             "#E41E26",  # 主红 - 主色
             "#FF5C5C",  # 亮红 - 次色
@@ -68,7 +78,6 @@ COLOR_SCHEMES = {
     },
     "ey": {
         "name": "EY Yellow",
-        "description": "安永黄色配色",
         "colors": [
             "#FFD100",  # 金黄 - 主色
             "#2E2E38",  # 炭黑 - 次色
@@ -111,7 +120,7 @@ def list_color_schemes():
         {
             "scheme_id": scheme_id,
             "name": scheme["name"],
-            "description": scheme["description"],
+            "description": get_scheme_description(scheme_id),
             "primary_color": scheme["primary"],
         }
         for scheme_id, scheme in COLOR_SCHEMES.items()

@@ -7,6 +7,7 @@ import socket
 import urllib.error
 import urllib.request
 
+from compute.i18n import say
 from data.forecast_config import load_config, validate_url
 
 MODEL_ID = "google/timesfm-3.0-pytorch"
@@ -27,10 +28,10 @@ class ForecastClient:
         self.config = dict(config if config is not None else load_config())
         self.token = token
         if require_enabled and not self.config.get("enabled"):
-            raise ForecastError("预测服务尚未启用，请在设置→本地服务中选择用于预测的服务 / Forecast service is disabled; select a forecast service in Settings → Local services")
+            raise ForecastError(say("Forecast service is disabled; select a forecast service in Settings → Local services", "预测服务尚未启用，请在设置→本地服务中选择用于预测的服务"))
         self.base_url = validate_url(self.config.get("base_url", ""), self.config.get("mode", "api"))
         if not self.base_url:
-            raise ForecastError("请先填写预测服务地址 / Configure a forecast service URL")
+            raise ForecastError(say("Configure a forecast service URL", "请先填写预测服务地址"))
 
     def _request(self, path, payload=None, *, timeout=None):
         headers = {"Accept": "application/json"}
@@ -50,55 +51,55 @@ class ForecastClient:
             with opener.open(request, timeout=timeout or self.config.get("timeout", 180)) as response:
                 raw = response.read(8 * 1024 * 1024 + 1)
                 if len(raw) > 8 * 1024 * 1024:
-                    raise ForecastError("预测响应过大 / Forecast response exceeds limit")
+                    raise ForecastError(say("Forecast response exceeds limit", "预测响应过大"))
                 value = json.loads(raw)
         except urllib.error.HTTPError as exc:
             messages = {
-                401: "认证失败 / Authentication failed", 403: "访问被拒绝 / Access denied",
-                404: "未找到预测接口，请检查端口和适配器 / Forecast endpoint not found",
-                409: "模型忙，请稍后重试 / Model is busy; retry later",
-                422: "模型拒绝输入，请检查形状和参数 / Model rejected input shape or options",
-                503: "模型尚未就绪或显存不足 / Model is not ready or GPU memory is insufficient",
+                401: say("Authentication failed", "认证失败"), 403: say("Access denied", "访问被拒绝"),
+                404: say("Forecast endpoint not found", "未找到预测接口，请检查端口和适配器"),
+                409: say("Model is busy; retry later", "模型忙，请稍后重试"),
+                422: say("Model rejected input shape or options", "模型拒绝输入，请检查形状和参数"),
+                503: say("Model is not ready or GPU memory is insufficient", "模型尚未就绪或显存不足"),
             }
-            raise ForecastError(messages.get(exc.code, f"预测服务返回 HTTP {exc.code} / Forecast service error")) from None
+            raise ForecastError(messages.get(exc.code, say(f"Forecast service returned HTTP {exc.code}", f"预测服务返回 HTTP {exc.code}"))) from None
         except (TimeoutError, socket.timeout):
-            raise ForecastError("预测请求超时；服务可能仍在计算，请核对状态再重试 / Request timed out; execution may still be running") from None
+            raise ForecastError(say("Request timed out; execution may still be running", "预测请求超时；服务可能仍在计算，请核对状态再重试")) from None
         except urllib.error.URLError:
-            raise ForecastError("无法连接预测服务，请检查地址、端口和服务状态 / Cannot connect to forecast service") from None
+            raise ForecastError(say("Cannot connect to forecast service", "无法连接预测服务，请检查地址、端口和服务状态")) from None
         except (ValueError, UnicodeError):
-            raise ForecastError("预测服务返回了无效 JSON / Invalid JSON from forecast service") from None
+            raise ForecastError(say("Invalid JSON from forecast service", "预测服务返回了无效 JSON")) from None
         if not isinstance(value, dict):
-            raise ForecastError("预测响应结构无效 / Invalid forecast response")
+            raise ForecastError(say("Invalid forecast response", "预测响应结构无效"))
         return value
 
     def health(self):
         value = self._request("/health", timeout=8)
         if value.get("model") != MODEL_ID or value.get("service") not in {"timesfm3-local", "timesfm3-service"}:
-            raise ForecastError("该端口不是兼容的 TimesFM-3 预测服务 / Endpoint is not a compatible TimesFM-3 service")
+            raise ForecastError(say("Endpoint is not a compatible TimesFM-3 service", "该端口不是兼容的 TimesFM-3 预测服务"))
         if value.get("ready") is not True:
-            raise ForecastError("服务在线，模型尚未就绪 / Service is online but model is not ready")
+            raise ForecastError(say("Service is online but model is not ready", "服务在线，模型尚未就绪"))
         return value
 
     def predict(self, context, horizon, target_names, **options):
         if not isinstance(horizon, int) or isinstance(horizon, bool) or not 1 <= horizon <= 256:
-            raise ForecastError("预测步数须为 1–256 / Horizon must be 1–256")
+            raise ForecastError(say("Horizon must be 1–256", "预测步数须为 1–256"))
         if (not isinstance(context, list) or not isinstance(target_names, list)
                 or any(not isinstance(n, str) or not n for n in target_names)
                 or not 1 <= len(context) <= 8 or len(context) != len(target_names)
                 or len(set(target_names)) != len(target_names)):
-            raise ForecastError("需要 1–8 个名称唯一的目标 / Need 1–8 uniquely named targets")
+            raise ForecastError(say("Need 1–8 uniquely named targets", "需要 1–8 个名称唯一的目标"))
         length = len(context[0])
         if not 2 <= length <= 2048 or any(len(row) != length for row in context):
-            raise ForecastError("历史长度须等长且为 2–2048 / Context rows must have equal length within 2–2048")
+            raise ForecastError(say("Context rows must have equal length within 2–2048", "历史长度须等长且为 2–2048"))
         if any(not math.isfinite(float(x)) or abs(float(x)) > 1e15 for row in context for x in row):
-            raise ForecastError("历史数据必须是有限数值 / Context must contain finite values")
+            raise ForecastError(say("Context must contain finite values", "历史数据必须是有限数值"))
         allowed = {k: v for k, v in options.items() if k in {
             "make_positive", "use_symmetric_averaging", "past_only_covariates", "past_future_covariates", "request_id",
         }}
         value = self._request("/forecast", {"context": context, "horizon": horizon,
                                            "target_names": target_names, **allowed})
         if value.get("model") != MODEL_ID or value.get("target_names") != target_names or value.get("horizon") != horizon:
-            raise ForecastError("预测模型、目标顺序或步数与请求不一致 / Forecast identity or target order mismatch")
+            raise ForecastError(say("Forecast identity or target order mismatch", "预测模型、目标顺序或步数与请求不一致"))
         pred, quantiles = value.get("forecast"), value.get("quantiles")
         try:
             if len(pred) != len(context) or len(quantiles) != len(context) or value.get("quantile_levels") != QUANTILES:
@@ -112,7 +113,7 @@ class ForecastClient:
                             or not math.isclose(float(median), float(row[4]), rel_tol=1e-5, abs_tol=1e-6)):
                         raise ValueError("quantiles")
         except (TypeError, ValueError, OverflowError):
-            raise ForecastError("预测形状、数值或分位数无效 / Invalid forecast shape, values or quantiles") from None
+            raise ForecastError(say("Invalid forecast shape, values or quantiles", "预测形状、数值或分位数无效")) from None
         return value
 
     def smoke_test(self):
