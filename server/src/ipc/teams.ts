@@ -72,6 +72,17 @@ export function teamMethods(deps: TeamMethodDeps): Record<string, RpcMethod> {
 
   return {
     "teams.list": (params) => translate(async () => ({ teams: await (await store(params)).list() })),
+    /**
+     * 任务板（`task_create` 等工具维护的会话文档）。它不在订阅推送的视图里（视图只含 pi 自带文档），
+     * 界面在任务工具完成后据此重新读取。
+     */
+    "tasks.list": async (params) => {
+      const id = conversationId(params);
+      const conversation = await harness.conversation(id as ConversationId, context);
+      if (conversation === undefined) throw appError("not_found", `conversation not found: ${id}`);
+      const board = await createConversationDocs({ harness, conversation, context }).tasks.read();
+      return { tasks: board.tasks };
+    },
 
     "teams.status": (params) =>
       translate(async () => {

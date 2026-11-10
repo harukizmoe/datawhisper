@@ -70,6 +70,9 @@ type ToolCall struct {
 	Name   string
 	// Args 是调用参数的紧凑摘要（键值对，已截断），给界面显示用，例如 `table=sales`。
 	Args string
+	// SQL 是调用参数里的 sql 全文（query_data、run_analysis 等都叫这个名字）。它不进 Args 摘要：摘要截断成一行，
+	// 看不全一条查询；界面把它画成带语法高亮的代码块。
+	SQL string
 	// Output 是工具结果的全文；界面默认只显示一行状态，展开后才显示它。
 	Output string
 	// Status 取 "running"、"ok" 或 "error"。
@@ -85,16 +88,19 @@ type ToolCall struct {
 	DashboardID string
 }
 
-// Usage 是一次模型回复的 token 用量与费用（pi-ai 的 Usage）。
+// Usage 是一次模型回复的 token 用量与费用（pi-ai 的 Usage）。DurationMS 是这次回复从发出请求到结束的耗时
+// （消息的 durationMs，用来算输出速度）；未知时为 0。
 type Usage struct {
 	Input, Output, CacheRead, CacheWrite, Total int
 	Cost                                        float64
+	DurationMS                                  int64
 }
 
 // Add 把另一次回复的用量累加进来（界面按轮次汇总）。
 func (u *Usage) Add(o Usage) {
 	u.Input += o.Input
 	u.Output += o.Output
+	u.DurationMS += o.DurationMS
 	u.CacheRead += o.CacheRead
 	u.CacheWrite += o.CacheWrite
 	u.Total += o.Total
@@ -267,6 +273,7 @@ func usageOf(m any) *Usage {
 		CacheWrite: int(numberOf(field(u, "cacheWrite"))),
 		Total:      int(numberOf(field(u, "totalTokens"))),
 		Cost:       numberOf(field(u, "cost", "total")),
+		DurationMS: int64(numberOf(field(m, "durationMs"))),
 	}
 }
 
@@ -406,13 +413,33 @@ func callOf(block any) *ToolCall {
 		return nil
 	}
 	args := field(block, "arguments")
+	sql, _ := field(args, "sql").(string)
 	return &ToolCall{
 		CallID: fmt.Sprint(field(block, "id")),
 		Name:   name,
-		Args:   argSummary(args),
+		Args:   argSummary(withoutKey(args, "sql")),
+		SQL:    strings.TrimSpace(sql),
 		Status: "running",
 		Ask:    askRequestOf(args),
 	}
+}
+
+// withoutKey 返回去掉一个键的参数副本；参数不是对象时原样返回。
+func withoutKey(args any, key string) any {
+	obj, ok := args.(map[string]any)
+	if !ok {
+		return args
+	}
+	rest := make(map[string]any, len(obj))
+	for k, v := range obj {
+		if k != key {
+			rest[k] = v
+		}
+	}
+	if len(rest) == 0 {
+		return nil
+	}
+	return rest
 }
 
 // mergeResult 把工具结果折进对应的调用行；返回 false 表示结果没有配对的调用（entry 窗口滑动时可能发生）。

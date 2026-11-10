@@ -44,54 +44,62 @@ func (a *app) chatPage(c *ui.Context) {
 		ui.Text(c, a.cv.modelsErr).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(4, 24)
 	}
 	messages := a.chat.Messages
-	if len(messages) == 0 {
-		a.homeView(c)
-	} else {
-		turns := turnEnds(messages, a.chat.Busy)
-		a.cv.rows, a.cv.rowOf = chatRows(messages, a.appearance())
-		rows := a.cv.rows
-		ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
-			a.list.Key = func(i int) any { return rows[i].key }
-			// 跳到某条提问或某个出处之后暂停跟随底部，否则下一帧又被拉回去；回到底部后恢复（见 jumpTo）。
-			if a.cv.followPaused && a.list.AtEnd() && c.Now().Sub(a.cv.jumpedAt) > 500*time.Millisecond {
-				a.cv.followPaused = false
-			}
-			a.list.FollowEnd = !a.cv.followPaused
-			ui.List(c, &a.list, len(rows), func(i int) {
-				row := rows[i]
-				a.centered(c, func() {
-					if row.folded {
-						a.foldedRun(c, row, messages[row.from:row.to])
-						return
-					}
-					a.message(c, messages[row.from])
-					if m := messages[row.from]; m.Role == "assistant" && m.Done {
-						a.provenanceRow(c, messages, row.from)
-					}
-					if meta, ok := turns[row.from]; ok {
-						a.turnMeta(c, meta)
-					}
-				})
-			}).Grow(1).MinWidth(0).Padding(20, 24).Gap(14).Justify(ui.End)
-			a.navRail(c, messages)
-		})
-	}
-	if a.chat.Failure != "" && !a.chat.Busy {
-		a.centered(c, func() {
-			ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(a.fs(textCaption)).TextColor(t.Warning).Padding(4, 0)
-		})
-	}
-	if a.sendErr != "" {
-		a.centered(c, func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 0).Children(func() {
-				ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
-				if a.needModel && ui.Button(c, a.tr("chat.openSettings")).Clicked() {
-					a.openSettings()
+	// 输入区固定在消息列下方，顶边有一条渐变把消息列的底部淡出。
+	ui.Column(c).Grow(1).MinHeight(0).Children(func() {
+		if len(messages) == 0 {
+			a.homeView(c)
+		} else {
+			turns := turnEnds(messages, a.chat.Busy)
+			a.cv.rows, a.cv.rowOf = chatRows(messages, a.appearance())
+			rows := a.cv.rows
+			ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+				a.list.Key = func(i int) any { return rows[i].key }
+				// 跳到某条提问或某个出处之后暂停跟随底部，否则下一帧又被拉回去；回到底部后恢复（见 jumpTo）。
+				if a.cv.followPaused && a.list.AtEnd() && c.Now().Sub(a.cv.jumpedAt) > 500*time.Millisecond {
+					a.cv.followPaused = false
 				}
+				a.list.FollowEnd = !a.cv.followPaused
+				ui.List(c, &a.list, len(rows), func(i int) {
+					row := rows[i]
+					a.centered(c, func() {
+						if row.folded {
+							a.foldedRun(c, row, messages[row.from:row.to])
+							return
+						}
+						a.message(c, messages[row.from])
+						if m := messages[row.from]; m.Role == "assistant" && m.Done {
+							a.provenanceRow(c, messages, row.from)
+						}
+						if meta, ok := turns[row.from]; ok {
+							a.turnMeta(c, meta)
+						}
+					})
+				}).Grow(1).MinWidth(0).Padding(20, 24).Gap(14).Justify(ui.End)
+				a.navRail(c, messages)
 			})
+		}
+		ui.Column(c).Children(func() {
+			// 消息列在输入区上方渐隐（参考 Tern 输入区边缘的虚化）：一条贴在输入区顶边、向上伸出的渐变，
+			// 把滚到那里的内容淡成背景色。
+			ui.Box(c).Absolute().Left(0).Right(0).Top(-28).Height(28).Gradient(t.Background.Alpha(0), t.Background, 180)
+			if a.chat.Failure != "" && !a.chat.Busy {
+				a.centered(c, func() {
+					ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(a.fs(textCaption)).TextColor(t.Warning).Padding(4, 0)
+				})
+			}
+			if a.sendErr != "" {
+				a.centered(c, func() {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(4, 0).Children(func() {
+						ui.Text(c, a.sendErr).TextColor(t.Danger).Grow(1).MinWidth(0)
+						if a.needModel && ui.Button(c, a.tr("chat.openSettings")).Clicked() {
+							a.openSettings()
+						}
+					})
+				})
+			}
+			a.composer(c)
 		})
-	}
-	a.composer(c)
+	})
 }
 
 // centered 把一段内容放进居中、限宽的对话列。
@@ -315,16 +323,21 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 			a.buffer(ui.Text(c, tool.Name)).TextColor(t.Accent).Shrink(0)
 		})
 		ui.Column(c).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(tok.CardBorder).Clip().Children(func() {
+			// 调用：SQL 是带语法高亮的代码块，其余参数是一行摘要。
+			if tool.SQL != "" {
+				ui.Column(c).Padding(8, 10, 2, 10).Children(func() { a.richText(c, sqlBlock(tool.SQL)) })
+			}
 			if tool.Args != "" {
 				a.buffer(ui.Text(c, tool.Args)).Selectable().Padding(10, 14)
 			}
+			hasCall := tool.SQL != "" || tool.Args != ""
 			if output != "" {
-				if tool.Args != "" {
+				if hasCall {
 					ui.Divider(c)
 				}
 				a.toolOutput(c, m.Key, output, mode, failed)
 			}
-			if tool.Args != "" || output != "" {
+			if hasCall || output != "" {
 				ui.Divider(c)
 			}
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(7, 14).Children(func() {
@@ -362,17 +375,23 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 }
 
 // toolOutput 画工具卡片里的输出，方式由设置里的「工具输出」决定：
-//   - 预览：只画末尾 toolPreviewLines 行，上方一行「前面还有 N 行 ⌃」展开；
+//   - 预览：只画一小段，下方或上方一行入口展开；
 //   - 折叠：只有一行「显示输出 · N 行」；
-//   - 展开：全文放进限高的滚动区。
+//   - 展开：全文。
 //
-// 点一下相对默认状态翻转（见 chatView.openOutputs），展开后末尾一行「收起」。失败的调用始终是全文，不给收起。
+// 输出认得出形态时（Markdown、pandas 的文本表，见 classifyOutput）用回答正文的主题画成标题、表格与代码块，
+// 预览取开头几行；否则是等宽纯文本，预览取末尾几行（日志类输出看结尾）。点一下相对默认状态翻转
+// （见 chatView.openOutputs），展开后末尾一行「收起」。失败的调用始终是全文纯文本，不给收起。
 func (a *app) toolOutput(c *ui.Context, key, output, mode string, failed bool) {
 	t := c.Theme()
 	lines := strings.Split(output, "\n")
 	hidden := len(lines) - toolPreviewLines
 	flipped := a.cv.openOutputs[key]
 	full := failed || (mode == prefs.OutputExpanded) != flipped
+	kind := outputText
+	if !failed {
+		kind, _ = classifyOutput(output)
+	}
 	toggle := func(label string, icon *ui.SVG) {
 		ui.Row(c).Children(func() {
 			if ui.ButtonBase(c).Label(label).Tooltip(a.tr("chat.toolOutputHint")).Children(func() {
@@ -386,6 +405,21 @@ func (a *app) toolOutput(c *ui.Context, key, output, mode string, failed bool) {
 			ui.Spacer(c)
 		})
 	}
+	// body 画一段输出：认得出形态的按主题渲染（预览截断后的文本重新转换），转换不了就退回等宽纯文本。
+	body := func(text string, top, bottom float32) {
+		rendered, ok := "", false
+		switch kind {
+		case outputMarkdown:
+			rendered, ok = text, true
+		case outputTable:
+			rendered, ok = fixedTableMarkdown(text)
+		}
+		if !ok {
+			a.buffer(ui.Text(c, text)).Selectable().Padding(top, 14, bottom, 14)
+			return
+		}
+		ui.Column(c).Padding(top, 14, bottom, 14).Children(func() { a.richText(c, rendered) })
+	}
 	// 折叠方式下没点开：只留一行入口。
 	if mode == prefs.OutputCollapsed && !full {
 		toggle(a.tr("chat.showOutput", "count", strconv.Itoa(len(lines))), icons.ChevronDown)
@@ -393,18 +427,26 @@ func (a *app) toolOutput(c *ui.Context, key, output, mode string, failed bool) {
 	}
 	switch {
 	case hidden <= 0:
-		a.buffer(ui.Text(c, output)).Selectable().Padding(8, 14)
+		body(output, 8, 8)
 		// 折叠方式下点开的短输出也要能再收起。
 		if mode == prefs.OutputCollapsed && !failed {
 			toggle(a.tr("chat.showLess"), icons.ChevronUp)
 		}
+	case !full && kind != outputText:
+		body(strings.Join(lines[:toolPreviewLines], "\n"), 8, 0)
+		toggle(a.tr("chat.moreLines", "count", strconv.Itoa(hidden)), icons.ChevronDown)
 	case !full:
 		toggle(a.tr("chat.earlierLines", "count", strconv.Itoa(hidden)), icons.ChevronUp)
-		a.buffer(ui.Text(c, strings.Join(lines[hidden:], "\n"))).Selectable().Padding(4, 14, 8, 14)
+		body(strings.Join(lines[hidden:], "\n"), 4, 8)
+	case kind != outputText:
+		body(output, 8, 0)
+		if !failed {
+			toggle(a.tr("chat.showLess"), icons.ChevronUp)
+		}
 	default:
 		// Scroll 需要一个确定的高度才会给内容可见的窗口，所以按输出长度估一个高度（上限 320 DIP）。
 		ui.Scroll(c).Height(outputHeight(output, 320)).Children(func() {
-			a.buffer(ui.Text(c, output)).Selectable().Padding(8, 14)
+			body(output, 8, 8)
 		})
 		if !failed {
 			toggle(a.tr("chat.showLess"), icons.ChevronDown)
@@ -535,6 +577,11 @@ func (a *app) turnMeta(c *ui.Context, info turnInfo) {
 		if u.Cost > 0 {
 			parts = append(parts, formatCost(u.Cost))
 		}
+		// 输出速度 = 输出 token ÷ 回复耗时（耗时含首 token 之前的等待，所以是端到端的速度）。
+		if u.DurationMS > 0 && u.Output > 0 {
+			rate := float64(u.Output) * 1000 / float64(u.DurationMS)
+			parts = append(parts, a.tr("chat.metaSpeed", "rate", strconv.FormatFloat(rate, 'f', 0, 64)))
+		}
 	}
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 		a.buffer(ui.Text(c, strings.Join(parts, " · "))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
@@ -612,9 +659,27 @@ func (a *app) composer(c *ui.Context) {
 			if busy || len(a.chat.QueuedInputs) > 0 {
 				a.statusLine(c, busy)
 			}
+			a.taskPanel(c)
 			a.contextMeter(c)
-			ui.Column(c).Radius(radiusBubble).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Padding(10, 12, 8, 12).Gap(6).Children(func() {
-				ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
+			// 没有焦点、没有草稿时折叠成一行（参考 Tern）：点一下展开并取得焦点。失焦要持续一小会儿才折叠：
+			// 选了下拉框的一项后焦点会短暂离开卡片，当场折叠会让还没处理的选择丢掉。
+			focused := a.cv.cardRef.FocusWithin(c)
+			switch {
+			case focused:
+				a.cv.composerSeen, a.cv.blurSince = true, time.Time{}
+			case a.cv.composerSeen && a.cv.blurSince.IsZero():
+				a.cv.blurSince = c.Now()
+			}
+			if a.cv.composerSeen && !focused && strings.TrimSpace(a.input) == "" && !a.slashOpen() {
+				if wait := composerGrace - c.Now().Sub(a.cv.blurSince); wait > 0 {
+					c.After(wait)
+				} else {
+					a.collapsedComposer(c, busy)
+					return
+				}
+			}
+			ui.Column(c).Radius(radiusBubble).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Padding(10, 12, 8, 12).Gap(6).Bind(&a.cv.cardRef).Children(func() {
+				area := ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
 					BorderWidth(0).Background(t.Surface).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
 					if k.Key != ui.KeyEnter || k.Mods != 0 {
 						return false // Shift+Enter 换行
@@ -628,6 +693,10 @@ func (a *app) composer(c *ui.Context) {
 					k.SetText(a.input)
 					return true
 				})
+				if a.cv.wantFocus {
+					area.Focus()
+					a.cv.wantFocus = false
+				}
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 					if options := a.modelOptions(); len(options) > 0 {
 						sel := ui.Select(c, &a.cv.modelChoice, options).MaxWidth(240).MinWidth(0).FontSize(a.fs(textCaption))
@@ -645,6 +714,9 @@ func (a *app) composer(c *ui.Context) {
 						ui.Segmented(c, &a.cv.busyMode, a.tr("chat.queue"), a.tr("chat.steer")).Shrink(0).Label(a.tr("chat.enterMode")).FontSize(a.fs(textCaption))
 					}
 					ui.Spacer(c)
+					if cost := a.sessionCost(); cost > 0 {
+						a.buffer(ui.Text(c, formatCost(cost))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0).Tooltip(a.tr("chat.costTip"))
+					}
 					if busy {
 						if iconButton(c, icons.Stop, a.tr("chat.stop")).Radius(999).Tooltip(a.tr("chat.stopTip")).Shrink(0).Clicked() {
 							a.abort()

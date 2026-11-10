@@ -372,6 +372,13 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 			})
 		case "usage.summary":
 			respond(req.ID, map[string]any{"models": map[string]any{}, "tools": map[string]any{}})
+		// 任务板：一项完成、一项进行中、一项待办。
+		case "tasks.list":
+			respond(req.ID, map[string]any{"tasks": []any{
+				map[string]any{"id": "t1", "title": "Profile the data", "assignee": "", "status": "completed"},
+				map[string]any{"id": "t2", "title": "Build the revenue chart", "assignee": "", "status": "in_progress"},
+				map[string]any{"id": "t3", "title": "Write the summary", "assignee": "", "status": "pending"},
+			}})
 		// 「运行」标签：两个长任务（一个运行中）与一个团队委派；workflow.runs.* 故意不实现，界面应隐藏那一节。
 		case "jobs.list":
 			respond(req.ID, map[string]any{"jobs": []any{

@@ -233,6 +233,7 @@ func (a *app) onChat(st conversation.State) {
 	}
 	a.chat, a.connected, a.streamErr = st, true, ""
 	a.syncFromState(switched)
+	a.syncTasks()
 	if finished {
 		a.refreshConversations() // 它的最新条目变了（服务端据此更新兜底标题）
 	}

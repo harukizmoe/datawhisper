@@ -329,7 +329,7 @@ func TestThinkingUsageAndQueue(t *testing.T) {
 					map[string]any{"type": "toolCall", "id": "c1", "name": "query_data", "arguments": map[string]any{"sql": "select 1"}},
 				},
 				"usage":     map[string]any{"input": 120.0, "output": 30.0, "cacheRead": 5.0, "totalTokens": 155.0, "cost": map[string]any{"total": 0.002}},
-				"timestamp": 2000.0, "model": "gw/flash",
+				"timestamp": 2000.0, "model": "gw/flash", "durationMs": 1500.0,
 			}}},
 		},
 		"docs": map[string]any{
@@ -359,7 +359,7 @@ func TestThinkingUsageAndQueue(t *testing.T) {
 		t.Errorf("user time %d", st.Messages[0].Time)
 	}
 	tool := st.Messages[2]
-	if tool.Usage == nil || tool.Usage.Input != 120 || tool.Usage.Total != 155 || tool.Usage.Cost != 0.002 || tool.Time != 2000 || tool.Model != "gw/flash" {
+	if tool.Usage == nil || tool.Usage.Input != 120 || tool.Usage.Total != 155 || tool.Usage.Cost != 0.002 || tool.Usage.DurationMS != 1500 || tool.Time != 2000 || tool.Model != "gw/flash" {
 		t.Errorf("usage on the last row %+v %+v", tool.Usage, tool)
 	}
 	if st.Messages[1].Usage != nil {

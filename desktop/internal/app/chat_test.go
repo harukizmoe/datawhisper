@@ -405,7 +405,7 @@ func TestToolCallPairing(t *testing.T) {
 func TestThinkingTurnMetaAndNavRail(t *testing.T) {
 	q := newQueue()
 	a := newTestApp(t, q)
-	usage := &conversation.Usage{Input: 1200, Output: 300, CacheRead: 4000, Total: 5500, Cost: 0.0125}
+	usage := &conversation.Usage{Input: 1200, Output: 300, CacheRead: 4000, Total: 5500, Cost: 0.0125, DurationMS: 3000}
 	a.chat.Messages = []conversation.Message{
 		{Key: "e1", Role: "user", Text: "first question", Done: true},
 		{Key: "g9.th", Role: "thinking", Text: "consider the schema first", Done: true},
@@ -417,7 +417,7 @@ func TestThinkingTurnMetaAndNavRail(t *testing.T) {
 	a.prefs = prefs.Default()
 	a.prefs.Appearance.FoldRuns = false // 检查单独的「Thought」行；折叠成组的情形见 chat_fold_test.go
 	tt := ui.NewTester(a.view, 1180, 900)
-	expectTexts(t, tt, []string{"Thought", "first answer", "in 1.2k", "out 300", "cache 4k", "$0.0125", "Copy", "Jump to this question"},
+	expectTexts(t, tt, []string{"Thought", "first answer", "in 1.2k", "out 300", "cache 4k", "$0.0125", "100 tok/s", "Copy", "Jump to this question"},
 		[]string{"consider the schema first"})
 	if err := tt.Click("Thought"); err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 	"datawhisper/desktop/internal/conversation"
 	"datawhisper/desktop/internal/i18n"
 	"datawhisper/desktop/internal/service"
+	"github.com/egoist/mygo/ui"
 )
 
 // chatView 是聊天页自己的界面状态。它只由 UI 线程读写；切换会话时 resetConversation 清掉与会话
@@ -55,6 +56,17 @@ type chatView struct {
 	// rows 与 rowOf 是这一帧的消息行划分（chat_fold.go）：rowOf[i] 是消息 i 所在的行，导航与跳转据此换算。
 	rows  []chatRow
 	rowOf []int
+	// tasks 是 agent 任务板的最近一次读取结果（tasks.go），tasksOpen 是任务行是否展开，taskCalls 是读取时
+	// 已完成的任务工具调用数：变了就重新读取。
+	tasks     []service.Task
+	tasksOpen bool
+	taskCalls int
+	// cardRef 绑在输入卡片上，据它判断焦点是否还在输入区内（含卡片里的模型选择与发送按钮）。composerSeen 记下
+	// 卡片获得过焦点：刚建出来的那一帧焦点还没生效，不能因此折叠。wantFocus 是点击折叠条后让输入框重新取得焦点。
+	cardRef      ui.Handle
+	composerSeen bool
+	wantFocus    bool
+	blurSince    time.Time
 	// fullChart 与 fullOpen 是全屏查看的图表（richcontent.go）。
 	fullChart conversation.Chart
 	fullOpen  bool
@@ -100,6 +112,8 @@ func (v *chatView) resetConversation() {
 	v.modelChoice, v.thinkingChoice = "", ""
 	v.modelsTouched = false
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
+	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0
+	v.composerSeen, v.wantFocus, v.blurSince = false, false, time.Time{}
 	v.followPaused, v.fullOpen = false, false
 }
 
