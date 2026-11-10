@@ -407,3 +407,9 @@ export function reworkNodes(graph: WorkflowGraph, nodeId: string): string[] {
   }
   return graph.nodes.map((node) => node.node_id).filter((id) => loop.has(id));
 }
+
+/** 节点的全部下游（沿 auto / conditional / approval 边，不含 `retry_loop`），按图的节点顺序。 */
+export function descendantsOf(graph: WorkflowGraph, nodeId: string): string[] {
+  const reachable = reachableFrom(forwardAdjacency(graph), nodeId);
+  return graph.nodes.map((node) => node.node_id).filter((id) => reachable.has(id));
+}

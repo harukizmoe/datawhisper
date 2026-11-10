@@ -48,7 +48,7 @@ import {
   type WorkInput,
   type WorkResult,
 } from "../jobs/work-task.ts";
-import { reworkLimit, validateWorkflowGraph } from "./graph.ts";
+import { descendantsOf, reworkLimit, validateWorkflowGraph } from "./graph.ts";
 import { createWorkflowRunTask, nodeViews, readRunIndex, WORKFLOW_RUN_INDEX } from "./task.ts";
 import {
   DEFAULT_WORKFLOW_QUOTAS,
@@ -65,6 +65,7 @@ import {
   type WorkflowNodeExecute,
   type WorkflowNodeRef,
   type WorkflowQuotas,
+  type WorkflowRetryRequest,
   type WorkflowRunCheckpoint,
   type WorkflowRunDetail,
   type WorkflowRunInput,
@@ -98,6 +99,8 @@ export type Workflows = {
   wait(id: number): Promise<WorkflowRunDetail>;
   /** 对待批的审批做决定；运行随后继续（或按决定终止）。 */
   decide(request: WorkflowDecideRequest): Promise<WorkflowRunDetail>;
+  /** 手动重试：另起一个运行，失败节点及其下游重跑，其余成功的节点沿用旧输出。 */
+  retry(request: WorkflowRetryRequest): Promise<{ id: number }>;
 };
 
 const SCAN_PAGE = 256;
@@ -228,6 +231,7 @@ function runSummary(record: AnyTaskRecord): WorkflowRunSummary {
     startedAt: iso(record.startedAt),
     endedAt: iso(record.endedAt),
     failure: runFailureOf(record),
+    retryOf: input.retryOf ?? null,
   };
 }
 
@@ -318,6 +322,21 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
     return record;
   }
 
+  async function create(input: WorkflowRunInput, conversationId: number): Promise<{ id: number }> {
+    const id = await harness.commit(
+      (tx) =>
+        tx.createTask(runTask, input, {
+          ownership: { kind: "conversation" },
+          // IPC 的会话 id 是正整数；ConversationId 是数字的 branded 类型（同上）。
+          conversationId: conversationId as ConversationId,
+          // 旧工作流运行独立于聊天回合：中止一轮对话不会停掉它，只有显式 cancel 才停。
+          background: true,
+        }),
+      context,
+    );
+    return { id };
+  }
+
   async function detail(id: number): Promise<WorkflowRunDetail> {
     const record = await readRun(id);
     const input = asRunInput(record);
@@ -334,7 +353,7 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
       graph: input.graph,
       inputs: input.inputs,
       outputs: runOutputs(record),
-      nodes: nodeViews(input.graph, index.nodes, records, new Set(index.skipped), index.approvals ?? []),
+      nodes: nodeViews(input.graph, index.nodes, records, new Set(index.skipped), index.approvals ?? [], input.seed ?? {}),
       approvals: [...(index.approvals ?? [])].sort((a, b) => Number(a.decision !== undefined) - Number(b.decision !== undefined)),
     };
   }
@@ -346,26 +365,55 @@ export function createWorkflows(options: WorkflowsOptions): Workflows {
 
     async start(request) {
       const graph = validateWorkflowGraph(request.graph);
-      const input: WorkflowRunInput = {
-        workflowVersionId: request.workflowVersionId,
-        graph,
-        inputs: request.inputs ?? {},
-        startedBy: request.startedBy ?? "",
-        createdAt: now(),
-        workspaceId: request.workspaceId ?? "",
-      };
-      const id = await harness.commit(
-        (tx) =>
-          tx.createTask(runTask, input, {
-            ownership: { kind: "conversation" },
-            // IPC 的会话 id 是正整数；ConversationId 是数字的 branded 类型（同上）。
-            conversationId: request.conversationId as ConversationId,
-            // 旧工作流运行独立于聊天回合：中止一轮对话不会停掉它，只有显式 cancel 才停。
-            background: true,
-          }),
-        context,
+      return create(
+        {
+          workflowVersionId: request.workflowVersionId,
+          graph,
+          inputs: request.inputs ?? {},
+          startedBy: request.startedBy ?? "",
+          createdAt: now(),
+          workspaceId: request.workspaceId ?? "",
+        },
+        request.conversationId,
       );
-      return { id };
+    },
+
+    async retry(request) {
+      const run = await readRun(request.runId);
+      if (runStatus(run) !== "failed") {
+        throw new WorkflowError("workflow_run_not_recoverable", `workflow run ${request.runId} did not fail, so there is nothing to retry`);
+      }
+      const source = await detail(request.runId);
+      const failed = source.nodes.find((node) => node.nodeRunId === request.nodeRunId);
+      if (failed === undefined) {
+        throw new WorkflowError("workflow_resource_not_found", `node run ${request.nodeRunId} does not belong to run ${request.runId}`);
+      }
+      const last = source.nodes.filter((node) => node.nodeId === failed.nodeId).at(-1);
+      if (failed.status !== "failed" || last?.nodeRunId !== failed.nodeRunId) {
+        throw new WorkflowError("workflow_run_not_recoverable", `node ${failed.nodeId} did not end in this failed attempt, so it cannot be retried from here`);
+      }
+      // 失败节点和它的下游重跑；其余已经成功的节点（含人批准、人改过的输出）沿用，不再花一遍模型。
+      const rerun = new Set([failed.nodeId, ...descendantsOf(source.graph, failed.nodeId)]);
+      const seed: Record<string, JsonValue> = {};
+      for (const node of source.graph.nodes) {
+        if (rerun.has(node.node_id)) continue;
+        const done = source.nodes.filter((view) => view.nodeId === node.node_id).at(-1);
+        if (done?.status === "succeeded" && done.output !== null) seed[node.node_id] = done.output;
+      }
+      const input = asRunInput(run);
+      return create(
+        {
+          workflowVersionId: input.workflowVersionId,
+          graph: input.graph,
+          inputs: input.inputs,
+          startedBy: input.startedBy,
+          createdAt: now(),
+          workspaceId: input.workspaceId,
+          retryOf: { runId: request.runId, nodeId: failed.nodeId },
+          seed,
+        },
+        run.conversationId,
+      );
     },
 
     async cancel(id) {

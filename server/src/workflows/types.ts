@@ -163,6 +163,10 @@ export type WorkflowRunInput = {
   startedBy: string;
   createdAt: number;
   workspaceId: string;
+  /** 手动重试：来自哪个失败的运行与节点。 */
+  retryOf?: { runId: number; nodeId: string };
+  /** 手动重试沿用的节点输出：失败运行里已经成功、又不在失败节点下游的节点。 */
+  seed?: Record<string, JsonValue>;
 };
 
 export type WorkflowRunCheckpoint = { phase: "schedule"; pendingApprovals?: number };
@@ -237,6 +241,8 @@ export type WorkflowRunSummary = {
   startedAt: string | null;
   endedAt: string | null;
   failure: WorkflowFailure | null;
+  /** 手动重试产生的运行：来自哪个失败的运行、从哪个节点重来。 */
+  retryOf: { runId: number; nodeId: string } | null;
 };
 
 export type WorkflowNodeView = {
@@ -253,6 +259,8 @@ export type WorkflowNodeView = {
   usage: WorkflowUsage | null;
   startedAt: string | null;
   endedAt: string | null;
+  /** 手动重试时沿用了失败运行里的输出，这个节点没有重跑。 */
+  reused: boolean;
 };
 
 export type WorkflowRunDetail = WorkflowRunSummary & {
@@ -306,4 +314,10 @@ export type WorkflowDecideRequest = {
   /** `approve_with_changes` 的改动：键必须是该节点 `output_contract` 的子集。 */
   changes?: Record<string, JsonValue>;
   decidedBy?: string;
+};
+
+export type WorkflowRetryRequest = {
+  runId: number;
+  /** 失败的节点任务；它和它的下游重跑，其余成功的节点沿用旧输出。 */
+  nodeRunId: number;
 };

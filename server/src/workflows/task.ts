@@ -326,6 +326,12 @@ export function createWorkflowRunTask(options: WorkflowRunTaskOptions): Task<Wor
             const payload = nodePayload(item.record);
             if (payload !== undefined) outputs.set(nodeId, payload.output);
           }
+          // 手动重试沿用的输出：这个节点没有自己的记录、也没有被打回重开，就当作已经成功。
+          for (const [nodeId, output] of Object.entries(input.seed ?? {})) {
+            if (latest.has(nodeId) || requiredIteration(nodeId) > 1) continue;
+            statuses.set(nodeId, "succeeded");
+            outputs.set(nodeId, output);
+          }
 
           // ── verifier 打回：decision=rework 时重开「打回目标 → verifier」这一段，修改意见交给目标节点 ──
           // 没有 retry_loop 出边的 verifier 只是把 decision 交给下游（比如条件边），不会触发重做。
@@ -594,6 +600,7 @@ export function nodeViews(
   records: ReadonlyMap<number, AnyTaskRecord>,
   skipped: ReadonlySet<string>,
   approvals: readonly WorkflowApproval[],
+  seed: Readonly<Record<string, JsonValue>>,
 ): WorkflowNodeView[] {
   const byNode = new Map<string, WorkflowNodeRef[]>();
   for (const ref of refs) {
@@ -605,19 +612,21 @@ export function nodeViews(
   for (const node of graph.nodes) {
     const attempts = (byNode.get(node.node_id) ?? []).sort((a, b) => a.iteration - b.iteration || a.attempt - b.attempt || a.taskId - b.taskId);
     if (attempts.length === 0) {
+      const seeded = seed[node.node_id];
       views.push({
         nodeId: node.node_id,
         nodeRunId: null,
-        status: skipped.has(node.node_id) ? "skipped" : "pending",
+        status: seeded !== undefined ? "succeeded" : skipped.has(node.node_id) ? "skipped" : "pending",
         iteration: 1,
         attempt: 1,
         agentProfileId: profileKey(node),
         input: {},
-        output: null,
+        output: seeded ?? null,
         error: "",
         usage: null,
         startedAt: null,
         endedAt: null,
+        reused: seeded !== undefined,
       });
       continue;
     }
@@ -646,6 +655,7 @@ export function nodeViews(
         usage: payload?.usage ?? null,
         startedAt: record.startedAt === undefined ? null : new Date(record.startedAt).toISOString(),
         endedAt: record.endedAt === undefined ? null : new Date(record.endedAt).toISOString(),
+        reused: false,
       });
     }
   }

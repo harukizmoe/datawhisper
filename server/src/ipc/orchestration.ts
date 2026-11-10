@@ -136,6 +136,8 @@ export function orchestrationMethods({ jobs, workflows }: OrchestrationDeps): Re
     };
     methods["workflow.runs.get"] = (params) => translate(() => workflows.get(positiveId(params)));
     methods["workflow.runs.cancel"] = (params) => translate(() => workflows.cancel(positiveId(params)));
+    methods["workflow.runs.retry"] = (params) =>
+      translate(() => workflows.retry({ runId: positiveId(params), nodeRunId: positiveId(params, "nodeRunId") }));
     methods["workflow.runs.approve"] = (params) => {
       const approvalId = params.approvalId;
       if (typeof approvalId !== "string" || approvalId === "") throw invalidParams("'approvalId' must be a non-empty string");

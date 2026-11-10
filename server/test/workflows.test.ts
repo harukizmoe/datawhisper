@@ -989,3 +989,154 @@ describe("审批", () => {
     expect((await bench.workflows.wait(id)).status).toBe("succeeded");
   });
 });
+
+describe("手动重试", () => {
+  const chain = () =>
+    makeGraph(
+      [
+        { node_id: "a", output_contract: ["a"] },
+        { node_id: "side", output_contract: ["side"] },
+        { node_id: "b", input_contract: ["a"], output_contract: ["b"], max_attempts: 1 },
+        { node_id: "c", input_contract: ["b", "side"], output_contract: ["c"] },
+      ],
+      [
+        { from_node: "a", to_node: "b" },
+        { from_node: "b", to_node: "c" },
+        { from_node: "side", to_node: "c" },
+      ],
+    );
+
+  async function failedRun(bench: Bench, graph: WorkflowGraph) {
+    const started = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
+    bench.harness.resume();
+    const detail = await bench.workflows.wait(started.id);
+    expect(detail.status).toBe("failed");
+    return detail;
+  }
+
+  test("失败节点和它的下游重跑，其余成功的节点沿用旧输出，不再调用模型", async () => {
+    const bench = await createBench();
+    const calls: string[] = [];
+    let bTries = 0;
+    for (const name of ["a", "side", "c"]) {
+      bench.behaviors.set(name, async (inputs) => {
+        calls.push(name);
+        return { output: { [name]: `${name}:${JSON.stringify(inputs)}` } };
+      });
+    }
+    bench.behaviors.set("b", async (inputs) => {
+      calls.push("b");
+      bTries += 1;
+      if (bTries === 1) throw new Error("warehouse offline");
+      return { output: { b: `b:${JSON.stringify(inputs)}` } };
+    });
+
+    const failed = await failedRun(bench, chain());
+    const failedNode = failed.nodes.find((node) => node.nodeId === "b");
+    expect(failedNode?.status).toBe("failed");
+    calls.length = 0;
+
+    const { id } = await bench.workflows.retry({ runId: failed.id, nodeRunId: failedNode?.nodeRunId as number });
+    const retried = await bench.workflows.wait(id);
+
+    expect(retried.status).toBe("succeeded");
+    expect(retried.retryOf).toEqual({ runId: failed.id, nodeId: "b" });
+    expect(calls.sort()).toEqual(["b", "c"]);
+    const byId = new Map(retried.nodes.map((node) => [node.nodeId, node]));
+    expect(byId.get("a")).toMatchObject({ status: "succeeded", reused: true });
+    expect(byId.get("side")).toMatchObject({ status: "succeeded", reused: true });
+    expect(byId.get("b")).toMatchObject({ status: "succeeded", reused: false });
+    // b 拿到的是旧的 a 输出，c 同时拿到新的 b 和旧的 side。
+    expect(byId.get("b")?.input).toEqual({ a: "a:{}" });
+    expect(Object.keys(byId.get("c")?.input ?? {}).sort()).toEqual(["b", "side"]);
+    expect(retried.outputs).toHaveProperty("c");
+    // 原运行不受影响。
+    expect((await bench.workflows.get(failed.id)).status).toBe("failed");
+  });
+
+  test("人批准、人改过的输出在重试里照样沿用，不会再来一次审批", async () => {
+    const bench = await createBench();
+    let applyTries = 0;
+    let planRuns = 0;
+    bench.behaviors.set("plan", async () => {
+      planRuns += 1;
+      return { output: { plan: "model plan", note: "n" } };
+    });
+    const applyInputs: Record<string, JsonValue>[] = [];
+    bench.behaviors.set("apply", async (inputs) => {
+      applyInputs.push(inputs);
+      applyTries += 1;
+      if (applyTries === 1) throw new Error("write failed");
+      return { output: { done: "yes" } };
+    });
+    const graph = makeGraph(
+      [
+        { node_id: "plan", output_contract: ["plan", "note"] },
+        { node_id: "apply", input_contract: ["plan"], output_contract: ["done"], max_attempts: 1 },
+      ],
+      [{ from_node: "plan", to_node: "apply", type: "approval" }],
+    );
+    const started = await bench.workflows.start({ conversationId: bench.conversationId, workflowVersionId: "wf", graph, inputs: {} });
+    bench.harness.resume();
+    await pendingApproval(bench, started.id);
+    await bench.workflows.decide({ runId: started.id, approvalId: "ap_1", decision: "approve_with_changes", changes: { plan: "human plan" } });
+    const failed = await bench.workflows.wait(started.id);
+    expect(failed.status).toBe("failed");
+
+    const applyRun = failed.nodes.find((node) => node.nodeId === "apply");
+    const { id } = await bench.workflows.retry({ runId: failed.id, nodeRunId: applyRun?.nodeRunId as number });
+    const retried = await bench.workflows.wait(id);
+    expect(retried.status).toBe("succeeded");
+    expect(retried.approvals).toEqual([]);
+    expect(planRuns).toBe(1);
+    expect(applyInputs).toEqual([{ plan: "human plan" }, { plan: "human plan" }]);
+  });
+
+  test("没有失败的运行、不属于该运行的节点、不是失败的节点都不能重试", async () => {
+    const bench = await createBench();
+    bench.behaviors.set("a", async () => ({ output: { a: 1 } }));
+    bench.behaviors.set("b", async () => {
+      throw new Error("boom");
+    });
+    bench.behaviors.set("side", async () => ({ output: { side: 1 } }));
+    bench.behaviors.set("c", async () => ({ output: { c: 1 } }));
+    const failed = await failedRun(bench, chain());
+    const ok = failed.nodes.find((node) => node.nodeId === "a");
+
+    await expect(bench.workflows.retry({ runId: failed.id, nodeRunId: ok?.nodeRunId as number })).rejects.toMatchObject({
+      code: "workflow_run_not_recoverable",
+    });
+    await expect(bench.workflows.retry({ runId: failed.id, nodeRunId: 999_999 })).rejects.toMatchObject({
+      code: "workflow_resource_not_found",
+    });
+
+    const good = await bench.workflows.start({
+      conversationId: bench.conversationId,
+      workflowVersionId: "wf",
+      graph: makeGraph([{ node_id: "a" }], []),
+    });
+    await bench.workflows.wait(good.id);
+    await expect(bench.workflows.retry({ runId: good.id, nodeRunId: 1 })).rejects.toMatchObject({ code: "workflow_run_not_recoverable" });
+  });
+
+  test("IPC：workflow.runs.retry 校验参数并返回新运行", async () => {
+    const bench = await createBench();
+    let tries = 0;
+    bench.behaviors.set("a", async () => {
+      tries += 1;
+      if (tries === 1) throw new Error("once");
+      return { output: { a: 1 } };
+    });
+    const failed = await failedRun(bench, makeGraph([{ node_id: "a", output_contract: ["a"], max_attempts: 1 }], []));
+    const server = memoryServer(orchestrationMethods({ workflows: bench.workflows }), mapSettingsError);
+
+    expect((await server.call("workflow.runs.retry", { id: failed.id })).error?.code).toBe(INVALID_PARAMS);
+    expect((await server.call("workflow.runs.retry", { id: failed.id, nodeRunId: 999_999 })).error).toMatchObject({
+      code: APP_ERROR,
+      data: { kind: "not_found" },
+    });
+    const retried = await server.call<{ id: number }>("workflow.runs.retry", { id: failed.id, nodeRunId: failed.nodes[0]?.nodeRunId });
+    expect(retried.result?.id).toBeGreaterThan(failed.id);
+    expect((await bench.workflows.wait(retried.result?.id as number)).status).toBe("succeeded");
+  });
+});
