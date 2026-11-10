@@ -274,6 +274,8 @@ func TestSlashCommandsCompleteBeforeSending(t *testing.T) {
 	a := &app{post: q.post}
 	tt := ui.NewTester(a.view, 1180, 760)
 	openRichChat(t, fs, q, a, tt)
+	// 命令目录是异步拉的（先告知服务语言，再 command.list）；等它到了再输入。
+	q.pump(t, tt, "the command catalog", func() bool { return len(a.cv.commands) > 0 })
 
 	if err := tt.Click("Message"); err != nil {
 		t.Fatal(err)

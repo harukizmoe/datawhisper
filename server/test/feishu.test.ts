@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { loadConfig } from "../src/config.ts";
+import { setLanguage } from "../src/i18n.ts";
+import { validateAppId } from "../src/feishu/config.ts";
 import {
   decodeFrame,
   encodeFrame,
@@ -403,17 +405,17 @@ describe("飞书机器人与入站回合", () => {
   });
 
   test("setConfig validates like the old endpoint", async () => {
-    await expect(feishu.setConfig(null)).rejects.toThrow("请求体必须是 JSON 对象");
-    await expect(feishu.setConfig({ enabled: "yes" })).rejects.toThrow("enabled 必须是布尔值");
-    await expect(feishu.setConfig({ enabled: true, app_id: "" })).rejects.toThrow("请填写有效的飞书 App ID");
+    await expect(feishu.setConfig(null)).rejects.toThrow("Request body must be a JSON object");
+    await expect(feishu.setConfig({ enabled: "yes" })).rejects.toThrow("enabled must be a boolean");
+    await expect(feishu.setConfig({ enabled: true, app_id: "" })).rejects.toThrow("Enter a valid Feishu App ID");
     await expect(
       feishu.setConfig({ enabled: true, app_id: "cli_app", receive_id_type: "open_id", receive_id: "" }),
-    ).rejects.toThrow("未选择目标群时，接收对象类型必须为 chat_id");
+    ).rejects.toThrow("Receive ID type must be chat_id when no target chat is selected");
     await expect(
       feishu.setConfig({ enabled: true, app_id: "cli_app", receive_id_type: "room", receive_id: "x" }),
-    ).rejects.toThrow("接收对象类型仅支持群聊 chat_id 或用户 open_id");
+    ).rejects.toThrow("Receive ID type only supports chat_id (group chat) or open_id (user)");
     await expect(feishu.setConfig({ enabled: true, app_id: "cli_app", inbound_transport: "poll" })).rejects.toThrow(
-      "入站方式仅支持长连接或 Webhook",
+      "Inbound mode only supports long connection or Webhook",
     );
   });
 
@@ -497,17 +499,17 @@ describe("飞书机器人与入站回合", () => {
       .catch((error: unknown) => error);
     expect(invalid).toBeInstanceOf(RpcError);
     expect((invalid as RpcError).code).toBe(INVALID_PARAMS);
-    expect((invalid as RpcError).message).toBe("请填写有效的飞书 App ID");
+    expect((invalid as RpcError).message).toBe("Enter a valid Feishu App ID");
 
     const tested = await pipe.client.request<{ ok: boolean; message: string }>("feishu.test", {});
-    expect(tested).toEqual({ ok: true, message: "测试消息已发送到飞书群。" });
+    expect(tested).toEqual({ ok: true, message: "Test message sent to the Feishu chat." });
     const text = fake.requests
       .filter((request) => request.path === "/open-apis/im/v1/messages")
       .map(messageBody)
       .filter((body) => body?.type === "text")
       .at(-1);
     expect(JSON.parse(text!.content).text).toBe(
-      "智析 Agent 已成功连接飞书应用机器人。后续分析结果将可同步至此群。",
+      "DataWhisper Agent is now connected to the Feishu app bot. Analysis results can be synced to this chat from now on.",
     );
 
     const missing = await pipe.client
@@ -593,7 +595,7 @@ describe("飞书多维表格工具", () => {
     expect(textOf(second)).toBe(textOf(first));
     expect(JSON.parse(textOf(first))).toMatchObject({
       ok: true,
-      message: "分析结果已追加写入飞书多维表格。请把 url 作为可点击链接交付给用户。",
+      message: "The analysis results were appended to the Feishu Bitable. Give the url to the user as a clickable link.",
       app_token: "bas_1",
       table_id: "tbl_1",
       url: "https://feishu.cn/base/bas_1?table=tbl_1",
@@ -631,7 +633,7 @@ describe("飞书多维表格工具", () => {
     const before = batchCreates().length;
     const result = await run("create_feishu_bitable", args, callApi(21, "crashed"));
     expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain("结果未知");
+    expect(textOf(result)).toContain("outcome is unknown");
     expect(batchCreates().length).toBe(before);
   });
 
@@ -644,7 +646,7 @@ describe("飞书多维表格工具", () => {
     const parsed = JSON.parse(textOf(created));
     expect(parsed).toMatchObject({
       ok: true,
-      message: "飞书多维表格已创建。请把 url 作为可点击链接交付给用户。",
+      message: "The Feishu Bitable was created. Give the url to the user as a clickable link.",
       app_token: "bas_1",
       table_id: "tbl_1",
       name: "季度报告",
@@ -664,7 +666,7 @@ describe("飞书多维表格工具", () => {
     );
     expect(JSON.parse(textOf(updated))).toMatchObject({
       ok: true,
-      message: "飞书多维表格记录已更新。请把 url 作为可点击链接交付给用户。",
+      message: "The Feishu Bitable record was updated. Give the url to the user as a clickable link.",
       record_id: "rec_1",
       updated_fields: ["名称", "数值"],
     });
@@ -677,10 +679,10 @@ describe("飞书多维表格工具", () => {
       return textOf(result);
     };
     expect(await failure("create_feishu_bitable", { name: "报告", table_name: "明细", fields: [] })).toBe(
-      "至少需要一个字段",
+      "At least one field is required",
     );
     expect(await failure("create_feishu_bitable", { name: "报告", table_name: "明细", fields: ["A", "A"] })).toBe(
-      "字段名重复：A",
+      "Duplicate field name: A",
     );
     expect(
       await failure("append_feishu_bitable_records", {
@@ -688,19 +690,19 @@ describe("飞书多维表格工具", () => {
         table_id: "t",
         records: [],
       }),
-    ).toBe("只支持飞书多维表格链接");
+    ).toBe("Only Feishu Bitable links are supported");
     expect(await failure("append_feishu_bitable_records", { bitable: "bas_1", table_id: "", records: [] })).toBe(
-      "请提供 table_id",
+      "Provide table_id",
     );
     expect(await failure("append_feishu_bitable_records", { bitable: "bas_1", table_id: "t", records: [] })).toBe(
-      "至少需要一条记录",
+      "At least one record is required",
     );
     expect(
       await failure("update_feishu_bitable_record", { bitable: "bas_1", table_id: "tbl_1", record_id: "", fields: {} }),
-    ).toBe("请提供record_id");
+    ).toBe("Provide the record_id");
     expect(
       await failure("update_feishu_bitable_record", { bitable: "bas_1", table_id: "tbl_1", record_id: "r", fields: {} }),
-    ).toBe("fields 必须是非空字段对象");
+    ).toBe("fields must be a non-empty object of fields");
   });
 });
 
@@ -720,6 +722,19 @@ describe("飞书消息发送与链接解析的边界", () => {
     });
     expect(parseBitableReference("bas_9", "tbl_3")).toEqual({ appToken: "bas_9", tableId: "tbl_3" });
     expect(() => parseBitableReference("https://feishu.cn.example.com/base/x")).toThrow(FeishuBitableError);
-    expect(() => parseBitableReference("https://feishu.cn/docx/abc")).toThrow("无法从链接中识别多维表格 app_token");
+    expect(() => parseBitableReference("https://feishu.cn/docx/abc")).toThrow("Cannot identify the Bitable app_token from the link");
+  });
+});
+
+describe("飞书文案跟随界面语言", () => {
+  test("Chinese UI language yields the Chinese messages and English is restored afterwards", () => {
+    setLanguage("zh");
+    try {
+      expect(() => parseBitableReference("https://feishu.cn/docx/abc")).toThrow("无法从链接中识别多维表格 app_token");
+      expect(() => validateAppId("")).toThrow("请填写有效的飞书 App ID");
+    } finally {
+      setLanguage("en");
+    }
+    expect(() => validateAppId("")).toThrow("Enter a valid Feishu App ID");
   });
 });

@@ -7,6 +7,7 @@
  * 不缓存 token：旧实现每次发送都现取一次，飞书对换取频率没有限制，这样也省掉过期判断。
  */
 
+import { say } from "../i18n.ts";
 import { FeishuBotError, type FeishuConfigStore } from "./config.ts";
 
 export const DEFAULT_API_BASE = "https://open.feishu.cn/open-apis";
@@ -52,11 +53,11 @@ export class FeishuClient {
       token: null,
     });
     if (response.status < 200 || response.status >= 300) {
-      throw new FeishuBotError(`飞书凭证验证返回 HTTP ${response.status}`);
+      throw new FeishuBotError(say(`Feishu credential check returned HTTP ${response.status}`, `飞书凭证验证返回 HTTP ${response.status}`));
     }
     const token = response.body?.tenant_access_token;
     if (typeof token !== "string" || token === "") {
-      throw new FeishuBotError("飞书未接受 App ID 或 App Secret，请检查应用状态和凭据");
+      throw new FeishuBotError(say("Feishu did not accept the App ID or App Secret; check the app status and credentials", "飞书未接受 App ID 或 App Secret，请检查应用状态和凭据"));
     }
     return token;
   }
@@ -77,24 +78,24 @@ export class FeishuClient {
       if (response.status < 200 || response.status >= 300) {
         const code = typeof response.body?.code === "number" ? response.body.code : undefined;
         if (code !== undefined) {
-          const hint = CHAT_LIST_ERROR_HINTS[code];
+          const hint = chatListErrorHint(code);
           if (hint !== undefined) throw new FeishuBotError(hint);
           throw new FeishuBotError(
-            `飞书群列表请求被拒绝（错误码 ${code}）；请检查机器人能力、群组信息权限和应用发布状态。`,
+            say(`Feishu rejected the chat list request (error code ${code}); check the bot capability, chat info permission and app publish status.`, `飞书群列表请求被拒绝（错误码 ${code}）；请检查机器人能力、群组信息权限和应用发布状态。`),
           );
         }
-        throw new FeishuBotError(`飞书群列表接口返回 HTTP ${response.status}`);
+        throw new FeishuBotError(say(`Feishu chat list API returned HTTP ${response.status}`, `飞书群列表接口返回 HTTP ${response.status}`));
       }
       const data = asObject(response.body?.data);
       if (data === undefined) {
-        throw new FeishuBotError("飞书拒绝读取群列表，请开通获取群组信息权限并发布应用");
+        throw new FeishuBotError(say("Feishu refused to read the chat list; grant the chat info permission and publish the app", "飞书拒绝读取群列表，请开通获取群组信息权限并发布应用"));
       }
       const items = Array.isArray(data.items) ? data.items : [];
       for (const item of items) {
         const chat = asObject(item);
         if (chat === undefined) continue;
         const chatId = typeof chat.chat_id === "string" ? chat.chat_id.trim() : "";
-        if (chatId !== "") chats.push({ chat_id: chatId, name: stringOr(chat.name, "未命名群") });
+        if (chatId !== "") chats.push({ chat_id: chatId, name: stringOr(chat.name, say("Untitled chat", "未命名群")) });
       }
       if (data.has_more !== true) break;
       const next = typeof data.page_token === "string" ? data.page_token : "";
@@ -111,8 +112,8 @@ export class FeishuClient {
    */
   async sendText(text: string, target?: FeishuTarget): Promise<void> {
     const message = text.trim();
-    if (message === "") throw new FeishuBotError("发送内容不能为空");
-    if (message.length > 4000) throw new FeishuBotError("飞书机器人单条测试消息不能超过 4000 个字符");
+    if (message === "") throw new FeishuBotError(say("Message content cannot be empty", "发送内容不能为空"));
+    if (message.length > 4000) throw new FeishuBotError(say("A single Feishu bot test message cannot exceed 4000 characters", "飞书机器人单条测试消息不能超过 4000 个字符"));
     const resolved = this.resolveTarget(target);
     const token = await this.token();
     await this.postMessage(token, resolved, {
@@ -128,7 +129,7 @@ export class FeishuClient {
    */
   async sendMarkdown(text: string, target?: FeishuTarget): Promise<void> {
     const message = text.trim();
-    if (message === "") throw new FeishuBotError("发送内容不能为空");
+    if (message === "") throw new FeishuBotError(say("Message content cannot be empty", "发送内容不能为空"));
     const resolved = this.resolveTarget(target);
     const token = await this.token();
     for (const chunk of splitMarkdown(message)) {
@@ -145,7 +146,7 @@ export class FeishuClient {
 
   /** 旧 `send_test_message`：设置页的「发送测试消息」。 */
   async sendTestMessage(): Promise<void> {
-    await this.sendText("智析 Agent 已成功连接飞书应用机器人。后续分析结果将可同步至此群。");
+    await this.sendText(say("DataWhisper Agent is now connected to the Feishu app bot. Analysis results can be synced to this chat from now on.", "智析 Agent 已成功连接飞书应用机器人。后续分析结果将可同步至此群。"));
   }
 
   /** 低层请求：返回状态码与已解析的 JSON（解析失败时为 undefined），由调用方各自翻译错误。 */
@@ -170,7 +171,7 @@ export class FeishuClient {
     try {
       response = await this.fetch(url, init);
     } catch {
-      throw new FeishuBotError("无法连接飞书开放平台，请检查网络");
+      throw new FeishuBotError(say("Cannot reach the Feishu Open Platform; check your network", "无法连接飞书开放平台，请检查网络"));
     }
     let body: Record<string, unknown> | undefined;
     try {
@@ -195,32 +196,56 @@ export class FeishuClient {
       throw new FeishuBotError(error instanceof Error ? error.message : String(error));
     }
     if (response.status < 200 || response.status >= 300) {
-      throw new FeishuBotError(`飞书机器人消息接口返回 HTTP ${response.status}`);
+      throw new FeishuBotError(say(`Feishu bot message API returned HTTP ${response.status}`, `飞书机器人消息接口返回 HTTP ${response.status}`));
     }
     const code = response.body?.code;
     if (typeof code === "number" && code !== 0) {
-      throw new FeishuBotError("飞书拒绝了该消息，请检查机器人是否已加入目标群以及应用权限");
+      throw new FeishuBotError(say("Feishu rejected the message; check that the bot has joined the target chat and that the app has permission", "飞书拒绝了该消息，请检查机器人是否已加入目标群以及应用权限"));
     }
   }
 
   private resolveTarget(target: FeishuTarget | undefined): FeishuTarget {
     if (target !== undefined) return target;
     const config = this.config.load();
-    if (config.receiveId === "") throw new FeishuBotError("请先从群列表中选择一个目标群");
+    if (config.receiveId === "") throw new FeishuBotError(say("Select a target chat from the chat list first", "请先从群列表中选择一个目标群"));
     return { receiveId: config.receiveId, receiveIdType: config.receiveIdType };
   }
 }
 
 /** 旧 `_CHAT_LIST_ERROR_HINTS`：群列表接口的已知错误码。 */
-const CHAT_LIST_ERROR_HINTS: Readonly<Record<number, string>> = {
-  99991672:
-    "飞书返回 99991672：缺少群组读取权限。请在开放平台的权限管理中申请 " +
-    "“获取群组信息”（im:chat:readonly）或“获取与更新群组信息”（im:chat），然后发布新版本。",
-  232001: "飞书返回 232001：群列表请求参数无效，请刷新后重试。",
-  232004: "飞书返回 232004：App ID 不存在，请检查应用凭据。",
-  232025: "飞书返回 232025：请在飞书开放平台为应用开启“机器人”能力，并发布新版本。",
-  232034: "飞书返回 232034：应用在当前企业未启用，请在管理后台安装或启用该应用。",
-};
+function chatListErrorHint(code: number): string | undefined {
+  switch (code) {
+    case 99991672:
+      return say(
+        "Feishu returned 99991672: missing chat read permission. In the Open Platform permission management, request " +
+          "“Obtain group information” (im:chat:readonly) or “Obtain and update group information” (im:chat), then publish a new version.",
+        "飞书返回 99991672：缺少群组读取权限。请在开放平台的权限管理中申请 " +
+          "“获取群组信息”（im:chat:readonly）或“获取与更新群组信息”（im:chat），然后发布新版本。",
+      );
+    case 232001:
+      return say(
+        "Feishu returned 232001: invalid chat list request parameters; refresh and try again.",
+        "飞书返回 232001：群列表请求参数无效，请刷新后重试。",
+      );
+    case 232004:
+      return say(
+        "Feishu returned 232004: the App ID does not exist; check the app credentials.",
+        "飞书返回 232004：App ID 不存在，请检查应用凭据。",
+      );
+    case 232025:
+      return say(
+        "Feishu returned 232025: enable the “Bot” capability for the app in the Feishu Open Platform and publish a new version.",
+        "飞书返回 232025：请在飞书开放平台为应用开启“机器人”能力，并发布新版本。",
+      );
+    case 232034:
+      return say(
+        "Feishu returned 232034: the app is not enabled in this organization; install or enable it in the admin console.",
+        "飞书返回 232034：应用在当前企业未启用，请在管理后台安装或启用该应用。",
+      );
+    default:
+      return undefined;
+  }
+}
 
 /**
  * 卡片 Markdown 元素约 4000 字符上限，按行边界切分，避免把列表或代码块切成两半

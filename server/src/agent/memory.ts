@@ -16,6 +16,7 @@
  */
 import { readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { say } from "../i18n.ts";
 import {
   PY_SPACE,
   isMapping,
@@ -45,12 +46,14 @@ const SCOPE_BY_TYPE: Readonly<Record<MemoryType, MemoryScope>> = {
   project: "workspace",
   reference: "workspace",
 };
-const INDEX_LABELS: Readonly<Record<MemoryType, string>> = {
-  user: "用户偏好",
-  feedback: "纠正反馈",
-  project: "工作区知识",
-  reference: "参考资料",
-};
+function indexLabel(type: MemoryType): string {
+  switch (type) {
+    case "user": return say("User preferences", "用户偏好");
+    case "feedback": return say("Corrections", "纠正反馈");
+    case "project": return say("Workspace knowledge", "工作区知识");
+    case "reference": return say("References", "参考资料");
+  }
+}
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const S = `[${PY_SPACE}]`;
 const NOT_S = `[^${PY_SPACE}]`;
@@ -98,9 +101,15 @@ export type ValidatedMemoryPayload = Readonly<{
 
 function validateText(value: unknown, label: string, limit: number, required = true, automatic = false): string {
   const text = pyTruthy(value) ? pyStrip(pyStr(value)) : "";
-  if (required && !text) throw new MemoryValidationError(`${label}不能为空`);
-  if (pyLen(text) > limit) throw new MemoryValidationError(`${label}不能超过 ${limit} 个字符`);
-  if (automatic && SECRET_RE.test(text)) throw new MemoryValidationError("自动记忆不能包含疑似凭据或连接信息");
+  if (required && !text) throw new MemoryValidationError(say(`${label} must not be empty`, `${label}不能为空`));
+  if (pyLen(text) > limit) {
+    throw new MemoryValidationError(say(`${label} must not exceed ${limit} characters`, `${label}不能超过 ${limit} 个字符`));
+  }
+  if (automatic && SECRET_RE.test(text)) {
+    throw new MemoryValidationError(
+      say("Automatic memories must not contain suspected credentials or connection details", "自动记忆不能包含疑似凭据或连接信息"),
+    );
+  }
   return text;
 }
 
@@ -113,17 +122,17 @@ export function validateMemoryPayload(
   const source: Record<string, unknown> = { ...existing };
   for (const [key, value] of Object.entries(payload)) if (value !== null && value !== undefined) source[key] = value;
   const type = pyTruthy(source.type) ? pyStrip(pyStr(source.type)) : "";
-  if (!Object.hasOwn(SCOPE_BY_TYPE, type)) throw new MemoryValidationError("记忆类型无效");
+  if (!Object.hasOwn(SCOPE_BY_TYPE, type)) throw new MemoryValidationError(say("Invalid memory type", "记忆类型无效"));
   const name = pyTruthy(source.name) ? pyStrip(pyStr(source.name)) : "";
-  if (!NAME_RE.test(name)) throw new MemoryValidationError("记忆 ID 必须是 kebab-case");
+  if (!NAME_RE.test(name)) throw new MemoryValidationError(say("Memory ID must be kebab-case", "记忆 ID 必须是 kebab-case"));
   return {
     name,
     type: type as MemoryType,
     scope: SCOPE_BY_TYPE[type as MemoryType],
-    title: validateText(source.title, "标题", MAX_TITLE_CHARS, true, automatic),
-    body: validateText(source.body, "正文", MAX_BODY_CHARS, true, automatic),
-    why: validateText(source.why, "原因", 500, false, automatic),
-    howToApply: validateText(source.how_to_apply, "应用方式", 500, false, automatic),
+    title: validateText(source.title, say("Title", "标题"), MAX_TITLE_CHARS, true, automatic),
+    body: validateText(source.body, say("Body", "正文"), MAX_BODY_CHARS, true, automatic),
+    why: validateText(source.why, say("Reason", "原因"), 500, false, automatic),
+    howToApply: validateText(source.how_to_apply, say("How to apply", "应用方式"), 500, false, automatic),
   };
 }
 
@@ -207,7 +216,7 @@ export function getMemoryRecord(name: string, dirs: MemoryDirs): MemoryRecord | 
 
 /** `_render_index`：每条记录一行 `- [label] title (name)`，受数量和字符数限制。 */
 export function renderMemoryIndex(records: readonly Pick<MemoryRecord, "type" | "title" | "name">[]): string {
-  const lines = records.map((record) => `- [${INDEX_LABELS[record.type]}] ${record.title} (${record.name})`);
+  const lines = records.map((record) => `- [${indexLabel(record.type)}] ${record.title} (${record.name})`);
   const kept: string[] = [];
   for (const line of lines.slice(0, MAX_RECORDS)) {
     if (pyLen([...kept, line].join("\n")) > MAX_INDEX_CHARS) break;

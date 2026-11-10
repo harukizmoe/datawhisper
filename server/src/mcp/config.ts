@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import { writePrivateJson } from "../models/credentials.ts";
+import { say } from "../i18n.ts";
 
 export type McpTransport = "stdio" | "sse";
 
@@ -101,6 +102,10 @@ export function mcpSecretId(serverId: string, kind: McpSecretKind, name: string)
   return `mcp:${serverId}:${kind}:${name}`;
 }
 
+function serverMissing(serverId: string): string {
+  return say(`Server '${serverId}' does not exist`, `服务器 '${serverId}' 不存在`);
+}
+
 /** 旧 `_validate_stdio`：命令白名单、参数元字符、受保护环境变量。 */
 export function validateStdioServer(
   command: string,
@@ -110,13 +115,17 @@ export function validateStdioServer(
   const base = basename(command ?? "");
   const stem = extname(base) === "" ? base : base.slice(0, -extname(base).length);
   if (!STDIO_ALLOWED_COMMANDS.has(stem)) {
-    return `命令 '${command}' 不在安全白名单中（允许: ${[...STDIO_ALLOWED_COMMANDS].sort().join(", ")}）`;
+    const allowedList = [...STDIO_ALLOWED_COMMANDS].sort().join(", ");
+    return say(
+      `Command '${command}' is not on the safe allowlist (allowed: ${allowedList})`,
+      `命令 '${command}' 不在安全白名单中（允许: ${allowedList}）`,
+    );
   }
   for (const arg of args) {
-    if (SHELL_META_RE.test(String(arg))) return `参数包含不允许的 shell 特殊字符: '${arg}'`;
+    if (SHELL_META_RE.test(String(arg))) return say(`Argument contains a disallowed shell metacharacter: '${arg}'`, `参数包含不允许的 shell 特殊字符: '${arg}'`);
   }
   for (const key of Object.keys(env)) {
-    if (BLOCKED_ENV_KEYS.has(key)) return `不允许覆盖环境变量: ${key}`;
+    if (BLOCKED_ENV_KEYS.has(key)) return say(`Overriding environment variable ${key} is not allowed`, `不允许覆盖环境变量: ${key}`);
   }
   return "";
 }
@@ -126,21 +135,21 @@ export function validateStdioServer(
  */
 export function validateServerInput(input: McpServerInput): { ok: true } | { ok: false; error: string } {
   const serverId = (input.server_id ?? "").trim();
-  if (serverId === "") return { ok: false, error: "server_id 不能为空" };
+  if (serverId === "") return { ok: false, error: say("server_id must not be empty", "server_id 不能为空") };
   if (input.transport !== "stdio" && input.transport !== "sse") {
-    return { ok: false, error: "transport 必须是 'stdio' 或 'sse'" };
+    return { ok: false, error: say("transport must be 'stdio' or 'sse'", "transport 必须是 'stdio' 或 'sse'") };
   }
   if (input.transport === "stdio") {
-    if (input.args !== undefined && !Array.isArray(input.args)) return { ok: false, error: "args 必须是数组" };
+    if (input.args !== undefined && !Array.isArray(input.args)) return { ok: false, error: say("args must be an array", "args 必须是数组") };
     if (input.env !== undefined && (typeof input.env !== "object" || input.env === null || Array.isArray(input.env))) {
-      return { ok: false, error: "env 必须是对象" };
+      return { ok: false, error: say("env must be an object", "env 必须是对象") };
     }
     const error = validateStdioServer((input.command ?? "").trim(), input.args ?? [], input.env ?? {});
     return error === "" ? { ok: true } : { ok: false, error };
   }
-  if ((input.url ?? "").trim() === "") return { ok: false, error: "SSE transport 需要 url" };
+  if ((input.url ?? "").trim() === "") return { ok: false, error: say("SSE transport requires a url", "SSE transport 需要 url") };
   if (input.headers !== undefined && (typeof input.headers !== "object" || input.headers === null || Array.isArray(input.headers))) {
-    return { ok: false, error: "headers 必须是对象" };
+    return { ok: false, error: say("headers must be an object", "headers 必须是对象") };
   }
   return { ok: true };
 }
@@ -199,15 +208,15 @@ export class McpConfigStore {
       const validation = validateServerInput(input);
       if (!validation.ok) return { ok: false, error: validation.error };
       const serverId = input.server_id.trim();
-      if (this.servers.has(serverId)) return { ok: false, error: `服务器 '${serverId}' 已存在` };
+      if (this.servers.has(serverId)) return { ok: false, error: say(`Server '${serverId}' already exists`, `服务器 '${serverId}' 已存在`) };
       const stored = emptyStored(serverId, input);
       await this.storeSecrets(stored, input);
       this.servers.set(serverId, stored);
       if (!(await this.save())) {
         this.servers.delete(serverId);
-        return { ok: false, error: "保存配置失败" };
+        return { ok: false, error: say("Failed to save the configuration", "保存配置失败") };
       }
-      return { ok: true, message: `服务器 '${serverId}' 已添加` };
+      return { ok: true, message: say(`Server '${serverId}' added`, `服务器 '${serverId}' 已添加`) };
     });
   }
 
@@ -215,7 +224,7 @@ export class McpConfigStore {
   update(serverId: string, patch: Partial<Omit<McpServerInput, "server_id">>): Promise<McpConfigMutation> {
     return this.write(async () => {
       const previous = this.servers.get(serverId);
-      if (previous === undefined) return { ok: false, error: `服务器 '${serverId}' 不存在` };
+      if (previous === undefined) return { ok: false, error: serverMissing(serverId) };
       // 没给 env/headers 时要沿用**已解析**的值；直接用磁盘上的空串会把密钥写没。
       const resolved = await this.resolve(previous);
       const merged: McpServerInput = {
@@ -239,37 +248,37 @@ export class McpConfigStore {
       this.servers.set(serverId, next);
       if (!(await this.save())) {
         this.servers.set(serverId, previous);
-        return { ok: false, error: "保存配置失败" };
+        return { ok: false, error: say("Failed to save the configuration", "保存配置失败") };
       }
-      return { ok: true, message: "已更新" };
+      return { ok: true, message: say("Updated", "已更新") };
     });
   }
 
   remove(serverId: string): Promise<McpConfigMutation> {
     return this.write(async () => {
       const previous = this.servers.get(serverId);
-      if (previous === undefined) return { ok: false, error: `服务器 '${serverId}' 不存在` };
+      if (previous === undefined) return { ok: false, error: serverMissing(serverId) };
       this.servers.delete(serverId);
       if (!(await this.save())) {
         this.servers.set(serverId, previous);
-        return { ok: false, error: "保存配置失败" };
+        return { ok: false, error: say("Failed to save the configuration", "保存配置失败") };
       }
       await this.dropSecrets(previous);
-      return { ok: true, message: `服务器 '${serverId}' 已删除` };
+      return { ok: true, message: say(`Server '${serverId}' deleted`, `服务器 '${serverId}' 已删除`) };
     });
   }
 
   setEnabled(serverId: string, enabled: boolean): Promise<McpConfigMutation> {
     return this.write(async () => {
       const previous = this.servers.get(serverId);
-      if (previous === undefined) return { ok: false, error: `服务器 '${serverId}' 不存在` };
+      if (previous === undefined) return { ok: false, error: serverMissing(serverId) };
       const next: StoredServer = { ...previous, enabled };
       this.servers.set(serverId, next);
       if (!(await this.save())) {
         this.servers.set(serverId, previous);
-        return { ok: false, error: "保存配置失败" };
+        return { ok: false, error: say("Failed to save the configuration", "保存配置失败") };
       }
-      return { ok: true, message: "已更新" };
+      return { ok: true, message: say("Updated", "已更新") };
     });
   }
 

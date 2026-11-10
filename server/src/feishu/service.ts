@@ -9,6 +9,7 @@
  * 网络事件驱动、频率低，轮询既延迟又浪费；重连后客户端只要再调一次 `feishu.status` 就能对齐。
  */
 
+import { say } from "../i18n.ts";
 import { resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import type { Context } from "@earendil-works/chord/context";
@@ -188,16 +189,16 @@ export class FeishuService {
   async setConfig(input: unknown): Promise<FeishuStatus> {
     await this.initialize();
     const payload = asObject(input);
-    if (payload === undefined) throw new FeishuBotError("请求体必须是 JSON 对象");
+    if (payload === undefined) throw new FeishuBotError(say("Request body must be a JSON object", "请求体必须是 JSON 对象"));
     const config = this.configStore!.load();
 
     const enabled = payload.enabled ?? config.enabled;
-    if (typeof enabled !== "boolean") throw new FeishuBotError("enabled 必须是布尔值");
-    const appSecret = optionalText(payload.app_secret, "App Secret 必须是文本");
-    const verificationToken = optionalText(payload.event_verification_token, "事件校验 Token 必须是文本");
+    if (typeof enabled !== "boolean") throw new FeishuBotError(say("enabled must be a boolean", "enabled 必须是布尔值"));
+    const appSecret = optionalText(payload.app_secret, say("App Secret must be text", "App Secret 必须是文本"));
+    const verificationToken = optionalText(payload.event_verification_token, say("Event verification token must be text", "事件校验 Token 必须是文本"));
     const inboundTransport = payload.inbound_transport ?? config.inboundTransport;
     if (inboundTransport !== "long_connection" && inboundTransport !== "webhook") {
-      throw new FeishuBotError("入站方式仅支持长连接或 Webhook");
+      throw new FeishuBotError(say("Inbound mode only supports long connection or Webhook", "入站方式仅支持长连接或 Webhook"));
     }
     const appId = validateAppId(payload.app_id ?? "");
     const requestedType = payload.receive_id_type ?? config.receiveIdType;
@@ -211,7 +212,7 @@ export class FeishuService {
       receiveIdType = target.receiveIdType;
       receiveId = target.receiveId;
     } else if (requestedType !== "chat_id") {
-      throw new FeishuBotError("未选择目标群时，接收对象类型必须为 chat_id");
+      throw new FeishuBotError(say("Receive ID type must be chat_id when no target chat is selected", "未选择目标群时，接收对象类型必须为 chat_id"));
     } else {
       receiveIdType = "chat_id";
       receiveId = "";
@@ -229,7 +230,7 @@ export class FeishuService {
       });
     } catch (error) {
       throw new FeishuBotError(
-        `无法保存飞书机器人配置：${error instanceof Error ? error.message : String(error)}`,
+        say(`Cannot save the Feishu bot configuration: ${error instanceof Error ? error.message : String(error)}`, `无法保存飞书机器人配置：${error instanceof Error ? error.message : String(error)}`),
       );
     }
     await this.applyConnection();
@@ -246,7 +247,7 @@ export class FeishuService {
   async test(): Promise<{ ok: true; message: string }> {
     await this.initialize();
     await this.client!.sendTestMessage();
-    return { ok: true, message: "测试消息已发送到飞书群。" };
+    return { ok: true, message: say("Test message sent to the Feishu chat.", "测试消息已发送到飞书群。") };
   }
 
   /**
@@ -259,7 +260,7 @@ export class FeishuService {
     await this.initialize();
     const payload = asObject(input);
     if (payload === undefined || typeof payload.enabled !== "boolean") {
-      throw new FeishuBotError("enabled 必须是布尔值");
+      throw new FeishuBotError(say("enabled must be a boolean", "enabled 必须是布尔值"));
     }
     if (!payload.enabled) {
       await this.linkStore!.unlinkConversation(conversationId);
@@ -267,13 +268,13 @@ export class FeishuService {
     }
     const status = await this.status();
     if (!status.enabled || !status.configured) {
-      throw new FeishuBotError("请先在“应用设置 → 飞书机器人”启用发送并选择目标群。");
+      throw new FeishuBotError(say("Enable sending and select a target chat in “App Settings → Feishu Bot” first.", "请先在“应用设置 → 飞书机器人”启用发送并选择目标群。"));
     }
     const chats = await this.chats();
     const requestedChatId = String(payload.chat_id ?? status.receiveId).trim();
     const selected = chats.find((chat) => chat.chat_id === requestedChatId);
     if (selected === undefined) {
-      throw new FeishuBotError("目标群不在当前机器人可见范围内，请刷新群列表后重新选择。");
+      throw new FeishuBotError(say("The target chat is not visible to this bot; refresh the chat list and select again.", "目标群不在当前机器人可见范围内，请刷新群列表后重新选择。"));
     }
     await this.linkStore!.link(selected.chat_id, {
       conversationId,

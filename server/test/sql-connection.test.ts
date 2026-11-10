@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { sqlConfigProblem, sqlConnectionString } from "../src/ipc/sql-connection.ts";
 
 describe("sqlConnectionString", () => {
@@ -47,5 +48,17 @@ describe("sqlConfigProblem", () => {
   test("数据库名和 SQLite 路径里的 ? 会被拒绝，因为连接串无法转义它", () => {
     expect(sqlConfigProblem({ driver: "postgresql", host: "h", database: "a?b" }, {})?.reason).toBe("invalid_database");
     expect(sqlConfigProblem({ driver: "sqlite", file: "/tmp/a?.db" }, {})?.reason).toBe("invalid_file");
+  });
+});
+
+describe("sqlConfigProblem messages follow the UI language", () => {
+  test("English by default, Chinese when the UI language is zh", () => {
+    expect(sqlConfigProblem({ driver: "postgresql" }, {})?.message).toBe("Host cannot be empty");
+    setLanguage("zh");
+    try {
+      expect(sqlConfigProblem({ driver: "postgresql" }, {})?.message).toBe("主机不能为空");
+    } finally {
+      setLanguage("en");
+    }
   });
 });

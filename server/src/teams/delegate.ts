@@ -24,6 +24,7 @@ import {
   ToolTask,
 } from "@earendil-works/pi-durable";
 import type { PlanUsage, TeamMember } from "../tools/app/docs.ts";
+import { say } from "../i18n.ts";
 import { isoSeconds } from "../tools/app/tasks.ts";
 import type {
   TeamDelegateRequest,
@@ -97,7 +98,7 @@ export function emptyUsage(): PlanUsage {
 
 /** 委托标题：界面按它就能看出团队与成员，不需要再查文档。 */
 export function teamDelegateTitle(teamName: string, memberName: string): string {
-  return `团队委托：${teamName} / ${memberName}`;
+  return say(`Team delegation: ${teamName} / ${memberName}`, `团队委托：${teamName} / ${memberName}`);
 }
 
 /** 允许工具 = 只读默认集 ∩ 调用方声明；声明里写了默认集之外的名字也不会生效。 */
@@ -135,17 +136,27 @@ function withToolFooter(content: string, events: readonly JsonValue[]): string {
     ),
   ];
   if (names.length === 0) return content;
-  return `${content.trimEnd()}\n\n---\n工具使用：${names.join(", ")}`.trimEnd();
+  return `${content.trimEnd()}\n\n---\n${say("Tools used: ", "工具使用：")}${names.join(", ")}`.trimEnd();
 }
+
+/** 工具使用尾行的前缀（两种语言）：已存的结果可能是另一种语言写下的，剥离时两种都要认。 */
+const TOOL_FOOTER_LABELS = ["Tools used: ", "工具使用："] as const;
+/** 工具轮耗尽占位结论里的可识别片段（两种语言）。 */
+const TOOL_LIMIT_PLACEHOLDER_MARKERS = [
+  "tool calls have reached the limit and no complete final summary",
+  "成员工具调用已达到上限，未能生成完整最终总结",
+] as const;
 
 /** 去掉 `withToolFooter` 追回的尾行，再决定结果是否可用。 */
 function stripToolFooter(content: string): string {
   const text = content.trim();
-  for (const marker of ["\n\n---\n工具使用：", "\n---\n工具使用："]) {
-    const index = text.indexOf(marker);
-    if (index >= 0) return text.slice(0, index).trim();
+  for (const label of TOOL_FOOTER_LABELS) {
+    for (const marker of [`\n\n---\n${label}`, `\n---\n${label}`]) {
+      const index = text.indexOf(marker);
+      if (index >= 0) return text.slice(0, index).trim();
+    }
+    if (text.startsWith(`---\n${label}`) || text.startsWith(label)) return "";
   }
-  if (text.startsWith("---\n工具使用：") || text.startsWith("工具使用：")) return "";
   return text;
 }
 
@@ -158,7 +169,7 @@ export function invalidDelegatedResult(
   if (body === "") {
     return { code: "team_delegate_empty_output", error: "delegated member produced no final Markdown result" };
   }
-  if (body.includes("成员工具调用已达到上限，未能生成完整最终总结")) {
+  if (TOOL_LIMIT_PLACEHOLDER_MARKERS.some((marker) => body.includes(marker))) {
     return {
       code: "team_delegate_tool_call_limit",
       error: "delegated member exhausted tool rounds without a final result",
@@ -390,7 +401,7 @@ export function createTeamDelegateService(deps: TeamDelegateDeps): TeamDelegatio
       if (entry.canceled) {
         status = "canceled";
         code = "team_delegate_canceled";
-        error = "团队成员委托已取消。";
+        error = say("Team member delegation was canceled.", "团队成员委托已取消。");
         await abort(conversationId);
         return {
           status,
@@ -407,9 +418,14 @@ export function createTeamDelegateService(deps: TeamDelegateDeps): TeamDelegatio
       const timeoutSeconds =
         typeof request.timeout_seconds === "number" && request.timeout_seconds > 0 ? request.timeout_seconds : 300;
       const requestId = request.request_id ?? crypto.randomUUID();
-      const prompt = (request.description?.trim() ? `任务：${request.description.trim()}\n\n` : "任务：团队并行分析\n\n") +
+      const prompt = (request.description?.trim()
+          ? say(`Task: ${request.description.trim()}\n\n`, `任务：${request.description.trim()}\n\n`)
+          : say("Task: parallel team analysis\n\n", "任务：团队并行分析\n\n")) +
         request.prompt +
-        "\n\n交付必须完整结束；如表格过长，请压缩行数并给出完整结论，不能在表格或句子中截断。" +
+        say(
+          "\n\nThe deliverable must be complete: if a table is too long, reduce the rows and give a full conclusion; never cut off in the middle of a table or sentence.",
+          "\n\n交付必须完整结束；如表格过长，请压缩行数并给出完整结论，不能在表格或句子中截断。",
+        ) +
         (request.inbox_context ?? "");
 
       await conversation.submit({ type: "input", content: prompt, requestId, whenBusy: "followUp" }, context);
@@ -449,18 +465,25 @@ export function createTeamDelegateService(deps: TeamDelegateDeps): TeamDelegatio
       if (raw.text.trim() === "" && events.length > 0) {
         // 与旧实现一致：工具轮用完但没有最终正文时，给 Leader 一段可识别的占位结论。
         content =
-          "成员工具调用已达到上限，未能生成完整最终总结。" +
-          "请 Leader 根据下方工具调用流程中的结果进行汇总。";
+          say(
+            "Member tool calls have reached the limit and no complete final summary could be produced. " +
+              "Leader, please summarize from the results in the tool-call trace below.",
+            "成员工具调用已达到上限，未能生成完整最终总结。" +
+              "请 Leader 根据下方工具调用流程中的结果进行汇总。",
+          );
       }
 
       if (outcome === "canceled") {
         status = "canceled";
         code = "team_delegate_canceled";
-        error = "团队成员委托已取消。";
+        error = say("Team member delegation was canceled.", "团队成员委托已取消。");
       } else if (outcome === "timeout") {
         status = "failed";
         code = "team_delegate_timeout";
-        error = `团队成员执行超过 ${timeoutSeconds} 秒未完成，已停止等待。`;
+        error = say(
+          `Team member did not finish within ${timeoutSeconds} seconds; stopped waiting.`,
+          `团队成员执行超过 ${timeoutSeconds} 秒未完成，已停止等待。`,
+        );
         content = "";
       } else {
         status = "completed";

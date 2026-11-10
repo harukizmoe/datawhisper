@@ -32,6 +32,7 @@ from ._utils import (
     snapshot_tables_to_memory,
 )
 from .excel import _excel_engine, _parse_sheets_parallel
+from compute.i18n import say
 from .base import DataSource
 from data.workspace_write_lease import (
     acquire_synchronous_workspace_write_lease,
@@ -100,7 +101,7 @@ def parse_workspace_csv_job(
     """
     old_tables = list(old_tables or [])
     started_at = time.perf_counter()
-    ctx.set_progress(2, f"正在批量导入 {file_key}")
+    ctx.set_progress(2, say(f"Importing {file_key} in bulk", f"正在批量导入 {file_key}"))
     ctx.check_canceled()
     conn = None
     with acquire_large_import_slot(ctx):
@@ -140,7 +141,7 @@ def parse_workspace_csv_job(
                     "import_metrics": metrics,
                 }
                 runtime.save_registry(registry)
-    ctx.set_progress(100, f"{file_key} 导入完成，共 {metrics['row_count']:,} 行")
+    ctx.set_progress(100, say(f"{file_key} imported, {metrics['row_count']:,} rows in total", f"{file_key} 导入完成，共 {metrics['row_count']:,} 行"))
     return {"workspace_id": runtime.workspace_id, "source_name": file_key, "tables": [table_name], "metrics": metrics}
 
 
@@ -165,8 +166,8 @@ def parse_workspace_excel_job(
     old_tables = list(old_tables or [])
     engine, sheet_names = _excel_engine(file_path)
     if not sheet_names:
-        raise ValueError("Excel 文件中未发现工作表。")
-    ctx.set_progress(2, f"正在读取 {file_key} 的工作表")
+        raise ValueError(say("No worksheets found in the Excel file.", "Excel 文件中未发现工作表。"))
+    ctx.set_progress(2, say(f"Reading worksheets of {file_key}", f"正在读取 {file_key} 的工作表"))
     ctx.check_canceled()
 
     total = len(sheet_names)
@@ -174,7 +175,7 @@ def parse_workspace_excel_job(
     def _sheet_done(sheet, done, _total):
         ctx.set_progress(
             5 + int(done * 78 / total),
-            f"已解析工作表 {done}/{total}：{sheet}",
+            say(f"Parsed worksheet {done}/{total}: {sheet}", f"已解析工作表 {done}/{total}：{sheet}"),
         )
 
     with acquire_large_import_slot(ctx):
@@ -212,10 +213,10 @@ def parse_workspace_excel_job(
                             registered.append(table_name)
                         ctx.set_progress(
                             83 + int(index * 14 / total),
-                            f"正在注册工作表 {index}/{total}：{sheet}",
+                            say(f"Registering worksheet {index}/{total}: {sheet}", f"正在注册工作表 {index}/{total}：{sheet}"),
                         )
                     if not registered:
-                        raise ValueError("Excel 文件中未发现有效工作表。")
+                        raise ValueError(say("No valid worksheets found in the Excel file.", "Excel 文件中未发现有效工作表。"))
                     conn.execute("COMMIT")
                 except Exception:
                     if conn is not None:
@@ -237,7 +238,7 @@ def parse_workspace_excel_job(
                 }
                 runtime.save_registry(registry)
 
-    ctx.set_progress(100, f"{file_key} 解析完成，共 {len(registered)} 个工作表")
+    ctx.set_progress(100, say(f"{file_key} parsed, {len(registered)} worksheet(s) in total", f"{file_key} 解析完成，共 {len(registered)} 个工作表"))
     return {
         "workspace_id": runtime.workspace_id,
         "workdir": str(runtime.workdir),
@@ -256,10 +257,10 @@ class WorkspacePersistentSource(DataSource):
     def __init__(
         self,
         db_path: str,
-        display_name: str = "工作目录",
+        display_name: str | None = None,
         db_lock: threading.RLock | None = None,
     ):
-        self.name = display_name
+        self.name = display_name or say("Workspace", "工作目录")
         self.file_path = db_path  # 兼容 workspace.py 卸载时的 file_path 检查
         self._db_path = Path(db_path)
         self._db_lock = db_lock or threading.RLock()
@@ -502,9 +503,9 @@ class WorkspacePersistentSource(DataSource):
                                 f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
                             )
                         rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
-            return f"表 '{table_name}' 已创建，共 {rows} 行。"
+            return say(f"Table '{table_name}' created, {rows} rows.", f"表 '{table_name}' 已创建，共 {rows} 行。")
         except Exception as e:
-            return f"创建表失败：{e}"
+            return say(f"Failed to create table: {e}", f"创建表失败：{e}")
 
     def list_tables(self) -> List[str]:
         with self._shadow_or_db_lock():

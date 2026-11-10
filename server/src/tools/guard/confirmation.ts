@@ -13,6 +13,7 @@
  */
 
 import { blockMessage } from "../../agent/output-guard.ts";
+import { say } from "../../i18n.ts";
 import type { ToolSpec } from "../registry.ts";
 
 /** 旧 `compute/tools/dispatch.py:46` 的 `as_bool_arg`：字符串 `"False"` 不算 true。 */
@@ -30,7 +31,13 @@ export function asBoolArg(value: unknown): boolean {
  * 未知工具退回通用文案。
  */
 const ARGUMENT_POLICY: Readonly<Record<string, { readonly field: string; readonly message: string }>> = {
-  delete_analysis_tables: { field: "confirm", message: "❌ 删除分析表需要 confirm=true。" },
+  delete_analysis_tables: {
+    field: "confirm",
+    // 取值时才按当前语言生成，策略表本身在模块加载时构建。
+    get message() {
+      return say("❌ Deleting analysis tables requires confirm=true.", "❌ 删除分析表需要 confirm=true。");
+    },
+  },
   workspace_delete_file: { field: "confirm", message: "file deletion requires confirm=true" },
 };
 

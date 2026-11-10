@@ -30,6 +30,7 @@ from data.sources import (
 )
 from data.sources.workspace_persistent import WorkspacePersistentSource
 
+from .i18n import say
 from .rpc import INVALID_PARAMS, RpcError
 
 log = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ def combined_schema(sources: Sequence[DataSource]) -> str:
             )
         else:
             note = ""
-        header = f"=== 数据源 {idx}: {getattr(src, 'name', '未命名')} ==="
+        header = f"=== {say('Source', '数据源')} {idx}: {getattr(src, 'name', say('Unnamed', '未命名'))} ==="
         parts.append(f"{header}{note}\n{raw_schema}")
     return "\n\n".join(parts)
 
@@ -125,43 +126,63 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
         cur = cur.__cause__ or cur.__context__
     text = "  ".join(f"{type(c).__name__}: {c}" for c in chain).lower()
 
-    if service == "数据库":
+    if service in _DATABASE_LABELS:
         # 数据库的常见失败按原因分开说，并指出该检查哪一项；顺序要先于下面的通用网络/认证文案。
         if any(k in text for k in (
             "password authentication failed", "access denied for user", "login failed for user",
             "authentication failed",
         )):
-            return "数据库认证失败：用户名或密码不正确，或该用户没有权限访问这个数据库。"
+            return say(
+                "Database authentication failed: the username or password is incorrect, or the user has no permission to access this database.",
+                "数据库认证失败：用户名或密码不正确，或该用户没有权限访问这个数据库。",
+            )
         if any(k in text for k in (
             "unknown database", "cannot open database", "does not exist", "no such database",
         )) and "database" in text:
-            return "数据库不存在：请检查数据库名是否正确。"
+            return say("Database does not exist: check that the database name is correct.", "数据库不存在：请检查数据库名是否正确。")
         if "unable to open database file" in text:
-            return "无法打开数据库文件：请检查路径和读取权限。"
+            return say("Cannot open the database file: check the path and read permission.", "无法打开数据库文件：请检查路径和读取权限。")
         if "pg_hba.conf" in text:
-            return "服务器拒绝了这次连接（pg_hba.conf 没有放行此主机，或要求/不允许 SSL）：请检查服务器的访问规则和 SSL 开关。"
+            return say(
+                "The server rejected the connection (pg_hba.conf does not allow this host, or SSL is required or not allowed): check the server's access rules and SSL setting.",
+                "服务器拒绝了这次连接（pg_hba.conf 没有放行此主机，或要求/不允许 SSL）：请检查服务器的访问规则和 SSL 开关。",
+            )
         if any(k in text for k in (
             "connection refused", "could not connect to server", "can't connect to mysql server",
             "name or service not known", "nodename nor servname", "getaddrinfo failed",
             "timeout expired", "timed out", "no route to host", "network is unreachable",
         )):
-            return "无法连接到数据库服务器：请检查主机和端口是否正确，数据库服务是否已启动，防火墙是否放行。"
+            return say(
+                "Cannot connect to the database server: check that the host and port are correct, the database service is running, and the firewall allows the connection.",
+                "无法连接到数据库服务器：请检查主机和端口是否正确，数据库服务是否已启动，防火墙是否放行。",
+            )
         if "no module named" in text and "pyodbc" not in text:
-            return "缺少数据库驱动：这是应用打包的问题，请反馈给开发者，不是你的配置有误。"
+            return say(
+                "Missing database driver: this is an application packaging problem, please report it to the developers; your configuration is not at fault.",
+                "缺少数据库驱动：这是应用打包的问题，请反馈给开发者，不是你的配置有误。",
+            )
 
     # — SQL Server 客户端依赖 —
     if "no module named 'pyodbc'" in text or "no module named \"pyodbc\"" in text:
         return (
-            "SQL Server 驱动未安装：请升级或重新运行本程序以安装 pyodbc，"
-            "并在此电脑安装 Microsoft ODBC Driver 17 或 18 for SQL Server 后重试。"
+            say(
+                "SQL Server driver is not installed: upgrade or rerun this program to install pyodbc, "
+                "and install Microsoft ODBC Driver 17 or 18 for SQL Server on this computer, then retry.",
+                "SQL Server 驱动未安装：请升级或重新运行本程序以安装 pyodbc，"
+                "并在此电脑安装 Microsoft ODBC Driver 17 或 18 for SQL Server 后重试。",
+            )
         )
     if any(k in text for k in (
         "data source name not found", "no default driver specified",
         "can't open lib 'odbc driver", "cannot open lib 'odbc driver",
     )):
         return (
-            "未找到 SQL Server ODBC 驱动：请安装 Microsoft ODBC Driver 17 或 18 for SQL Server，"
-            "并在连接串中指定已安装的驱动名称。"
+            say(
+                "SQL Server ODBC driver not found: install Microsoft ODBC Driver 17 or 18 for SQL Server, "
+                "and specify the installed driver name in the connection string.",
+                "未找到 SQL Server ODBC 驱动：请安装 Microsoft ODBC Driver 17 或 18 for SQL Server，"
+                "并在连接串中指定已安装的驱动名称。",
+            )
         )
 
     # — SQL Server 可达性 / 实例发现 —
@@ -171,8 +192,12 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
         "08001", "08s01",
     )):
         return (
-            "无法连接 SQL Server：请确认服务器地址/实例名和端口正确，SQL Server 已启用 TCP/IP，"
-            "防火墙已放行端口（通常为 1433），且客户端网络可访问该服务器。"
+            say(
+                "Cannot connect to SQL Server: confirm the server address/instance name and port are correct, TCP/IP is enabled on SQL Server, "
+                "the firewall allows the port (usually 1433), and the client network can reach the server.",
+                "无法连接 SQL Server：请确认服务器地址/实例名和端口正确，SQL Server 已启用 TCP/IP，"
+                "防火墙已放行端口（通常为 1433），且客户端网络可访问该服务器。",
+            )
         )
 
     # — 网络不可达 / 连接被重置（代理、GFW、离线） —
@@ -184,10 +209,16 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
         "remotedisconnected", "connectionerror",
     )):
         return (
-            f"无法连接「{service}」：网络请求被中断或超时。"
-            f"请检查网络是否可正常访问目标服务"
-            + ("（Google 服务在部分网络下需要代理）" if "google" in service.lower() else "")
-            + "，确认代理 / VPN 已开启且 Python 进程已走代理后重试。"
+            say(
+                f"Cannot connect to \"{service}\": the network request was interrupted or timed out. "
+                "Check that the network can reach the target service"
+                + (" (Google services need a proxy on some networks)" if "google" in service.lower() else "")
+                + ", make sure the proxy / VPN is on and the Python process goes through it, then retry.",
+                f"无法连接「{service}」：网络请求被中断或超时。"
+                f"请检查网络是否可正常访问目标服务"
+                + ("（Google 服务在部分网络下需要代理）" if "google" in service.lower() else "")
+                + "，确认代理 / VPN 已开启且 Python 进程已走代理后重试。",
+            )
         )
     # — 认证 / 授权 —
     if any(k in text for k in (
@@ -196,28 +227,44 @@ def friendly_conn_error(exc: Exception, service: str) -> str:
         "access_denied", "credential",
     )):
         return (
-            f"{service} 认证失败：凭证无效或没有访问权限。"
-            "请检查服务账号 / 密钥是否正确，以及该账号是否已被授权访问目标资源。"
+            say(
+                f"{service} authentication failed: the credentials are invalid or lack access. "
+                "Check that the service account / key is correct and that the account is authorized to access the target resource.",
+                f"{service} 认证失败：凭证无效或没有访问权限。"
+                "请检查服务账号 / 密钥是否正确，以及该账号是否已被授权访问目标资源。",
+            )
         )
     # — 未找到 —
     if any(k in text for k in ("404", "not found", "does not exist")):
-        return f"{service} 目标资源不存在：请检查 URL / ID / 表名是否正确。"
+        return say(
+            f"{service}: target resource not found. Check that the URL / ID / table name is correct.",
+            f"{service} 目标资源不存在：请检查 URL / ID / 表名是否正确。",
+        )
 
     # — 未知情形 — 保留原始消息，但要保持简短 —
     raw = str(exc).strip() or type(exc).__name__
     if len(raw) > 200:
         raw = raw[:200] + "…"
-    return f"{service} 连接失败：{raw}"
+    return say(f"{service} connection failed: {raw}", f"{service} 连接失败：{raw}")
 
 
 # 打开失败时需要给出可读原因的远程 source。
-_CONNECTION_LABELS = {"sql": "数据库", "gsheets": "Google Sheets", "http": "外部 API", "feishu": "飞书多维表格"}
+_DATABASE_LABELS = ("Database", "数据库")
+
+
+def _connection_label(kind: str) -> str | None:
+    return {
+        "sql": say("Database", "数据库"),
+        "gsheets": "Google Sheets",
+        "http": say("External API", "外部 API"),
+        "feishu": say("Feishu Bitable", "飞书多维表格"),
+    }.get(kind)
 
 
 def open_failed(descriptor: dict, exc: Exception) -> RpcError:
     """打开 source 失败时的错误（``data.kind == "open_failed"``）：远程连接给出
     可读原因，文件则保留原始消息。"""
-    label = _CONNECTION_LABELS.get(str(descriptor.get("kind") or ""))
+    label = _connection_label(str(descriptor.get("kind") or ""))
     if label and not isinstance(exc, FeishuBitableError):
         message = friendly_conn_error(exc, label)
     else:
@@ -232,13 +279,19 @@ def pdf_source(file_path: str, name: str) -> DataSource:
 
     pdf_bytes = Path(file_path).read_bytes()
     if len(pdf_bytes) > MAX_PDF_BYTES:
-        raise ValueError(f"PDF 文件超过 {MAX_PDF_BYTES // (1024 * 1024)}MB 上限，请拆分后再上传")
+        raise ValueError(say(
+            f"PDF file exceeds the {MAX_PDF_BYTES // (1024 * 1024)}MB limit; split it and upload again",
+            f"PDF 文件超过 {MAX_PDF_BYTES // (1024 * 1024)}MB 上限，请拆分后再上传",
+        ))
     grids = parse_pdf_tables(pdf_bytes)
     if not grids:
-        raise ValueError("未在 PDF 中检测到表格（扫描件/图片型 PDF 不支持），请先转换为文本型 PDF")
+        raise ValueError(say(
+            "No tables detected in the PDF (scanned/image-based PDFs are not supported); convert it to a text-based PDF first",
+            "未在 PDF 中检测到表格（扫描件/图片型 PDF 不支持），请先转换为文本型 PDF",
+        ))
     tables, _meta = normalize_grids(grids)
     if not tables:
-        raise ValueError("PDF 表格均少于 2 行/2 列，无可导入内容")
+        raise ValueError(say("All PDF tables have fewer than 2 rows/2 columns; nothing to import", "PDF 表格均少于 2 行/2 列，无可导入内容"))
     return ExtractedTableDataSource(name, tables)
 
 
@@ -268,12 +321,12 @@ def restore_source(info: dict) -> DataSource:
     if kind == "csv":
         file_path = str(info.get("file_path") or "")
         if not Path(file_path).is_file():
-            raise FileNotFoundError(file_path or "CSV 文件不存在")
+            raise FileNotFoundError(file_path or say("CSV file does not exist", "CSV 文件不存在"))
         return CSVDataSource(file_path, name or Path(file_path).name)
     if kind == "excel":
         file_path = str(info.get("file_path") or "")
         if not Path(file_path).is_file():
-            raise FileNotFoundError(file_path or "Excel 文件不存在")
+            raise FileNotFoundError(file_path or say("Excel file does not exist", "Excel 文件不存在"))
         db_path = str(info.get("db_path") or "")
         if db_path and Path(db_path).is_file():
             return ExcelDataSource.from_database(file_path, name or Path(file_path).name, db_path)
@@ -281,7 +334,7 @@ def restore_source(info: dict) -> DataSource:
     if kind == "sql":
         conn = encode_conn_secret(str(info.get("connection_string") or "").strip())
         if not conn:
-            raise ValueError("SQL 连接字符串为空")
+            raise ValueError(say("SQL connection string is empty", "SQL 连接字符串为空"))
         source = SQLDataSource(conn, name)
         # 之前选过的表可能已被删掉，或连接改指到了别的库：只恢复仍然存在的，否则整个来源都打不开。
         saved = [str(item) for item in (info.get("analysis_tables") or [])]
@@ -295,37 +348,37 @@ def restore_source(info: dict) -> DataSource:
         creds = info.get("creds_dict")
         spreadsheet = str(info.get("spreadsheet") or "")
         if not isinstance(creds, dict) or not spreadsheet:
-            raise ValueError("Google Sheets 凭证或表格地址为空")
+            raise ValueError(say("Google Sheets credentials or spreadsheet address is empty", "Google Sheets 凭证或表格地址为空"))
         return GoogleSheetsDataSource(creds, spreadsheet, name)
     if kind == "http":
         url = str(info.get("url") or "")
         if not url:
-            raise ValueError("API URL 为空")
+            raise ValueError(say("API URL is empty", "API URL 为空"))
         auth_type = str(info.get("auth_type") or "none")
         if auth_type not in ("none", "bearer", "api_key"):
-            raise ValueError("认证方式无效，支持: none / bearer / api_key")
+            raise ValueError(say("Invalid auth type; supported: none / bearer / api_key", "认证方式无效，支持: none / bearer / api_key"))
         return HTTPAPIDataSource(url, auth_type, str(info.get("auth_value") or ""), name)
     if kind == "feishu":
         app_token = str(info.get("app_token") or "")
         table_id = str(info.get("table_id") or "")
         if not app_token or not table_id:
-            raise ValueError("飞书多维表格 app_token 或 table_id 为空")
+            raise ValueError(say("Feishu Bitable app_token or table_id is empty", "飞书多维表格 app_token 或 table_id 为空"))
         result = read_bitable_records(bitable=app_token, table_id=table_id)
-        source = FeishuBitableDataSource(result["records"], name or "飞书多维表格")
+        source = FeishuBitableDataSource(result["records"], name or say("Feishu Bitable", "飞书多维表格"))
         source._feishu_app_token = app_token
         source._feishu_table_id = table_id
         return source
     if kind == "workspace_persistent":
         db_path = str(info.get("db_path") or "")
         if not Path(db_path).is_file():
-            raise FileNotFoundError(db_path or "工作目录 DuckDB 不存在")
-        return WorkspacePersistentSource(db_path, name or "工作目录")
+            raise FileNotFoundError(db_path or say("Workspace DuckDB does not exist", "工作目录 DuckDB 不存在"))
+        return WorkspacePersistentSource(db_path, name or say("Workspace", "工作目录"))
     if kind == "pdf":
         file_path = str(info.get("file_path") or "")
         if not Path(file_path).is_file():
-            raise FileNotFoundError(file_path or "PDF 文件不存在")
+            raise FileNotFoundError(file_path or say("PDF file does not exist", "PDF 文件不存在"))
         return pdf_source(file_path, name or f"PDF {Path(file_path).name}")
-    raise ValueError(f"不支持的数据源类型：{kind or 'unknown'}")
+    raise ValueError(say(f"Unsupported data source type: {kind or 'unknown'}", f"不支持的数据源类型：{kind or 'unknown'}"))
 
 
 def probe_source(info: dict) -> dict:

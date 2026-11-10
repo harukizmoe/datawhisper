@@ -308,6 +308,8 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 			respond(req.ID, map[string]any{"enabled": true, "configured": true, "appId": params["app_id"], "inboundStatus": "connected"})
 		case "session.rename":
 			respond(req.ID, map[string]any{"id": params["id"], "title": params["title"], "pinned": false, "archived": false})
+		case "app.setLanguage":
+			respond(req.ID, map[string]any{"lang": params["lang"]})
 		case "command.list":
 			respond(req.ID, map[string]any{"commands": []any{
 				map[string]any{"name": "compact", "description": "Summarize the conversation", "type": "prompt", "aliases": []any{"cp"}, "arguments": "none", "available": true},

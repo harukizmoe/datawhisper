@@ -6,6 +6,8 @@
  * 绝不把可渲染的图变成 error。
  */
 
+import { say } from "../../../i18n.ts";
+
 const SERIES: Readonly<Record<string, readonly string[]>> = {
   mckinsey: ["#003B71", "#005CAB", "#0083CA", "#00A3E0", "#7FBA00", "#FFC000", "#F7630C", "#E2231A", "#A4373A", "#6B2C91"],
   bcg: ["#006C5B", "#009879", "#00B398", "#004A3F", "#8CC63F", "#F2A900", "#2C7FB8", "#3F454A"],
@@ -97,16 +99,23 @@ export function qcDiagram(xml: string): string[] {
     else if (attr(tag, "edge") === "1") edges.push(tag);
   }
   if (vertices.length > VERTEX_BUDGET) {
-    warnings.push(
+    warnings.push(say(
+      `Node count ${vertices.length} exceeds the concept diagram budget ${VERTEX_BUDGET}; merge minor nodes or split into several diagrams`,
       `节点数 ${vertices.length} 超过概念图预算 ${VERTEX_BUDGET}，建议聚合次要节点或拆分为多张图`,
-    );
+    ));
   }
   if (edges.length > EDGE_BUDGET) {
-    warnings.push(`连线数 ${edges.length} 超过预算 ${EDGE_BUDGET}，建议精简关系或拆分`);
+    warnings.push(say(
+      `Edge count ${edges.length} exceeds the budget ${EDGE_BUDGET}; simplify the relationships or split the diagram`,
+      `连线数 ${edges.length} 超过预算 ${EDGE_BUDGET}，建议精简关系或拆分`,
+    ));
   }
   const floating = edges.filter((edge) => !attr(edge, "source") || !attr(edge, "target")).length;
   if (floating > 0) {
-    warnings.push(`存在 ${floating} 条悬空连线（缺 source/target），请在 edit_diagram 中补全`);
+    warnings.push(say(
+      `${floating} dangling edge(s) (missing source/target); please complete them with edit_diagram`,
+      `存在 ${floating} 条悬空连线（缺 source/target），请在 edit_diagram 中补全`,
+    ));
   }
   if (edges.length > 0) {
     const endpoints = new Set<string>();
@@ -125,7 +134,10 @@ export function qcDiagram(xml: string): string[] {
       );
     });
     if (isolated.length > 0) {
-      warnings.push(`存在 ${isolated.length} 个孤立节点（无任何连线），若它们不属于本图讯息请删除，否则请连线表达关系`);
+      warnings.push(say(
+        `${isolated.length} isolated node(s) with no connections; delete them if they do not belong to this diagram, otherwise connect them to express relationships`,
+        `存在 ${isolated.length} 个孤立节点（无任何连线），若它们不属于本图讯息请删除，否则请连线表达关系`,
+      ));
     }
   }
   let badFonts = 0;
@@ -138,7 +150,10 @@ export function qcDiagram(xml: string): string[] {
     }
   }
   if (badFonts > 0) {
-    warnings.push(`存在 ${badFonts} 处字号越界（建议 ${FONT_MIN}-${FONT_MAX}，标题可到 20），请统一字号层级`);
+    warnings.push(say(
+      `${badFonts} font size(s) out of range (recommended ${FONT_MIN}-${FONT_MAX}, titles up to 20); please unify the font size hierarchy`,
+      `存在 ${badFonts} 处字号越界（建议 ${FONT_MIN}-${FONT_MAX}，标题可到 20），请统一字号层级`,
+    ));
   }
   return warnings;
 }

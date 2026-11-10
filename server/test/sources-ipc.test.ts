@@ -4,7 +4,9 @@
  * compute 用假客户端（记录调用、回放固定结果），状态用内存文档宿主，配置存储用真实的
  * `SecretCredentialStore`（强制文件后端），这样「密钥不进 JSON、不进返回值」能被实际读到文件。
  */
+import { validateWorkspacePath } from "../src/ipc/source-store.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -859,5 +861,18 @@ describe("产物", () => {
 
     const outsideName = await server.call("artifact.read", { conversationId: 1, name: "data.csv" });
     expect(outsideName.error?.code).toBe(APP_ERROR);
+  });
+});
+
+describe("工作目录校验文案跟随界面语言", () => {
+  test("English by default, Chinese when the UI language is zh", () => {
+    const options = { projectRoot: "/nonexistent-project-root" };
+    expect(validateWorkspacePath("", options)).toEqual({ ok: false, message: "The working directory path cannot be empty." });
+    setLanguage("zh");
+    try {
+      expect(validateWorkspacePath("", options)).toEqual({ ok: false, message: "工作目录路径不能为空。" });
+    } finally {
+      setLanguage("en");
+    }
   });
 });

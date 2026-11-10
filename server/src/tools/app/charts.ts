@@ -8,6 +8,7 @@
 
 import type { JsonValue } from "@earendil-works/chord";
 import { pyRepr } from "../../agent/py-compat.ts";
+import { say } from "../../i18n.ts";
 import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "./types.ts";
 import { BOOST_TABLE, CHARTS, COLUMN_PATTERN_TABLE, type ChartEntry } from "./chart-registry.ts";
 
@@ -91,31 +92,46 @@ export function formatSelectionResult(candidates: readonly ChartCandidate[]): st
     );
   }
   const lines: string[] = [
-    "根据用户需求，从图表注册表中匹配到以下候选图表（按相关度排序）。",
-    "请选择最合适的一个，并**严格使用 `required_roles` 中列出的 key 构造 `field_mapping`**。",
+    say(
+      "The following candidate charts were matched from the chart registry for the user's request (sorted by relevance).",
+      "根据用户需求，从图表注册表中匹配到以下候选图表（按相关度排序）。",
+    ),
+    say(
+      "Pick the most suitable one and **build `field_mapping` strictly with the keys listed in `required_roles`**.",
+      "请选择最合适的一个，并**严格使用 `required_roles` 中列出的 key 构造 `field_mapping`**。",
+    ),
     "",
   ];
   candidates.forEach((candidate, index) => {
     const scoreHint = (candidate._score ?? 0) > 0 ? `  *(score=${candidate._score})*` : "";
-    lines.push(`### 选项 ${index + 1}：${candidate.name}  (\`${candidate.chart_id}\`)${scoreHint}`);
-    lines.push(`- **分类**：${candidate.category}`);
-    lines.push(`- **用途**：${candidate.desc}`);
-    lines.push(`- **required_roles → field_mapping keys**：\`${pyRepr(candidate.required_roles)}\``);
+    lines.push(say(
+      `### Option ${index + 1}: ${candidate.name}  (\`${candidate.chart_id}\`)${scoreHint}`,
+      `### 选项 ${index + 1}：${candidate.name}  (\`${candidate.chart_id}\`)${scoreHint}`,
+    ));
+    lines.push(`- **${say("Category", "分类")}**${say(": ", "：")}${candidate.category}`);
+    lines.push(`- **${say("Purpose", "用途")}**${say(": ", "：")}${candidate.desc}`);
+    lines.push(`- **required_roles → field_mapping keys**${say(": ", "：")}\`${pyRepr(candidate.required_roles)}\``);
     if (candidate.optional_roles.length > 0) {
-      lines.push(`- **optional_roles**：\`${pyRepr(candidate.optional_roles)}\``);
+      lines.push(`- **optional_roles**${say(": ", "：")}\`${pyRepr(candidate.optional_roles)}\``);
     }
-    lines.push(`- **数据格式**：${candidate.data_format}`);
+    lines.push(`- **${say("Data format", "数据格式")}**${say(": ", "：")}${candidate.data_format}`);
     if (candidate.constraints) {
-      lines.push(`- **约束**：${candidate.constraints}`);
+      lines.push(`- **${say("Constraints", "约束")}**${say(": ", "：")}${candidate.constraints}`);
     }
     lines.push("");
   });
   lines.push(
     "---",
-    "**下一步操作**：",
-    "1. 选定 `chart_id`",
-    "2. 用 `query_data` 确认 SQL 结果列名与 `required_roles` 一一对应",
-    "3. 调用 `generate_chart`，`field_mapping` 的 key 必须完全来自上面的 `required_roles`",
+    say("**Next steps**:", "**下一步操作**："),
+    say("1. Pick a `chart_id`", "1. 选定 `chart_id`"),
+    say(
+      "2. Use `query_data` to confirm the SQL result column names match `required_roles` one to one",
+      "2. 用 `query_data` 确认 SQL 结果列名与 `required_roles` 一一对应",
+    ),
+    say(
+      "3. Call `generate_chart`; the keys of `field_mapping` must come strictly from the `required_roles` above",
+      "3. 调用 `generate_chart`，`field_mapping` 的 key 必须完全来自上面的 `required_roles`",
+    ),
   );
   return lines.join("\n");
 }

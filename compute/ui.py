@@ -23,6 +23,7 @@ from infrastructure.paths import content_data_path
 from .dashboard import load_dashboard, render_widget, save_dashboard
 from .dashboard_html_export import build_export_html, export_filename
 from .host import CallChartStore, InlineJobContext, sql_path_authorization
+from .i18n import say
 from .rpc import INVALID_PARAMS, Cancelled, MethodContext, RpcError, int_param, str_param
 from .sources import SourceRegistry, open_failed, preview_tables
 from .workspace import import_workdir_files
@@ -45,11 +46,11 @@ def upload_prepare(ctx: MethodContext, params: dict) -> dict:
     kind = UPLOAD_KINDS.get(Path(file_path).suffix.lower())
     if kind is None:
         raise RpcError(
-            "仅支持 .xlsx / .xls / .csv / .pdf 文件", INVALID_PARAMS,
+            say("Only .xlsx / .xls / .csv / .pdf files are supported", "仅支持 .xlsx / .xls / .csv / .pdf 文件"), INVALID_PARAMS,
             data={"kind": "unsupported_format"},
         )
     if not Path(file_path).is_file():
-        raise RpcError(f"文件不存在：{file_path}", data={"kind": "file_not_found"})
+        raise RpcError(say(f"File does not exist: {file_path}", f"文件不存在：{file_path}"), data={"kind": "file_not_found"})
     descriptor = {"kind": kind, "file_path": file_path, "name": f"PDF {name}" if kind == "pdf" else name}
     if kind == "excel" and excel_requires_job(file_path):
         descriptor["db_path"] = _parse_workbook(ctx, descriptor)
@@ -154,7 +155,7 @@ def dashboard_refresh(ctx: MethodContext, registry: SourceRegistry, params: dict
             ctx.check()
             result = render_widget(source, charts, color_scheme, widget, authorization)
             (kpi_results if widget.get("chart_type") == "KPI_Card" else chart_results).append(result)
-            ctx.progress(round(index * 100 / len(widgets)), f"已刷新组件 {index}/{len(widgets)}")
+            ctx.progress(round(index * 100 / len(widgets)), say(f"Refreshed widget {index}/{len(widgets)}", f"已刷新组件 {index}/{len(widgets)}"))
     ctx.check()
     if not widget_id:
         dashboard["refreshed_at"] = datetime.datetime.now().isoformat()

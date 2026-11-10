@@ -80,6 +80,21 @@ class RpcProtocolTest(unittest.TestCase):
         resp, _ = self.w.until_response(1)
         self.assertEqual(resp["result"], {"text": "销售额 ≥ 100 万"})
 
+    def test_language_follows_each_request_and_is_hidden_from_methods(self):
+        # 线程池线程会复用：语言必须按请求重设，不能残留上一个请求的值。
+        self.w.request(1, "greet", {"_lang": "zh", "x": 1})
+        self.w.request(2, "greet", {"_lang": "en"})
+        self.w.request(3, "greet", {})
+        self.w.request(4, "greet", {"_lang": "fr"})
+        results = {}
+        for rid in (1, 2, 3, 4):
+            resp, _ = self.w.until_response(rid)
+            results[rid] = resp["result"]
+        self.assertEqual(results[1], {"text": "你好", "params": {"x": 1}})
+        self.assertEqual(results[2], {"text": "hello", "params": {}})
+        self.assertEqual(results[3], {"text": "hello", "params": {}})
+        self.assertEqual(results[4], {"text": "hello", "params": {}})
+
     def test_requests_run_concurrently_and_answer_out_of_order(self):
         self.w.request("slow", "sleep", {"seconds": 1.0})
         self.w.request("fast", "echo", {"x": 1})

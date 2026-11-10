@@ -4,6 +4,7 @@
  * 一方向是请求/响应（`id` 关联，可乱序），另一方向是通知（`conversation.event`）。读取只按 LF 切分，
  * 与服务端共用 framing.ts，因此两端的记录边界规则不会漂移。
  */
+import { say } from "../i18n.ts";
 import { JsonLinesDecoder, JsonlWriter, type LineSink } from "./framing.ts";
 import { INTERNAL_ERROR, RpcError, type RpcRecord } from "./errors.ts";
 
@@ -68,7 +69,7 @@ export class IpcClient {
 
   /** 发出请求并等它的响应；服务端按 `id` 关联，因此可以和别的请求并发。 */
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    if (this.#closed) throw new Error(`管道已关闭，无法发送 ${method}`);
+    if (this.#closed) throw new Error(say(`The pipe is closed; cannot send ${method}`, `管道已关闭，无法发送 ${method}`));
     const id = this.#nextId++;
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
     this.#pending.set(id, { resolve, reject });
@@ -86,7 +87,7 @@ export class IpcClient {
   nextNotification(): Promise<IpcNotification> {
     const queued = this.#queue.shift();
     if (queued !== undefined) return Promise.resolve(queued);
-    if (this.#closed) return Promise.reject(new Error("管道已关闭，不会再有通知"));
+    if (this.#closed) return Promise.reject(new Error(say("The pipe is closed; no more notifications will arrive", "管道已关闭，不会再有通知")));
     const { promise, resolve, reject } = Promise.withResolvers<IpcNotification>();
     this.#notificationResolvers.push({ resolve, reject });
     return promise;
@@ -101,7 +102,7 @@ export class IpcClient {
   /** 等已收到的通知满足 `predicate`。不轮询、不用计时器：每次通知到达后重新判定。 */
   async until(predicate: (notifications: IpcNotification[]) => boolean): Promise<void> {
     while (!predicate(this.notifications)) {
-      if (this.#closed) throw new Error(`管道已关闭；已收到 ${this.notifications.length} 条通知`);
+      if (this.#closed) throw new Error(say(`The pipe is closed; ${this.notifications.length} notification(s) received`, `管道已关闭；已收到 ${this.notifications.length} 条通知`));
       const { promise, resolve } = Promise.withResolvers<void>();
       this.#waiterPromises.push(resolve);
       await promise;
@@ -198,11 +199,11 @@ export class IpcClient {
   #closeInput(): void {
     if (this.#closed) return;
     this.#closed = true;
-    for (const pending of this.#pending.values()) pending.reject(new Error("管道已关闭"));
+    for (const pending of this.#pending.values()) pending.reject(new Error(say("The pipe is closed", "管道已关闭")));
     this.#pending.clear();
     for (const wake of this.#waiterPromises.splice(0)) wake();
     for (const resolve of this.#closeWaiters.splice(0)) resolve();
-    for (const waiter of this.#notificationResolvers.splice(0)) waiter.reject(new Error("管道已关闭"));
+    for (const waiter of this.#notificationResolvers.splice(0)) waiter.reject(new Error(say("The pipe is closed", "管道已关闭")));
     this.#input.removeAllListeners("data");
     this.#input.removeAllListeners("end");
     this.#input.removeAllListeners("error");

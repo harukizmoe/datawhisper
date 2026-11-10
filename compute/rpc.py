@@ -30,6 +30,8 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, TextIO
 
+from .i18n import set_language
+
 log = logging.getLogger(__name__)
 
 # JSON-RPC 错误码。-32000.. 为应用自定义区间。
@@ -175,6 +177,10 @@ class Server:
                 ctx._cancelled.set()
 
     def _run(self, handler: Method, ctx: MethodContext, params: dict) -> None:
+        # 界面语言随请求到达（见 compute/i18n.py）；线程池线程会被复用，所以每次都要重设，
+        # 并且不让方法看到这个保留参数。
+        params = dict(params)
+        set_language(params.pop("_lang", None))
         try:
             result = handler(ctx, params)
             response = {"jsonrpc": "2.0", "id": ctx.request_id, "result": result}

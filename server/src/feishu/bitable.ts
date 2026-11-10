@@ -8,6 +8,7 @@
  * 所有请求都带应用身份（tenant_access_token）；不接收也不回显用户 token。
  */
 
+import { say } from "../i18n.ts";
 import type { FeishuClient } from "./client.ts";
 
 export class FeishuBitableError extends Error {
@@ -50,15 +51,26 @@ async function call(
   if (response.status < 200 || response.status >= 300 || body === undefined) {
     const code = typeof body?.code === "number" ? body.code : undefined;
     const message = typeof body?.msg === "string" ? body.msg : "";
-    const hint =
+    const hint = say(
+      "Request the “View, comment, edit and manage Bitable” permission in the Feishu Open Platform and publish the app; " +
+        "if it still fails, also confirm the app can access the target folder.",
       "请在飞书开放平台申请“查看、评论、编辑和管理多维表格”权限，并发布应用；" +
-      "若仍失败，也请确认应用可访问目标文件夹。";
-    const suffix = code === undefined ? "" : `（错误码 ${code}）`;
-    throw new FeishuBitableError(`飞书拒绝${operation}${suffix}：${message === "" ? hint : message}`);
+        "若仍失败，也请确认应用可访问目标文件夹。",
+    );
+    const suffix = code === undefined ? "" : say(` (error code ${code})`, `（错误码 ${code}）`);
+    throw new FeishuBitableError(
+      say(
+        `Feishu rejected ${operation}${suffix}: ${message === "" ? hint : message}`,
+        `飞书拒绝${operation}${suffix}：${message === "" ? hint : message}`,
+      ),
+    );
   }
   if (typeof body.code === "number" && body.code !== 0) {
     throw new FeishuBitableError(
-      `飞书拒绝${operation}（错误码 ${body.code}）：${typeof body.msg === "string" && body.msg !== "" ? body.msg : "请检查应用权限与目标文件夹"}`,
+      say(
+        `Feishu rejected ${operation} (error code ${body.code}): ${typeof body.msg === "string" && body.msg !== "" ? body.msg : "check the app permissions and the target folder"}`,
+        `飞书拒绝${operation}（错误码 ${body.code}）：${typeof body.msg === "string" && body.msg !== "" ? body.msg : "请检查应用权限与目标文件夹"}`,
+      ),
     );
   }
   const data = body.data;
@@ -73,18 +85,18 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
 
 /** `_clean_name`：名称必须是非空文本且不超过长度上限。 */
 function cleanName(value: unknown, label: string, maximum = 100): string {
-  if (typeof value !== "string") throw new FeishuBitableError(`${label}必须是文本`);
+  if (typeof value !== "string") throw new FeishuBitableError(say(`The ${label} must be text`, `${label}必须是文本`));
   const result = value.trim();
-  if (result === "") throw new FeishuBitableError(`请填写${label}`);
-  if (result.length > maximum) throw new FeishuBitableError(`${label}不能超过 ${maximum} 个字符`);
+  if (result === "") throw new FeishuBitableError(say(`Enter the ${label}`, `请填写${label}`));
+  if (result.length > maximum) throw new FeishuBitableError(say(`The ${label} cannot exceed ${maximum} characters`, `${label}不能超过 ${maximum} 个字符`));
   return result;
 }
 
 /** `_token`：app_token / table_id / record_id 这类不透明标识的校验。 */
 function token(value: unknown, label: string, maximum = 300): string {
   const result = value === undefined || value === null ? "" : String(value).trim();
-  if (result === "") throw new FeishuBitableError(`请提供${label}`);
-  if (result.length > maximum || /\s/.test(result)) throw new FeishuBitableError(`${label}格式不正确`);
+  if (result === "") throw new FeishuBitableError(say(`Provide the ${label}`, `请提供${label}`));
+  if (result.length > maximum || /\s/.test(result)) throw new FeishuBitableError(say(`The ${label} has an invalid format`, `${label}格式不正确`));
   return result;
 }
 
@@ -98,7 +110,7 @@ export function parseBitableReference(bitable: unknown, tableId: unknown = ""): 
   appToken: string;
   tableId: string;
 } {
-  const raw = token(bitable, "多维表格链接或 app_token");
+  const raw = token(bitable, say("Bitable link or app_token", "多维表格链接或 app_token"));
   let suppliedTable = typeof tableId === "string" ? tableId.trim() : "";
   let appToken = raw;
   if (raw.includes("://")) {
@@ -106,16 +118,16 @@ export function parseBitableReference(bitable: unknown, tableId: unknown = ""): 
     try {
       parsed = new URL(raw);
     } catch {
-      throw new FeishuBitableError("无法从链接中识别多维表格 app_token");
+      throw new FeishuBitableError(say("Cannot identify the Bitable app_token from the link", "无法从链接中识别多维表格 app_token"));
     }
     const host = parsed.hostname;
     const allowed =
       host === "feishu.cn" || host.endsWith(".feishu.cn") || host === "larksuite.com" || host.endsWith(".larksuite.com");
-    if (!allowed) throw new FeishuBitableError("只支持飞书多维表格链接");
+    if (!allowed) throw new FeishuBitableError(say("Only Feishu Bitable links are supported", "只支持飞书多维表格链接"));
     const parts = parsed.pathname.split("/").filter((part) => part !== "");
     const index = parts.indexOf("base");
     const candidate = index === -1 ? undefined : parts[index + 1];
-    if (candidate === undefined) throw new FeishuBitableError("无法从链接中识别多维表格 app_token");
+    if (candidate === undefined) throw new FeishuBitableError(say("Cannot identify the Bitable app_token from the link", "无法从链接中识别多维表格 app_token"));
     appToken = candidate;
     if (suppliedTable === "") suppliedTable = (parsed.searchParams.get("table") ?? "").trim();
   }
@@ -134,13 +146,13 @@ function normalizeFields(fields: Iterable<unknown>): { field_name: string; type:
   const normalized: { field_name: string; type: number }[] = [];
   const seen: Record<string, true> = {};
   for (const raw of fields) {
-    const name = cleanName(raw, "字段名", 100);
-    if (seen[name] === true) throw new FeishuBitableError(`字段名重复：${name}`);
+    const name = cleanName(raw, say("field name", "字段名"), 100);
+    if (seen[name] === true) throw new FeishuBitableError(say(`Duplicate field name: ${name}`, `字段名重复：${name}`));
     seen[name] = true;
     normalized.push({ field_name: name, type: 1 });
   }
-  if (normalized.length === 0) throw new FeishuBitableError("至少需要一个字段");
-  if (normalized.length > MAX_FIELDS) throw new FeishuBitableError(`一次最多创建 ${MAX_FIELDS} 个字段`);
+  if (normalized.length === 0) throw new FeishuBitableError(say("At least one field is required", "至少需要一个字段"));
+  if (normalized.length > MAX_FIELDS) throw new FeishuBitableError(say(`At most ${MAX_FIELDS} fields can be created at once`, `一次最多创建 ${MAX_FIELDS} 个字段`));
   return normalized;
 }
 
@@ -153,19 +165,24 @@ function normalizeRecords(records: Iterable<unknown>, fieldNames: Readonly<Recor
   const normalized: { fields: Record<string, string> }[] = [];
   for (const raw of records) {
     const record = asObject(raw);
-    if (record === undefined) throw new FeishuBitableError("每条记录必须是字段和值组成的对象");
+    if (record === undefined) throw new FeishuBitableError(say("Each record must be an object of fields and values", "每条记录必须是字段和值组成的对象"));
     const fields: Record<string, string> = {};
     for (const [key, value] of Object.entries(record)) {
       const name = key.trim();
       if (name === "" || fieldNames[name] !== true) {
-        throw new FeishuBitableError(`记录包含未定义字段：${name === "" ? "（空）" : name}`);
+        throw new FeishuBitableError(
+          say(
+            `Record contains an undefined field: ${name === "" ? "(empty)" : name}`,
+            `记录包含未定义字段：${name === "" ? "（空）" : name}`,
+          ),
+        );
       }
       if (value === null || value === undefined) continue;
       fields[name] = typeof value === "object" ? JSON.stringify(value) : pyStr(value);
     }
     if (Object.keys(fields).length > 0) normalized.push({ fields });
   }
-  if (normalized.length > MAX_RECORDS) throw new FeishuBitableError(`一次最多写入 ${MAX_RECORDS} 条记录`);
+  if (normalized.length > MAX_RECORDS) throw new FeishuBitableError(say(`At most ${MAX_RECORDS} records can be written at once`, `一次最多写入 ${MAX_RECORDS} 条记录`));
   return normalized;
 }
 
@@ -180,18 +197,18 @@ function writeRecords(records: Iterable<unknown>): { fields: Record<string, unkn
   for (const raw of records) {
     const record = asObject(raw);
     if (record === undefined || Object.keys(record).length === 0) {
-      throw new FeishuBitableError("每条记录必须是非空字段对象");
+      throw new FeishuBitableError(say("Each record must be a non-empty object of fields", "每条记录必须是非空字段对象"));
     }
     const fields: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
       const name = key.trim();
       if (name !== "") fields[name] = value;
     }
-    if (Object.keys(fields).length === 0) throw new FeishuBitableError("每条记录至少需要一个有效字段");
+    if (Object.keys(fields).length === 0) throw new FeishuBitableError(say("Each record needs at least one valid field", "每条记录至少需要一个有效字段"));
     normalized.push({ fields });
   }
-  if (normalized.length === 0) throw new FeishuBitableError("至少需要一条记录");
-  if (normalized.length > MAX_RECORDS) throw new FeishuBitableError(`一次最多写入 ${MAX_RECORDS} 条记录`);
+  if (normalized.length === 0) throw new FeishuBitableError(say("At least one record is required", "至少需要一条记录"));
+  if (normalized.length > MAX_RECORDS) throw new FeishuBitableError(say(`At most ${MAX_RECORDS} records can be written at once`, `一次最多写入 ${MAX_RECORDS} 条记录`));
   return normalized;
 }
 
@@ -207,7 +224,7 @@ export async function listBitableTables(
   while (tables.length < MAX_RECORDS) {
     const params: Record<string, string> = { page_size: String(PAGE_SIZE) };
     if (pageToken !== "") params.page_token = pageToken;
-    const data = await call(client, "GET", `/bitable/v1/apps/${appToken}/tables`, "读取飞书多维表格数据表", {
+    const data = await call(client, "GET", `/bitable/v1/apps/${appToken}/tables`, say("reading Feishu Bitable tables", "读取飞书多维表格数据表"), {
       params,
     });
     const items = Array.isArray(data.items) ? data.items : [];
@@ -218,7 +235,7 @@ export async function listBitableTables(
       if (tableId === "") continue;
       tables.push({
         table_id: tableId,
-        name: typeof table.name === "string" && table.name !== "" ? table.name : "未命名数据表",
+        name: typeof table.name === "string" && table.name !== "" ? table.name : say("Untitled table", "未命名数据表"),
         url: bitableUrl(appToken, tableId),
       });
     }
@@ -236,7 +253,7 @@ export async function appendBitableRecords(
   input: { bitable: unknown; tableId: unknown; records: Iterable<unknown> },
 ): Promise<{ app_token: string; table_id: string; url: string; record_count: number; record_ids: string[] }> {
   const { appToken, tableId } = parseBitableReference(input.bitable, input.tableId);
-  if (tableId === "") throw new FeishuBitableError("请提供 table_id");
+  if (tableId === "") throw new FeishuBitableError(say("Provide table_id", "请提供 table_id"));
   const normalized = writeRecords(input.records);
   const recordIds: string[] = [];
   for (let start = 0; start < normalized.length; start += WRITE_BATCH_SIZE) {
@@ -244,7 +261,7 @@ export async function appendBitableRecords(
       client,
       "POST",
       `/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_create`,
-      "写入飞书多维表格记录",
+      say("writing Feishu Bitable records", "写入飞书多维表格记录"),
       { body: { records: normalized.slice(start, start + WRITE_BATCH_SIZE) } },
     );
     const created = Array.isArray(data.records) ? data.records : [];
@@ -275,23 +292,23 @@ export async function updateBitableRecord(
   updated_fields: string[];
 }> {
   const { appToken, tableId } = parseBitableReference(input.bitable, input.tableId);
-  if (tableId === "") throw new FeishuBitableError("请提供 table_id");
+  if (tableId === "") throw new FeishuBitableError(say("Provide table_id", "请提供 table_id"));
   const recordId = token(input.recordId, "record_id");
   const fields = asObject(input.fields);
   if (fields === undefined || Object.keys(fields).length === 0) {
-    throw new FeishuBitableError("fields 必须是非空字段对象");
+    throw new FeishuBitableError(say("fields must be a non-empty object of fields", "fields 必须是非空字段对象"));
   }
   const cleanFields: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     const name = key.trim();
     if (name !== "") cleanFields[name] = value;
   }
-  if (Object.keys(cleanFields).length === 0) throw new FeishuBitableError("fields 至少需要一个有效字段");
+  if (Object.keys(cleanFields).length === 0) throw new FeishuBitableError(say("fields needs at least one valid field", "fields 至少需要一个有效字段"));
   await call(
     client,
     "PUT",
     `/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`,
-    "更新飞书多维表格记录",
+    say("updating a Feishu Bitable record", "更新飞书多维表格记录"),
     { body: { fields: cleanFields } },
   );
   return {
@@ -321,23 +338,23 @@ export async function createBitable(
   record_count: number;
   url: string;
 }> {
-  const baseName = cleanName(input.name, "多维表格名称");
-  const tableName = cleanName(input.tableName, "数据表名称");
+  const baseName = cleanName(input.name, say("Bitable name", "多维表格名称"));
+  const tableName = cleanName(input.tableName, say("table name", "数据表名称"));
   const normalizedFields = normalizeFields(input.fields);
   const fieldNames: Record<string, true> = {};
   for (const field of normalizedFields) fieldNames[field.field_name] = true;
   const normalizedRecords = normalizeRecords(input.records ?? [], fieldNames);
   const folder = typeof input.folderToken === "string" ? input.folderToken.trim() : "";
   const targetFolder = folder !== "" ? folder : await rootFolderToken(client);
-  const appData = await call(client, "POST", "/bitable/v1/apps", "创建飞书多维表格", {
+  const appData = await call(client, "POST", "/bitable/v1/apps", say("creating a Feishu Bitable", "创建飞书多维表格"), {
     body: { name: baseName, folder_token: targetFolder },
   });
   const app = asObject(appData.app) ?? {};
   const appToken = typeof app.app_token === "string" ? app.app_token.trim() : "";
   if (appToken === "") {
-    throw new FeishuBitableError("飞书已返回成功但未提供多维表格标识，请稍后在云空间确认");
+    throw new FeishuBitableError(say("Feishu reported success but did not return the Bitable identifier; check Drive later", "飞书已返回成功但未提供多维表格标识，请稍后在云空间确认"));
   }
-  const tableData = await call(client, "POST", `/bitable/v1/apps/${appToken}/tables`, "创建飞书数据表", {
+  const tableData = await call(client, "POST", `/bitable/v1/apps/${appToken}/tables`, say("creating a Feishu table", "创建飞书数据表"), {
     body: { table: { name: tableName, fields: normalizedFields } },
   });
   // 当前 REST API 返回 `data.table_id`；部分 SDK 版本序列化成 `data.table.table_id`。
@@ -349,14 +366,14 @@ export async function createBitable(
         ? table.table_id.trim()
         : "") || "";
   if (tableId === "") {
-    throw new FeishuBitableError("多维表格已创建，但未返回数据表标识；请在飞书中检查表结构");
+    throw new FeishuBitableError(say("The Bitable was created but no table identifier was returned; check the table structure in Feishu", "多维表格已创建，但未返回数据表标识；请在飞书中检查表结构"));
   }
   for (let start = 0; start < normalizedRecords.length; start += WRITE_BATCH_SIZE) {
     await call(
       client,
       "POST",
       `/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_create`,
-      "写入飞书多维表格记录",
+      say("writing Feishu Bitable records", "写入飞书多维表格记录"),
       { body: { records: normalizedRecords.slice(start, start + WRITE_BATCH_SIZE) } },
     );
   }
@@ -372,11 +389,11 @@ export async function createBitable(
 
 /** 旧 `_root_folder_token`：Drive Explorer v2 的根文件夹元数据。 */
 async function rootFolderToken(client: FeishuClient): Promise<string> {
-  const data = await call(client, "GET", "/drive/explorer/v2/root_folder/meta", "读取飞书默认保存文件夹");
+  const data = await call(client, "GET", "/drive/explorer/v2/root_folder/meta", say("reading the Feishu default save folder", "读取飞书默认保存文件夹"));
   const token = typeof data.token === "string" ? data.token.trim() : "";
   if (token === "") {
     throw new FeishuBitableError(
-      "无法读取飞书根文件夹。请申请云空间读取权限，或在创建请求中提供可写文件夹 Token。",
+      say("Cannot read the Feishu root folder. Request Drive read permission, or provide a writable folder token in the create request.", "无法读取飞书根文件夹。请申请云空间读取权限，或在创建请求中提供可写文件夹 Token。"),
     );
   }
   return token;

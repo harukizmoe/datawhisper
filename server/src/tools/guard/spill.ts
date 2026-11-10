@@ -13,6 +13,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { say } from "../../i18n.ts";
 import {
   createDirectoryArtifactSource,
   type ToolResultArtifactRef,
@@ -145,7 +146,7 @@ export function createToolResultStore(options: {
       const artifact = {
         type: "tool_result" as const,
         artifact_id: artifactId,
-        name: `${input.tool} 完整结果`,
+        name: say(`${input.tool} full result`, `${input.tool} 完整结果`),
         uri: `artifact://tool-result/${artifactId}`,
         url: `/api/session/${sessionId}/tool-results/${artifactId}`,
         size_bytes: record.size_bytes,

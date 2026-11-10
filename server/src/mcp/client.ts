@@ -19,6 +19,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { basename, extname } from "node:path";
 import { type McpServerConfig, STDIO_ALLOWED_COMMANDS } from "./config.ts";
 import { formatMcpError, validateMcpArgs } from "./tools.ts";
+import { say } from "../i18n.ts";
+
+/** SSE 连接失败的统一前缀；`detailEn`/`detailZh` 是各语言的原因。 */
+function sseFailure(detailEn: string, detailZh: string): string {
+  return say(`SSE connection failed: ${detailEn}`, `SSE 连接失败: ${detailZh}`);
+}
 
 export type McpClientStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -137,7 +143,7 @@ class StdioTransport implements McpTransport {
     const stem = extname(this.config.command) === ""
       ? basename(this.config.command)
       : basename(this.config.command, extname(this.config.command));
-    if (!allowed.has(stem)) throw new Error(`命令 '${this.config.command}' 不在白名单中`);
+    if (!allowed.has(stem)) throw new Error(say(`Command '${this.config.command}' is not on the allowlist`, `命令 '${this.config.command}' 不在白名单中`));
     const argv = stdioArgv(this.config.command, this.config.args);
     const proc = spawn(argv[0]!, argv.slice(1), {
       // 旧实现：os.environ 打底、配置覆盖。
@@ -157,8 +163,12 @@ class StdioTransport implements McpTransport {
     });
     proc.on("error", (error: Error) => {
       this.spawnFailure = new Error(
-        `无法启动命令 '${this.config.command}': ${error.message}. `
-        + "请确认已安装对应运行时（如 Node.js / Python），或在配置中填写可执行文件的完整路径。",
+        say(
+          `Failed to start command '${this.config.command}': ${error.message}. `
+            + "Make sure the required runtime (e.g. Node.js / Python) is installed, or set the full path of the executable in the config.",
+          `无法启动命令 '${this.config.command}': ${error.message}. `
+            + "请确认已安装对应运行时（如 Node.js / Python），或在配置中填写可执行文件的完整路径。",
+        ),
       );
       this.failAll(this.spawnFailure);
     });
@@ -186,7 +196,7 @@ class StdioTransport implements McpTransport {
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
     const timer = setTimeout(() => {
       this.pending.delete(id);
-      reject(new Error(`MCP 请求超时（${timeoutMs}ms）: ${method}`));
+      reject(new Error(say(`MCP request timed out (${timeoutMs}ms): ${method}`, `MCP 请求超时（${timeoutMs}ms）: ${method}`)));
     }, timeoutMs);
     timer.unref?.();
     this.pending.set(id, { resolve, reject, timer });
@@ -299,9 +309,9 @@ class SseTransport implements McpTransport {
         signal: this.controller.signal,
       });
     } catch (error) {
-      throw new Error(`SSE 连接失败: ${errorText(error)}`);
+      throw new Error(sseFailure(errorText(error), errorText(error)));
     }
-    if (!response.ok) throw new Error(`SSE 连接失败: HTTP ${response.status}`);
+    if (!response.ok) throw new Error(sseFailure(`HTTP ${response.status}`, `HTTP ${response.status}`));
     this.endpoint = new URL(await this.readEndpoint(response), this.config.url).toString();
     await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
@@ -312,7 +322,7 @@ class SseTransport implements McpTransport {
   }
 
   request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    if (this.closed || this.endpoint === "") return Promise.reject(new Error("SSE 连接失败: endpoint 未就绪"));
+    if (this.closed || this.endpoint === "") return Promise.reject(new Error(sseFailure("endpoint not ready", "endpoint 未就绪")));
     const id = ++this.nextId;
     return this.post({ jsonrpc: "2.0", id, method, params }, timeoutMs).then((data) => {
       if (typeof data === "object" && data !== null && "error" in data) {
@@ -323,7 +333,7 @@ class SseTransport implements McpTransport {
   }
 
   async notify(method: string, params: unknown): Promise<void> {
-    if (this.closed || this.endpoint === "") throw new Error("SSE 连接失败: endpoint 未就绪");
+    if (this.closed || this.endpoint === "") throw new Error(sseFailure("endpoint not ready", "endpoint 未就绪"));
     await this.post({ jsonrpc: "2.0", method, params }, this.options.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs);
   }
 
@@ -337,7 +347,7 @@ class SseTransport implements McpTransport {
     this.closed = true;
     this.controller?.abort();
     this.controller = undefined;
-    for (const handler of this.closeHandlers) handler(new Error("MCP SSE 连接已关闭"));
+    for (const handler of this.closeHandlers) handler(new Error(say("MCP SSE connection closed", "MCP SSE 连接已关闭")));
   }
 
   private async post(body: unknown, timeoutMs: number): Promise<unknown> {
@@ -356,7 +366,7 @@ class SseTransport implements McpTransport {
 
   /** 读事件流直到 `endpoint`；找到后让剩余事件在后台排空。 */
   private async readEndpoint(response: Response): Promise<string> {
-    if (response.body === null) throw new Error("SSE 连接失败: 响应没有 body");
+    if (response.body === null) throw new Error(sseFailure("response has no body", "响应没有 body"));
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -389,9 +399,9 @@ class SseTransport implements McpTransport {
         }
       }
     } catch (error) {
-      throw new Error(`SSE 连接失败: ${errorText(error)}`);
+      throw new Error(sseFailure(errorText(error), errorText(error)));
     }
-    throw new Error("SSE 连接失败: 未收到 endpoint 事件");
+    throw new Error(sseFailure("no endpoint event received", "未收到 endpoint 事件"));
   }
 }
 
@@ -436,7 +446,7 @@ function renderCallResult(result: unknown): { text: string; failed: boolean } {
       ? [item.text]
       : []);
   const isError = "isError" in result && result.isError === true;
-  if (isError) return { text: texts.join(" ") || "工具返回错误", failed: true };
+  if (isError) return { text: texts.join(" ") || say("Tool returned an error", "工具返回错误"), failed: true };
   if (texts.length > 0) return { text: texts.join("\n"), failed: false };
   return { text: JSON.stringify(result), failed: false };
 }
@@ -493,11 +503,11 @@ export class McpServerClient {
 
   async callTool(rawName: string, args: Record<string, unknown>): Promise<McpCallOutcome> {
     const fail = (reason: string): McpCallOutcome => ({ text: formatMcpError(this.serverId, rawName, reason), failed: true });
-    if (!(await this.ensureConnected())) return fail(`服务器未连接且重连失败: ${this.lastError}`);
+    if (!(await this.ensureConnected())) return fail(say(`Server is not connected and reconnecting failed: ${this.lastError}`, `服务器未连接且重连失败: ${this.lastError}`));
 
     const tool = this.toolsCache.find((item) => item.name === rawName);
     const validation = validateMcpArgs(tool?.inputSchema ?? {}, args);
-    if (!validation.ok) return fail(`参数校验失败: ${validation.error}`);
+    if (!validation.ok) return fail(say(`Argument validation failed: ${validation.error}`, `参数校验失败: ${validation.error}`));
 
     this.activeCalls += 1;
     try {
@@ -509,13 +519,13 @@ export class McpServerClient {
         // JSON-RPC error 是服务器对这次调用的回答，重试只会重复副作用。
         if (error instanceof McpRpcError) return fail(error.message);
         this.dropTransport(error);
-        if (!(await this.reconnect())) return fail(`调用时连接断开且重连失败: ${this.lastError}`);
+        if (!(await this.reconnect())) return fail(say(`Connection dropped during the call and reconnecting failed: ${this.lastError}`, `调用时连接断开且重连失败: ${this.lastError}`));
         try {
           const retried = await this.transport!.request("tools/call", { name: rawName, arguments: args }, this.options.callTimeoutMs ?? DEFAULTS.callTimeoutMs);
           const rendered = renderCallResult(retried);
           return rendered.failed ? { text: formatMcpError(this.serverId, rawName, rendered.text), failed: true } : rendered;
         } catch (retryError) {
-          return fail(`重连后重试仍失败: ${errorText(retryError)}`);
+          return fail(say(`Retry after reconnect still failed: ${errorText(retryError)}`, `重连后重试仍失败: ${errorText(retryError)}`));
         }
       }
     } finally {
@@ -539,7 +549,7 @@ export class McpServerClient {
     this.lastError = "";
     const transport = this.buildTransport();
     try {
-      await withTimeout(transport.connect(), this.options.connectTimeoutMs ?? DEFAULTS.connectTimeoutMs, `连接 ${this.serverId} 超时`);
+      await withTimeout(transport.connect(), this.options.connectTimeoutMs ?? DEFAULTS.connectTimeoutMs, say(`Connecting to ${this.serverId} timed out`, `连接 ${this.serverId} 超时`));
       const result = await transport.request("tools/list", {}, this.options.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs);
       this.toolsCache = parseTools(result);
       this.transport = transport;
@@ -564,7 +574,7 @@ export class McpServerClient {
     if (this.config.transport === "stdio") return new StdioTransport(this.config, this.options);
     if (this.config.transport === "sse") return new SseTransport(this.config, this.options);
     // 类型上不可达，保留旧实现的文案，方便以后加传输时忘了改这里。
-    throw new Error(`未知 transport: ${String(this.config.transport)}`);
+    throw new Error(say(`Unknown transport: ${String(this.config.transport)}`, `未知 transport: ${String(this.config.transport)}`));
   }
 
   private reconnect(): Promise<boolean> {

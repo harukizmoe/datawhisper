@@ -23,6 +23,7 @@ import skillCatalogRules from './prompt-text/skill-catalog-rules.txt' with { typ
 import teamsRules from './prompt-text/teams-rules.txt' with { type: 'text' }
 import unnamedColumnRules from './prompt-text/unnamed-column-rules.txt' with { type: 'text' }
 import workspaceRules from './prompt-text/workspace-rules.txt' with { type: 'text' }
+import { say } from '../i18n.ts'
 
 // ── Static blocks ───────────────────────────────────────────────────────────
 
@@ -307,12 +308,17 @@ export function buildTempPromptSection(tempPrompt: string | null | undefined): s
   // Python len()/slicing count code points, not UTF-16 units.
   const codePoints = Array.from(text)
   if (codePoints.length > TEMP_PROMPT_MAX_CHARS) {
-    text = codePoints.slice(0, TEMP_PROMPT_MAX_CHARS).join('') + '\n…[临时指令已截断]'
+    text = codePoints.slice(0, TEMP_PROMPT_MAX_CHARS).join('') + say('\n…[temporary instruction truncated]', '\n…[临时指令已截断]')
   }
   return (
-    '\n\n## 本次会话临时指令（用户为当前对话设定）\n' +
-    '以下指令由用户为这次对话临时设定，优先级高于一般默认行为；' +
-    '但绝对不可违反上文的「ABSOLUTE RULE — NO FABRICATION」与输出格式规则。\n' +
+    say(
+      '\n\n## Temporary instruction for this session (set by the user for the current conversation)\n' +
+        'The following instruction was set temporarily by the user for this conversation and takes priority over ordinary default behavior; ' +
+        'but it must never violate the "ABSOLUTE RULE — NO FABRICATION" above or the output format rules.\n',
+      '\n\n## 本次会话临时指令（用户为当前对话设定）\n' +
+        '以下指令由用户为这次对话临时设定，优先级高于一般默认行为；' +
+        '但绝对不可违反上文的「ABSOLUTE RULE — NO FABRICATION」与输出格式规则。\n',
+    ) +
     text
   )
 }

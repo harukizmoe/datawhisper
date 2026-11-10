@@ -13,6 +13,7 @@
  * 环境变量沿用旧实现的语义（`BAA_FEISHU_*`），只用于本机开发/自动化，配置文件优先。
  */
 
+import { say } from "../i18n.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CredentialStore } from "@earendil-works/pi-ai";
@@ -59,9 +60,9 @@ export const EVENT_TOKEN_ID = "feishu:event-verification-token";
 const RECEIVE_ID_TYPES: Readonly<Record<string, true>> = { chat_id: true, open_id: true };
 
 export function validateAppId(value: unknown): string {
-  if (typeof value !== "string") throw new FeishuBotError("App ID 必须是文本");
+  if (typeof value !== "string") throw new FeishuBotError(say("App ID must be text", "App ID 必须是文本"));
   const appId = value.trim();
-  if (appId === "" || appId.length > 128 || /\s/.test(appId)) throw new FeishuBotError("请填写有效的飞书 App ID");
+  if (appId === "" || appId.length > 128 || /\s/.test(appId)) throw new FeishuBotError(say("Enter a valid Feishu App ID", "请填写有效的飞书 App ID"));
   return appId;
 }
 
@@ -70,12 +71,12 @@ export function validateReceiveTarget(
   receiveId: unknown,
 ): { receiveIdType: FeishuReceiveIdType; receiveId: string } {
   if (typeof receiveIdType !== "string" || RECEIVE_ID_TYPES[receiveIdType] !== true) {
-    throw new FeishuBotError("接收对象类型仅支持群聊 chat_id 或用户 open_id");
+    throw new FeishuBotError(say("Receive ID type only supports chat_id (group chat) or open_id (user)", "接收对象类型仅支持群聊 chat_id 或用户 open_id"));
   }
-  if (typeof receiveId !== "string") throw new FeishuBotError("接收对象 ID 必须是文本");
+  if (typeof receiveId !== "string") throw new FeishuBotError(say("Receive ID must be text", "接收对象 ID 必须是文本"));
   const value = receiveId.trim();
   if (value === "" || value.length > 256 || /\s/.test(value)) {
-    throw new FeishuBotError("请填写有效的目标群 chat_id 或用户 open_id");
+    throw new FeishuBotError(say("Enter a valid target chat_id or user open_id", "请填写有效的目标群 chat_id 或用户 open_id"));
   }
   return { receiveIdType: receiveIdType === "open_id" ? "open_id" : "chat_id", receiveId: value };
 }
@@ -142,18 +143,18 @@ export class FeishuConfigStore {
     try {
       appId = validateAppId(this.config.appId);
     } catch {
-      throw new FeishuBotError("请先保存飞书 App ID");
+      throw new FeishuBotError(say("Save the Feishu App ID first", "请先保存飞书 App ID"));
     }
     const envSecret = (this.env.BAA_FEISHU_APP_SECRET ?? "").trim();
     if (envSecret !== "") return { appId, appSecret: envSecret };
-    if (this.config.appSecretRef === "") throw new FeishuBotError("请先保存飞书 App Secret");
+    if (this.config.appSecretRef === "") throw new FeishuBotError(say("Save the Feishu App Secret first", "请先保存飞书 App Secret"));
     try {
       const credential = await this.credentials.read(this.config.appSecretRef);
       const secret = credential?.type === "api_key" ? (credential.key ?? "") : "";
-      if (secret === "") throw new Error("凭据为空");
+      if (secret === "") throw new Error(say("The credential is empty", "凭据为空"));
       return { appId, appSecret: secret };
     } catch (error) {
-      throw new FeishuBotError(`无法读取飞书 App Secret：${error instanceof Error ? error.message : String(error)}`);
+      throw new FeishuBotError(say(`Cannot read the Feishu App Secret: ${error instanceof Error ? error.message : String(error)}`, `无法读取飞书 App Secret：${error instanceof Error ? error.message : String(error)}`));
     }
   }
 
@@ -162,15 +163,15 @@ export class FeishuConfigStore {
     const envToken = (this.env.BAA_FEISHU_EVENT_VERIFICATION_TOKEN ?? "").trim();
     if (envToken !== "") return envToken;
     if (this.config.eventVerificationTokenRef === "") {
-      throw new FeishuBotError("请先在飞书机器人设置中保存事件校验 Token");
+      throw new FeishuBotError(say("Save the event verification token in the Feishu bot settings first", "请先在飞书机器人设置中保存事件校验 Token"));
     }
     try {
       const credential = await this.credentials.read(this.config.eventVerificationTokenRef);
       const token = credential?.type === "api_key" ? (credential.key ?? "") : "";
-      if (token === "") throw new Error("凭据为空");
+      if (token === "") throw new Error(say("The credential is empty", "凭据为空"));
       return token;
     } catch (error) {
-      throw new FeishuBotError(`无法读取飞书事件校验 Token：${error instanceof Error ? error.message : String(error)}`);
+      throw new FeishuBotError(say(`Cannot read the Feishu event verification token: ${error instanceof Error ? error.message : String(error)}`, `无法读取飞书事件校验 Token：${error instanceof Error ? error.message : String(error)}`));
     }
   }
 

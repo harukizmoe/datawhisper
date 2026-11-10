@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { McpCatalogEntry } from "../tools/app/mcp.ts";
 import type { McpServerClient, McpToolDef } from "./client.ts";
+import { say } from "../i18n.ts";
 
 /** 旧 `mcp_tool_to_openai_schema` 产出的 OpenAPI function 片段（目录哈希也基于它）。 */
 export type McpOpenAiSchema = {
@@ -99,7 +100,7 @@ export function validateMcpArgs(
 ): { ok: true } | { ok: false; error: string } {
   const required = Array.isArray(inputSchema.required) ? inputSchema.required : [];
   for (const field of required) {
-    if (!(String(field) in args)) return { ok: false, error: `缺少必填参数: ${String(field)}` };
+    if (!(String(field) in args)) return { ok: false, error: say(`Missing required parameter: ${String(field)}`, `缺少必填参数: ${String(field)}`) };
   }
   // JSON 边界断言：下面是逐字段 typeof 校验，不是盲读。
   const properties = typeof inputSchema.properties === "object" && inputSchema.properties !== null && !Array.isArray(inputSchema.properties)
@@ -109,7 +110,7 @@ export function validateMcpArgs(
     const property = key in properties ? properties[key] : undefined;
     if (typeof property !== "object" || property === null || !("type" in property) || typeof property.type !== "string") continue;
     const expected = property.type;
-    if (typeMismatch(expected, value)) return { ok: false, error: `参数 '${key}' 类型错误: 期望 ${expected}` };
+    if (typeMismatch(expected, value)) return { ok: false, error: say(`Parameter '${key}' has the wrong type: expected ${expected}`, `参数 '${key}' 类型错误: 期望 ${expected}`) };
   }
   return { ok: true };
 }

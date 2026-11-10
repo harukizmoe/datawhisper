@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from compute.i18n import set_language
 from compute.methods import METHODS, _sources
 from compute.rpc import RpcError
 from compute.sources import friendly_conn_error, restore_source
@@ -34,7 +35,12 @@ class SourceTestMethod(unittest.TestCase):
         with self.assertRaises(RpcError) as caught:
             METHODS["source.test"](None, {"descriptor": {"kind": "sql", "connection_string": "sqlite:////nonexistent/dir/x.db"}})
         self.assertEqual(caught.exception.data["kind"], "open_failed")
-        self.assertIn("无法打开数据库文件", str(caught.exception))
+        self.assertIn("Cannot open the database file", str(caught.exception))
+        set_language("zh")
+        self.addCleanup(set_language, "en")
+        with self.assertRaises(RpcError) as zh:
+            METHODS["source.test"](None, {"descriptor": {"kind": "sql", "connection_string": "sqlite:////nonexistent/dir/x.db"}})
+        self.assertIn("无法打开数据库文件", str(zh.exception))
 
 
 class RestoreSelection(unittest.TestCase):
@@ -55,6 +61,21 @@ class RestoreSelection(unittest.TestCase):
 
 
 class DatabaseErrorWording(unittest.TestCase):
+    def setUp(self) -> None:
+        set_language("zh")
+        self.addCleanup(set_language, "en")
+
+    def test_english_names_what_to_check(self) -> None:
+        set_language("en")
+        cases = {
+            'FATAL:  password authentication failed for user "demo"': "username or password",
+            'FATAL:  database "nope" does not exist': "database name",
+            "no pg_hba.conf entry for host": "pg_hba.conf",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertIn(expected, friendly_conn_error(RuntimeError(raw), "数据库").lower())
+
     def test_common_failures_name_what_to_check(self) -> None:
         cases = {
             'FATAL:  password authentication failed for user "demo"': "用户名或密码",

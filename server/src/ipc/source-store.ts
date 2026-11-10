@@ -13,6 +13,7 @@
  * 崩溃回放后来源列表仍在，compute 侧只要按 descriptor 重新打开即可。
  */
 
+import { say } from "../i18n.ts";
 import { createHash, randomBytes } from "node:crypto";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -485,37 +486,37 @@ export function validateWorkspacePath(
   options: { readonly projectRoot: string; readonly blockedRoots?: readonly string[] },
 ): WorkspacePathCheck {
   const raw = input.trim();
-  if (raw === "") return { ok: false, message: "工作目录路径不能为空。" };
+  if (raw === "") return { ok: false, message: say("The working directory path cannot be empty.", "工作目录路径不能为空。") };
   const expanded = raw === "~" || raw.startsWith(`~${sep}`) ? join(homedir(), raw.slice(1)) : raw;
-  if (!isAbsolute(expanded)) return { ok: false, message: `工作目录必须是绝对路径：${input}` };
+  if (!isAbsolute(expanded)) return { ok: false, message: say(`The working directory must be an absolute path: ${input}`, `工作目录必须是绝对路径：${input}`) };
   let resolved: string;
   try {
     resolved = realpathSync.native(resolve(expanded));
   } catch {
-    return { ok: false, message: `路径不存在：${input}` };
+    return { ok: false, message: say(`Path does not exist: ${input}`, `路径不存在：${input}`) };
   }
   let stats;
   try {
     stats = statSync(resolved);
     accessSync(resolved, constants.R_OK);
   } catch {
-    return { ok: false, message: `目录不可读：${resolved}` };
+    return { ok: false, message: say(`Directory is not readable: ${resolved}`, `目录不可读：${resolved}`) };
   }
-  if (!stats.isDirectory()) return { ok: false, message: `路径不是目录：${resolved}` };
+  if (!stats.isDirectory()) return { ok: false, message: say(`Path is not a directory: ${resolved}`, `路径不是目录：${resolved}`) };
 
   const parts = new Set(resolved.split(sep).map((part) => part.toLowerCase()));
   for (const fragment of BLOCKED_FRAGMENTS) {
-    if (parts.has(fragment)) return { ok: false, message: `安全限制：不允许挂载系统/敏感目录：${resolved}` };
+    if (parts.has(fragment)) return { ok: false, message: say(`Security restriction: system or sensitive directories cannot be mounted: ${resolved}`, `安全限制：不允许挂载系统/敏感目录：${resolved}`) };
   }
   const blocked = [...defaultBlockedRoots(), ...(options.blockedRoots ?? [])];
   for (const root of blocked) {
     const candidateRoot = realPath(resolve(root));
     if (within(candidateRoot, resolved)) {
-      return { ok: false, message: `安全限制：不允许挂载系统/敏感目录：${resolved}` };
+      return { ok: false, message: say(`Security restriction: system or sensitive directories cannot be mounted: ${resolved}`, `安全限制：不允许挂载系统/敏感目录：${resolved}`) };
     }
   }
   const project = realPath(resolve(options.projectRoot));
-  if (within(project, resolved)) return { ok: false, message: `不允许挂载项目根目录：${resolved}` };
+  if (within(project, resolved)) return { ok: false, message: say(`The project root directory cannot be mounted: ${resolved}`, `不允许挂载项目根目录：${resolved}`) };
   return { ok: true, path: resolved };
 }
 

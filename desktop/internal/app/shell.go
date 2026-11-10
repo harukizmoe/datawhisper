@@ -150,6 +150,7 @@ func (a *app) setLanguage(pref string) {
 	if a.hooks.setLocale != nil {
 		a.hooks.setLocale(appLocale(pref))
 	}
+	a.syncLanguage()
 	a.rebuildMenu()
 	a.redraw()
 }
@@ -161,6 +162,7 @@ func (a *app) followLocale() {
 	}
 	if lang := i18n.Resolve(i18n.System, a.systemLanguages()); lang != a.lang {
 		a.lang = lang
+		a.syncLanguage()
 		a.rebuildMenu()
 	}
 }

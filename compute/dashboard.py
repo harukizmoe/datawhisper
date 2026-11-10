@@ -15,6 +15,7 @@ import uuid
 
 from infrastructure.paths import content_data_path
 
+from .i18n import language
 from .validate import validate_tool_args
 
 log = logging.getLogger(__name__)
@@ -71,10 +72,16 @@ def _render_kpi_from_df(df, error: str | None = None) -> dict:
         kpi_value = row.iloc[0]
         try:
             fv = float(kpi_value)
-            if abs(fv) >= 1e8:
+            if language() == "zh" and abs(fv) >= 1e8:
                 kpi_value = f"{fv/1e8:.2f} 亿"
-            elif abs(fv) >= 1e4:
+            elif language() == "zh" and abs(fv) >= 1e4:
                 kpi_value = f"{fv/1e4:.1f} 万"
+            elif language() != "zh" and abs(fv) >= 1e9:
+                kpi_value = f"{fv/1e9:.2f} B"
+            elif language() != "zh" and abs(fv) >= 1e6:
+                kpi_value = f"{fv/1e6:.1f} M"
+            elif language() != "zh" and abs(fv) >= 1e3:
+                kpi_value = f"{fv/1e3:.1f} K"
             elif fv == int(fv):
                 kpi_value = str(int(fv))
             else:

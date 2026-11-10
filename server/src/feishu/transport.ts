@@ -9,6 +9,8 @@
  * 官方 SDK 在 514/403 时抛 ClientException 并停止重连，其余抛 ServerException 继续重连。
  */
 
+import { say } from "../i18n.ts";
+
 export type FeishuCredentials = { appId: string; appSecret: string };
 
 /** 端点发现返回的重连/心跳参数（`data.ClientConfig`）。 */
@@ -86,31 +88,31 @@ export function createTransport(options: TransportOptions): FeishuTransport {
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch {
-        throw new FeishuEndpointError("无法连接飞书开放平台，请检查网络", false, "network");
+        throw new FeishuEndpointError(say("Cannot reach the Feishu Open Platform; check your network", "无法连接飞书开放平台，请检查网络"), false, "network");
       }
       if (!response.ok) {
         // 非 200 也可能带 `{"msg": …}`；只取 msg 作为错误码前缀，绝不回显响应体原文之外的字段。
-        throw new FeishuEndpointError(`飞书长连接握手返回 HTTP ${response.status}`, false, `http_${response.status}`);
+        throw new FeishuEndpointError(say(`Feishu long-connection handshake returned HTTP ${response.status}`, `飞书长连接握手返回 HTTP ${response.status}`), false, `http_${response.status}`);
       }
       let body: unknown;
       try {
         body = await response.json();
       } catch {
-        throw new FeishuEndpointError("飞书长连接握手返回了无效响应", false, "invalid_response");
+        throw new FeishuEndpointError(say("Feishu long-connection handshake returned an invalid response", "飞书长连接握手返回了无效响应"), false, "invalid_response");
       }
       const envelope = asObject(body);
       const code = typeof envelope?.code === "number" ? envelope.code : 0;
       if (code !== 0) {
         const fatal = code === AUTH_FAILED || code === FORBIDDEN;
         throw new FeishuEndpointError(
-          `飞书长连接握手被拒绝（错误码 ${code}）`,
+          say(`Feishu long-connection handshake was rejected (error code ${code})`, `飞书长连接握手被拒绝（错误码 ${code}）`),
           fatal,
           fatal ? "auth_failed" : `code_${code}`,
         );
       }
       const data = asObject(envelope?.data);
       const url = typeof data?.URL === "string" ? data.URL : typeof data?.url === "string" ? data.url : "";
-      if (url === "") throw new FeishuEndpointError("飞书长连接握手没有返回地址", false, "invalid_response");
+      if (url === "") throw new FeishuEndpointError(say("Feishu long-connection handshake returned no URL", "飞书长连接握手没有返回地址"), false, "invalid_response");
       const config = asObject(data?.ClientConfig) ?? asObject(data?.clientConfig) ?? {};
       return { url, config: readClientConfig(config) };
     },

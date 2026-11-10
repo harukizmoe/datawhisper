@@ -6,6 +6,8 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { afterEach as restoreLanguage, beforeEach as useChinese } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { createHash } from "node:crypto";
 import { deflateRawSync } from "node:zlib";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -32,6 +34,10 @@ import {
 import { readZipEntry, listZipEntries } from "../src/tools/app/workspace/zip.ts";
 
 const temps: string[] = [];
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage("zh"));
+restoreLanguage(() => setLanguage("en"));
+
 afterAll(() => {
   for (const dir of temps) rmSync(dir, { recursive: true, force: true });
 });

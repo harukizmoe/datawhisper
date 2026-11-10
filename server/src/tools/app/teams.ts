@@ -10,6 +10,7 @@
 import type { JsonValue } from "@earendil-works/chord";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "./types.ts";
+import { say } from "../../i18n.ts";
 import type { AppDocHost, AppToolDetails } from "./types.ts";
 import { invalidDelegatedResult } from "../../teams/delegate.ts";
 import {
@@ -31,10 +32,6 @@ export const LEAD_RECIPIENT = "leader";
 const LEGACY_LEAD_RECIPIENTS: Readonly<Record<string, true>> = { leader: true, lead: true };
 const QUALITY_REVIEWER_NAME = "质量复核员";
 const QUALITY_REVIEWER_ROLE = "quality_reviewer";
-const QUALITY_REVIEWER_INSTRUCTIONS =
-  "固定质量复核员。只读复核团队输出中的数据口径、SQL、分子分母、样本范围、" +
-  "工具错误、图表失败和无证据业务归因。必须独立使用 get_schema/profile_data/query_data " +
-  "等只读工具复算关键指标；把结论分为通过、需修正、不可验证，并明确证据缺口。";
 
 export class WorkspaceTeamError extends AppToolError {}
 
@@ -104,12 +101,27 @@ function normalizeLeaderAlias(name: string): string {
   return value.toLowerCase() === "lead" ? LEAD_RECIPIENT : value;
 }
 
+function defaultTeamGoal(): string {
+  return say("Dynamic team collaboration", "团队动态协作");
+}
+
+function qualityReviewerInstructions(): string {
+  return say(
+    "Fixed quality reviewer. Read-only review of the metric definitions, SQL, numerators and denominators, sample scope, " +
+      "tool errors, chart failures and unsupported business attributions in the team output. Must independently recompute key metrics with " +
+      "read-only tools such as get_schema/profile_data/query_data; classify conclusions as passed, needs correction or unverifiable, and state evidence gaps explicitly.",
+    "固定质量复核员。只读复核团队输出中的数据口径、SQL、分子分母、样本范围、" +
+      "工具错误、图表失败和无证据业务归因。必须独立使用 get_schema/profile_data/query_data " +
+      "等只读工具复算关键指标；把结论分为通过、需修正、不可验证，并明确证据缺口。",
+  );
+}
+
 function qualityReviewerMember(): TeamMember {
   return {
     name: QUALITY_REVIEWER_NAME,
     agent_id: QUALITY_REVIEWER_NAME,
     role: QUALITY_REVIEWER_ROLE,
-    instructions: QUALITY_REVIEWER_INSTRUCTIONS,
+    instructions: qualityReviewerInstructions(),
     status: "idle",
     last_message: "",
     last_active_at: "",
@@ -169,13 +181,13 @@ export class WorkspaceTeamStore {
       for (const member of team.members) {
         if (member.status === "running" && ageSeconds(member.last_active_at, now) > maxAgeSeconds) {
           member.status = "failed";
-          member.last_message = "团队成员执行超时，已自动标记失败。";
+          member.last_message = say("The team member timed out and was automatically marked as failed.", "团队成员执行超时，已自动标记失败。");
           member.last_active_at = nowIso(now);
           team.messages.push({
             id: messageId(),
             sender: member.name,
             recipient: LEAD_RECIPIENT,
-            message: "团队成员执行超过 5 分钟仍未完成，已自动标记为失败。",
+            message: say("The team member did not finish within 5 minutes and was automatically marked as failed.", "团队成员执行超过 5 分钟仍未完成，已自动标记为失败。"),
             message_type: "error",
             read: false,
             created_at: nowIso(now),
@@ -250,14 +262,19 @@ export class WorkspaceTeamStore {
         .map((member) => member.name);
       if (active.length > 0) {
         throw new WorkspaceTeamError(
-          "团队成员仍在执行或排队，暂不能解散团队：" + active.join(", "),
+          say("Team members are still running or queued; the team cannot be disbanded yet: ", "团队成员仍在执行或排队，暂不能解散团队：") + active.join(", "),
         );
       }
       if (team.messages.length > 0 && !force) {
         throw new WorkspaceTeamError(
-          "团队已有委派结果、错误或质量复核记录，默认保留以便复盘；" +
-            "请先使用 team_status 查看证据。只有用户明确确认删除时，" +
-            "才可再次调用 team_delete 并传 force=true。",
+          say(
+            "The team already has delegated results, errors or quality-review records and is kept for review by default; " +
+              "use team_status to inspect the evidence first. Only when the user explicitly confirms deletion " +
+              "may you call team_delete again with force=true.",
+            "团队已有委派结果、错误或质量复核记录，默认保留以便复盘；" +
+              "请先使用 team_status 查看证据。只有用户明确确认删除时，" +
+              "才可再次调用 team_delete 并传 force=true。",
+          ),
         );
       }
       delete doc.teams[teamName];
@@ -705,7 +722,7 @@ export class DynamicTeamPlanStore {
       id: `tp_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`,
       workspace_id: this.#workspaceId,
       team_name: String(teamName).slice(0, 64),
-      goal: String(goal || "团队动态协作").slice(0, 4000),
+      goal: String(goal || defaultTeamGoal()).slice(0, 4000),
       status: "planned",
       created_by: "lead",
       tasks,
@@ -887,7 +904,7 @@ export function createTeamTools(deps: AppToolDeps): AppTool[] {
           return delegateFail("team_delegate requires non-empty assignments", "invalid_input");
         }
         perTaskAllowed = provided.map((item) => item.allowed_tools);
-        const created = await plans.create(teamKey, String(args.goal ?? "团队动态协作"), provided);
+        const created = await plans.create(teamKey, String(args.goal ?? defaultTeamGoal()), provided);
         plan = await plans.start(created.id);
       }
 
@@ -947,7 +964,9 @@ export function createTeamTools(deps: AppToolDeps): AppTool[] {
           return;
         }
         const assignmentText =
-          (task.title.trim() !== "" ? `任务：${task.title.trim()}\n\n` : "任务：团队并行分析\n\n") + task.prompt;
+          (task.title.trim() !== ""
+            ? say(`Task: ${task.title.trim()}\n\n`, `任务：${task.title.trim()}\n\n`)
+            : say("Task: parallel team analysis\n\n", "任务：团队并行分析\n\n")) + task.prompt;
         try {
           await plans.task(plan.id, task.id, "running");
           await store.assignMember(teamKey, member.name, assignmentText);
@@ -1039,7 +1058,7 @@ export function createTeamTools(deps: AppToolDeps): AppTool[] {
           await completeFailure(
             task.id,
             memberName,
-            `前置任务失败，当前任务未派发：${failedDependency}`,
+            say(`A prerequisite task failed; this task was not dispatched: ${failedDependency}`, `前置任务失败，当前任务未派发：${failedDependency}`),
             "team_delegate_dependency_failed",
           );
         }
@@ -1053,7 +1072,7 @@ export function createTeamTools(deps: AppToolDeps): AppTool[] {
             await completeFailure(
               task.id,
               task.member_name,
-              "前置任务未满足，当前任务未派发。",
+              say("Prerequisite tasks are not satisfied; this task was not dispatched.", "前置任务未满足，当前任务未派发。"),
               "team_delegate_dependency_unmet",
             );
           }
@@ -1314,7 +1333,7 @@ export function createTeamTools(deps: AppToolDeps): AppTool[] {
           if (!teamName || !Array.isArray(assignments)) {
             throw new WorkspaceTeamError("team_plan_create requires team_name and assignments");
           }
-          const plan = await planStore(api).create(teamName, String(args.goal || "团队动态协作").slice(0, 4000), assignments);
+          const plan = await planStore(api).create(teamName, String(args.goal || defaultTeamGoal()).slice(0, 4000), assignments);
           const result = {
             plan: plan as unknown as JsonValue,
             execution_instruction: "After user confirmation, call team_delegate with this plan_id.",

@@ -212,6 +212,12 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return out, err
 }
 
+// SetLanguage 告诉服务界面当前的语言（"en" 或 "zh"），服务与计算进程里面向用户和模型的文案随之切换。
+func (c *Client) SetLanguage(ctx context.Context, lang string) error {
+	_, err := c.Call(ctx, "app.setLanguage", map[string]string{"lang": lang})
+	return err
+}
+
 // Conversations 列出无属主的会话，最新的在前。
 func (c *Client) Conversations(ctx context.Context) ([]ConversationSummary, error) {
 	var out struct {

@@ -14,6 +14,7 @@
  * `SecretCredentialStore` 里，只在打开来源的一瞬间于进程内合并。
  */
 
+import { say } from "../i18n.ts";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Context, JsonValue } from "@earendil-works/chord";
@@ -215,7 +216,7 @@ function permissionParam(params: MethodParams, fallback: WorkspacePermission): W
   const value = params.permission;
   if (value === undefined) return fallback;
   if (value !== "read_only" && value !== "read_write") {
-    throw invalidParams("permission 必须是 read_only 或 read_write。");
+    throw invalidParams(say("permission must be read_only or read_write.", "permission 必须是 read_only 或 read_write。"));
   }
   return value;
 }
@@ -341,47 +342,47 @@ function requireRemoteConfig(kind: SourceConfigKind, fields: Record<string, stri
     return;
   }
   if (kind === "gsheets") {
-    if (!has("spreadsheet")) throw invalidReason("电子表格 URL 或 ID 不能为空", "missing_spreadsheet");
-    if (!has("creds_json")) throw invalidReason("服务账号 JSON 不能为空", "missing_credentials");
+    if (!has("spreadsheet")) throw invalidReason(say("Spreadsheet URL or ID cannot be empty", "电子表格 URL 或 ID 不能为空"), "missing_spreadsheet");
+    if (!has("creds_json")) throw invalidReason(say("Service account JSON cannot be empty", "服务账号 JSON 不能为空"), "missing_credentials");
     const raw = secret.creds_json ?? fields.creds_json ?? "";
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
     } catch {
-      throw invalidReason("服务账号 JSON 格式无效", "invalid_credentials");
+      throw invalidReason(say("Service account JSON is invalid", "服务账号 JSON 格式无效"), "invalid_credentials");
     }
     return;
   }
   if (kind === "feishu") {
     if (!has("bitable")) {
-      throw invalidReason("飞书多维表格链接或 app_token 不能为空", "missing_bitable");
+      throw invalidReason(say("Feishu Bitable link or app_token cannot be empty", "飞书多维表格链接或 app_token 不能为空"), "missing_bitable");
     }
     return;
   }
-  if (!has("url")) throw invalidReason("API URL 不能为空", "missing_url");
+  if (!has("url")) throw invalidReason(say("API URL cannot be empty", "API URL 不能为空"), "missing_url");
   const url = fields.url ?? secret.url ?? "";
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw invalidReason("API URL 格式无效", "invalid_url");
+    throw invalidReason(say("API URL is invalid", "API URL 格式无效"), "invalid_url");
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw invalidReason("API URL 只支持 http/https", "invalid_url");
+    throw invalidReason(say("API URL only supports http/https", "API URL 只支持 http/https"), "invalid_url");
   }
   const authType = fields.auth_type ?? "none";
   if (authType !== "none" && authType !== "bearer" && authType !== "api_key") {
-    throw invalidReason("认证方式无效，支持: none / bearer / api_key", "invalid_auth_type");
+    throw invalidReason(say("Invalid auth type; supported: none / bearer / api_key", "认证方式无效，支持: none / bearer / api_key"), "invalid_auth_type");
   }
   if (authType !== "none" && !has("auth_value")) {
-    throw invalidReason("认证值不能为空", "missing_auth_value");
+    throw invalidReason(say("Auth value cannot be empty", "认证值不能为空"), "missing_auth_value");
   }
 }
 
 /** 解析飞书多维表格引用：完整链接里取 app_token 与 `?table=`，否则按 app_token 处理。 */
 function parseBitableReference(value: string, table: string | undefined): { appToken: string; tableId: string } {
   const raw = value.trim();
-  if (raw === "") throw invalidReason("飞书多维表格链接或 app_token 不能为空", "missing_bitable");
+  if (raw === "") throw invalidReason(say("Feishu Bitable link or app_token cannot be empty", "飞书多维表格链接或 app_token 不能为空"), "missing_bitable");
   let appToken = raw;
   let tableId = table?.trim() ?? "";
   if (/^https?:\/\//i.test(raw)) {
@@ -389,22 +390,22 @@ function parseBitableReference(value: string, table: string | undefined): { appT
     try {
       parsed = new URL(raw);
     } catch {
-      throw invalidReason("飞书多维表格链接格式无效", "invalid_bitable");
+      throw invalidReason(say("Feishu Bitable link is invalid", "飞书多维表格链接格式无效"), "invalid_bitable");
     }
     const match = /\/base\/([A-Za-z0-9_-]+)/.exec(parsed.pathname);
-    if (match === null) throw invalidReason("飞书多维表格链接格式无效", "invalid_bitable");
+    if (match === null) throw invalidReason(say("Feishu Bitable link is invalid", "飞书多维表格链接格式无效"), "invalid_bitable");
     appToken = match[1]!;
     tableId = tableId === "" ? (parsed.searchParams.get("table") ?? "") : tableId;
   }
   if (!/^[A-Za-z0-9_-]+$/.test(appToken)) {
-    throw invalidReason("飞书多维表格 app_token 格式无效", "invalid_bitable");
+    throw invalidReason(say("Feishu Bitable app_token is invalid", "飞书多维表格 app_token 格式无效"), "invalid_bitable");
   }
   if (tableId === "") {
     // 旧实现会调用飞书接口列出所有表让用户选；compute 侧还没有对应方法（见报告「未迁移项」）。
-    throw invalidReason("请提供 table_id（表选择列表需要 compute 侧新增方法）", "missing_table");
+    throw invalidReason(say("Provide table_id (listing tables requires a new compute-side method)", "请提供 table_id（表选择列表需要 compute 侧新增方法）"), "missing_table");
   }
   if (!/^[A-Za-z0-9_-]+$/.test(tableId)) {
-    throw invalidReason("飞书多维表格 table_id 格式无效", "invalid_bitable");
+    throw invalidReason(say("Feishu Bitable table_id is invalid", "飞书多维表格 table_id 格式无效"), "invalid_bitable");
   }
   return { appToken, tableId };
 }
@@ -493,7 +494,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         try {
           descriptor.creds_dict = JSON.parse(creds) as JsonValue;
         } catch {
-          throw appReason("服务账号 JSON 格式无效", "invalid_credentials");
+          throw appReason(say("Service account JSON is invalid", "服务账号 JSON 格式无效"), "invalid_credentials");
         }
       }
     } else if (record.kind === "sql") {
@@ -572,7 +573,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     const roots = artifactRoots(doc);
     if (name !== undefined) {
       if (name.length > 255 || name.includes("\u0000") || /[\\/]/.test(name) || name === "." || name === "..") {
-        throw invalidReason("产物名不合法", "invalid_artifact_name");
+        throw invalidReason(say("Invalid artifact name", "产物名不合法"), "invalid_artifact_name");
       }
       for (const root of roots) {
         const candidate = join(root.path, name);
@@ -586,7 +587,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       throw appError("not_found", `artifact not found: ${name}`);
     }
     if (!isAbsolute(rawPath!)) {
-      throw invalidReason("产物路径必须是绝对路径", "invalid_artifact_path");
+      throw invalidReason(say("Artifact path must be absolute", "产物路径必须是绝对路径"), "invalid_artifact_path");
     }
     const real = realPath(rawPath!);
     for (const root of roots) {
@@ -598,10 +599,10 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       } catch {
         throw appError("not_found", `artifact not found: ${rawPath}`);
       }
-      if (!info.isFile()) throw invalidReason("产物路径不是文件", "invalid_artifact_path");
+      if (!info.isFile()) throw invalidReason(say("Artifact path is not a file", "产物路径不是文件"), "invalid_artifact_path");
       return { path: real, workspaceId: root.workspaceId };
     }
-    throw invalidReason("产物不在允许的目录内", "artifact_outside_root");
+    throw invalidReason(say("Artifact is outside the allowed directories", "产物不在允许的目录内"), "artifact_outside_root");
   };
 
   // ── 打开远程来源 ──────────────────────────────────────────────────────────
@@ -615,7 +616,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       if (!CONFIG_ID_PATTERN.test(explicitConfigId)) throw invalidParams("'configId' must look like ds_xxxxxxxx");
       const config = await deps.configs.get(explicitConfigId);
       if (config === undefined) throw appError("not_found", `data source config not found: ${explicitConfigId}`);
-      if (config.kind !== kind) throw invalidReason(`配置 ${explicitConfigId} 不是 ${kind} 类型`, "config_kind_mismatch");
+      if (config.kind !== kind) throw invalidReason(say(`Config ${explicitConfigId} is not of type ${kind}`, `配置 ${explicitConfigId} 不是 ${kind} 类型`), "config_kind_mismatch");
       configId = config.id;
       fallbackFields = config.fields;
       fallbackSecret = (await deps.configs.secret(config.id)) ?? {};
@@ -695,7 +696,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       try {
         creds = JSON.parse(secret.creds_json ?? "") as JsonValue;
       } catch {
-        throw invalidReason("服务账号 JSON 格式无效", "invalid_credentials");
+        throw invalidReason(say("Service account JSON is invalid", "服务账号 JSON 格式无效"), "invalid_credentials");
       }
       descriptor = { kind, spreadsheet: fields.spreadsheet ?? "", creds_dict: creds };
       stored = { kind, spreadsheet: fields.spreadsheet ?? "" };
@@ -736,9 +737,9 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
   };
 
   const openUploaded = async (conversationId: number, params: MethodParams): Promise<Record<string, JsonValue>> => {
-    const uploadId = patternParam(params, "uploadId", UPLOAD_ID_PATTERN, "32 位十六进制");
+    const uploadId = patternParam(params, "uploadId", UPLOAD_ID_PATTERN, say("32 hex characters", "32 位十六进制"));
     const ticket = uploads.get(uploadId);
-    if (ticket === undefined) throw invalidReason("上传凭据无效或已过期，请重新上传", "unknown_upload");
+    if (ticket === undefined) throw invalidReason(say("Upload ticket is invalid or expired; upload again", "上传凭据无效或已过期，请重新上传"), "unknown_upload");
     uploads.delete(uploadId);
     if (ticket.expiresAt <= now().getTime()) {
       try {
@@ -746,7 +747,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       } catch {
         // 过期文件可能已被回收。
       }
-      throw invalidReason("上传凭据已过期，请重新上传", "upload_expired");
+      throw invalidReason(say("Upload ticket has expired; upload again", "上传凭据已过期，请重新上传"), "upload_expired");
     }
 
     const reject = (error: RpcError): never => {
@@ -762,17 +763,17 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     try {
       stats = lstatSync(ticket.path);
     } catch {
-      return reject(invalidReason("上传文件不存在，请重新上传", "upload_missing"));
+      return reject(invalidReason(say("The uploaded file does not exist; upload again", "上传文件不存在，请重新上传"), "upload_missing"));
     }
-    if (stats.isSymbolicLink() || !stats.isFile()) return reject(invalidReason("上传目标必须是普通文件", "upload_not_file"));
+    if (stats.isSymbolicLink() || !stats.isFile()) return reject(invalidReason(say("Upload target must be a regular file", "上传目标必须是普通文件"), "upload_not_file"));
     const real = realpathSync.native(ticket.path);
-    if (!within(realPath(incomingDir), real)) return reject(invalidReason("上传路径越界", "upload_outside_root"));
+    if (!within(realPath(incomingDir), real)) return reject(invalidReason(say("Upload path is outside the allowed directory", "上传路径越界"), "upload_outside_root"));
     if (stats.size !== ticket.declaredSize) {
-      return reject(invalidReason(`上传文件大小与声明不一致（声明 ${ticket.declaredSize}，实际 ${stats.size}）`, "upload_size_mismatch"));
+      return reject(invalidReason(say(`The uploaded file size does not match the declared size (declared ${ticket.declaredSize}, actual ${stats.size})`, `上传文件大小与声明不一致（声明 ${ticket.declaredSize}，实际 ${stats.size}）`), "upload_size_mismatch"));
     }
-    if (stats.size === 0) return reject(invalidReason("文件为空", "empty_file"));
+    if (stats.size === 0) return reject(invalidReason(say("The file is empty", "文件为空"), "empty_file"));
     if (stats.size > maxUploadBytes) {
-      return reject(invalidReason(`文件超过大小上限（${Math.floor(maxUploadBytes / (1024 * 1024))} MiB）`, "file_too_large"));
+      return reject(invalidReason(say(`The file exceeds the size limit (${Math.floor(maxUploadBytes / (1024 * 1024))} MiB)`, `文件超过大小上限（${Math.floor(maxUploadBytes / (1024 * 1024))} MiB）`), "file_too_large"));
     }
 
     mkdirSync(deps.uploadsDir, { recursive: true });
@@ -787,11 +788,11 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       });
       const descriptor = prepared?.descriptor;
       if (typeof descriptor !== "object" || descriptor === null || Array.isArray(descriptor)) {
-        throw appReason("上传解析没有返回数据源描述符", "invalid_descriptor");
+        throw appReason(say("Upload parsing returned no data source descriptor", "上传解析没有返回数据源描述符"), "invalid_descriptor");
       }
       const kind = descriptor.kind;
       if (kind !== "csv" && kind !== "excel" && kind !== "pdf") {
-        throw appReason(`不支持的数据源类型：${String(kind)}`, "invalid_descriptor");
+        throw appReason(say(`Unsupported data source type: ${String(kind)}`, `不支持的数据源类型：${String(kind)}`), "invalid_descriptor");
       }
       const sourceId = randomId("s_");
       const opened = await openCompute(sourceId, descriptor);
@@ -867,12 +868,12 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const filename = stringParam(params, "filename");
       const suffix = suffixOf(filename);
       if (UPLOAD_SUFFIXES[suffix] !== true) {
-        throw invalidReason("仅支持 .xlsx / .xls / .csv / .pdf 文件", "unsupported_format");
+        throw invalidReason(say("Only .xlsx / .xls / .csv / .pdf files are supported", "仅支持 .xlsx / .xls / .csv / .pdf 文件"), "unsupported_format");
       }
       const declaredSize = integerParam(params, "size");
-      if (declaredSize <= 0) throw invalidReason("文件为空", "empty_file");
+      if (declaredSize <= 0) throw invalidReason(say("The file is empty", "文件为空"), "empty_file");
       if (declaredSize > maxUploadBytes) {
-        throw invalidReason(`文件超过大小上限（${Math.floor(maxUploadBytes / (1024 * 1024))} MiB）`, "file_too_large");
+        throw invalidReason(say(`The file exceeds the size limit (${Math.floor(maxUploadBytes / (1024 * 1024))} MiB)`, `文件超过大小上限（${Math.floor(maxUploadBytes / (1024 * 1024))} MiB）`), "file_too_large");
       }
       mkdirSync(incomingDir, { recursive: true });
       const id = randomId("", 16);
@@ -990,7 +991,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const sourceId = patternParam(params, "sourceId", SOURCE_ID_PATTERN, "s_xxxxxxxx");
       const name = stringParam(params, "name");
       if (name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) {
-        throw invalidReason("名称最多 200 个字符，且不能含控制字符", "invalid_name");
+        throw invalidReason(say("The name must be at most 200 characters and cannot contain control characters", "名称最多 200 个字符，且不能含控制字符"), "invalid_name");
       }
       await state.update(conversationId, (draft) => {
         const record = requireStoredSource(draft, sourceId);
@@ -1009,7 +1010,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const before = requireStoredSource(await state.read(conversationId), sourceId);
       const kind = before.kind;
       if (before.configId === undefined || !Object.hasOwn(REMOTE_KINDS, kind)) {
-        throw invalidReason("这个数据源没有可修改的连接设置", "not_editable");
+        throw invalidReason(say("This data source has no editable connection settings", "这个数据源没有可修改的连接设置"), "not_editable");
       }
       const prepared = await prepareRemote(kind as RemoteSourceKind, { ...params, kind, configId: before.configId });
       try {
@@ -1154,7 +1155,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       if (id !== undefined && !CONFIG_ID_PATTERN.test(id)) throw invalidParams("'id' must look like ds_xxxxxxxx");
       const existing = id === undefined ? undefined : await deps.configs.get(id);
       if (existing !== undefined && existing.kind !== kind) {
-        throw invalidReason(`配置 ${id} 不是 ${kind} 类型`, "config_kind_mismatch");
+        throw invalidReason(say(`Config ${id} is not of type ${kind}`, `配置 ${id} 不是 ${kind} 类型`), "config_kind_mismatch");
       }
       // 只改名/改 URL 时，未提供的字段沿用已保存的值；未提供的密文保持不变。
       const fields = stringMapParam(params, "fields") ?? existing?.fields ?? {};
@@ -1243,7 +1244,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       }>("workspace.sync", syncParams);
       const descriptor = synced.descriptor;
       if (typeof descriptor !== "object" || descriptor === null || Array.isArray(descriptor)) {
-        throw appReason("工作区同步没有返回数据源描述符", "invalid_descriptor");
+        throw appReason(say("Workspace sync returned no data source descriptor", "工作区同步没有返回数据源描述符"), "invalid_descriptor");
       }
       const opened = alreadyOpen ? { name: `📁 ${label}`, tables: synced.tables ?? [] } : await openCompute(sourceId, descriptor);
       if (!alreadyOpen) openIds.add(sourceId);
@@ -1312,8 +1313,8 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const target = requested === undefined
         ? doc.workspaces.find((record) => record.mounted)
         : doc.workspaces.find((record) => record.workspaceId === requested);
-      if (target === undefined) throw invalidReason("未挂载工作目录。", "not_mounted");
-      if (!target.mounted) throw invalidReason("未挂载工作目录。", "not_mounted");
+      if (target === undefined) throw invalidReason(say("The working directory is not mounted.", "未挂载工作目录。"), "not_mounted");
+      if (!target.mounted) throw invalidReason(say("The working directory is not mounted.", "未挂载工作目录。"), "not_mounted");
       const removedSource = target.sourceId;
       const result = await state.update(conversationId, (draft) => {
         const record = requireWorkspace(draft, target.workspaceId);
@@ -1334,11 +1335,11 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
       const raw = stringParam(params, "name");
       if (/[\u0000-\u001f\u007f]/.test(raw)) {
-        throw invalidReason("工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。", "invalid_workspace_name");
+        throw invalidReason(say("The working directory display name must be 1-80 characters and cannot contain control characters.", "工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。"), "invalid_workspace_name");
       }
       const name = raw.trim().split(/\s+/).join(" ");
       if (name === "" || name.length > 80) {
-        throw invalidReason("工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。", "invalid_workspace_name");
+        throw invalidReason(say("The working directory display name must be 1-80 characters and cannot contain control characters.", "工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。"), "invalid_workspace_name");
       }
       const result = await state.update(conversationId, (draft) => {
         const record = requireWorkspace(draft, workspaceId);
@@ -1362,7 +1363,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       if (params.permission === undefined) throw invalidParams("'permission' is required");
       const result = await state.update(conversationId, (draft) => {
         const record = requireWorkspace(draft, workspaceId);
-        if (!record.mounted) throw invalidReason("未挂载工作目录。", "not_mounted");
+        if (!record.mounted) throw invalidReason(say("The working directory is not mounted.", "未挂载工作目录。"), "not_mounted");
         record.permission = permission;
         record.updatedAt = iso();
         return { workspace: record, workspaces: draft.workspaces.map(publicWorkspace) };
@@ -1373,10 +1374,10 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     "workspace.remove": async (params) => {
       const conversationId = conversationIdParam(params);
       const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
-      if (params.confirmed !== true) throw invalidReason("移除前必须明确确认。", "confirmation_required");
+      if (params.confirmed !== true) throw invalidReason(say("Removal must be explicitly confirmed first.", "移除前必须明确确认。"), "confirmation_required");
       const doc = await state.read(conversationId);
       const target = requireWorkspace(doc, workspaceId);
-      if (target.mounted) throw invalidReason("工作目录仍有会话连接，请先卸载。", "workspace_connected");
+      if (target.mounted) throw invalidReason(say("The working directory is still connected to a conversation; unmount it first.", "工作目录仍有会话连接，请先卸载。"), "workspace_connected");
       const removedSource = target.sourceId;
       await state.update(conversationId, (draft) => {
         draft.workspaces = draft.workspaces.filter((record) => record.workspaceId !== workspaceId);
@@ -1468,7 +1469,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       };
       if (as !== "text") return base;
       if (info.size > MAX_ARTIFACT_TEXT_BYTES) {
-        throw appReason(`产物超过文本读取上限（${Math.floor(MAX_ARTIFACT_TEXT_BYTES / 1024)} KiB），请用路径读取`, "file_too_large");
+        throw appReason(say(`The artifact exceeds the text read limit (${Math.floor(MAX_ARTIFACT_TEXT_BYTES / 1024)} KiB); read it by path`, `产物超过文本读取上限（${Math.floor(MAX_ARTIFACT_TEXT_BYTES / 1024)} KiB），请用路径读取`), "file_too_large");
       }
       return { ...base, text: readFileSync(resolved.path, "utf8") };
     },

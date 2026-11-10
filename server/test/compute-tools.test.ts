@@ -8,6 +8,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach as restoreLanguage, beforeEach as useChinese } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -303,6 +305,10 @@ async function openCsv(name: string, rows: Record<string, string | number>[]): P
   const opened = await compute.openSource(sourceId, { kind: "csv", file_path: path, name: `${name}.csv` });
   return { sourceId, table: opened.tables[0] ?? name };
 }
+
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage("zh"));
+restoreLanguage(() => setLanguage("en"));
 
 beforeAll(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), "dw-compute-tools-"));

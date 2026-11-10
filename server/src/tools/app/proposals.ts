@@ -8,14 +8,15 @@
 
 import type { JsonValue } from "@earendil-works/chord";
 import { pyRepr } from "../../agent/py-compat.ts";
+import { say } from "../../i18n.ts";
 import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } from "./types.ts";
 
-/** 与 `Function/Charts_generation/charts/color_schemes.py` 相同的四套方案。 */
-export const COLOR_SCHEMES: Readonly<Record<string, { name: string; description: string }>> = {
-  mckinsey: { name: "McKinsey Blue", description: "麦肯锡蓝色配色" },
-  bcg: { name: "BCG Green", description: "波士顿咨询绿色配色" },
-  bain: { name: "Bain Red", description: "贝恩红色配色" },
-  ey: { name: "EY Yellow", description: "安永黄色配色" },
+/** 与 `Function/Charts_generation/charts/color_schemes.py` 相同的四套方案；说明文字按调用时的界面语言取。 */
+export const COLOR_SCHEMES: Readonly<Record<string, { name: string; description: () => string }>> = {
+  mckinsey: { name: "McKinsey Blue", description: () => say("McKinsey blue palette", "麦肯锡蓝色配色") },
+  bcg: { name: "BCG Green", description: () => say("Boston Consulting Group green palette", "波士顿咨询绿色配色") },
+  bain: { name: "Bain Red", description: () => say("Bain red palette", "贝恩红色配色") },
+  ey: { name: "EY Yellow", description: () => say("EY yellow palette", "安永黄色配色") },
 };
 
 const PPT_LAYOUT_LABELS: Readonly<Record<string, readonly [string, string]>> = {
@@ -78,7 +79,7 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
   const label = (layout: string): string => {
     const pair = PPT_LAYOUT_LABELS[layout];
     if (pair === undefined) return layout;
-    return deps.uiLang === "en" ? pair[1] : pair[0];
+    return say(pair[1], pair[0]);
   };
   return [
     makeAppTool<{ tables: string[]; filename?: string; summary?: string }>({
@@ -106,14 +107,20 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
           const tables = args.tables ?? ["*"];
           const all = tables.length === 1 && (tables[0] === "*" || tables[0] === "all");
           const exportLabel = all
-            ? "全部可用表格（原始数据 + 分析结果）"
-            : tables.length > 0 ? tables.join("、") : "（未指定）";
+            ? say("All available tables (raw data + analysis results)", "全部可用表格（原始数据 + 分析结果）")
+            : tables.length > 0 ? tables.join(say(", ", "、")) : say("(not specified)", "（未指定）");
           let markdown =
-            `**导出目标：** ${exportLabel}\n\n` +
-            `**文件名：** ${args.filename || "（自动生成）"}.xlsx\n\n`;
-          if (args.summary) markdown += `**说明：** ${args.summary}\n`;
+            say(`**Export target:** ${exportLabel}\n\n`, `**导出目标：** ${exportLabel}\n\n`) +
+            say(
+              `**File name:** ${args.filename || "(auto-generated)"}.xlsx\n\n`,
+              `**文件名：** ${args.filename || "（自动生成）"}.xlsx\n\n`,
+            );
+          if (args.summary) markdown += say(`**Note:** ${args.summary}\n`, `**说明：** ${args.summary}\n`);
           const result = { tables, filename: args.filename ?? "", summary: args.summary ?? "", markdown };
-          return okResult("propose_excel_export", "导出计划已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。", {
+          return okResult("propose_excel_export", say(
+            "The export plan has been shown to the user, who will confirm or edit it with the buttons. Do not output any text.",
+            "导出计划已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。",
+          ), {
             tool: "propose_excel_export",
             event: "excel_outline",
             ...(result as unknown as Record<string, JsonValue>),
@@ -151,12 +158,18 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
           const sections = normalizeReportSections(args.sections);
           const problem = validateReportOutline("propose_report_outline", args.title ?? "", sections);
           if (problem !== undefined) throw new Error(problem);
-          const rows = ["| # | 章节标题 |\n|---|---------|"];
+          const rows = [say("| # | Section title |", "| # | 章节标题 |") + "\n|---|---------|"];
           sections.forEach((section, index) => {
             rows.push(`| ${index + 1} | ${section.heading || `Section ${index + 1}`} |`);
           });
-          const markdown = `**${args.title}**（共 ${sections.length} 个章节）\n\n` + rows.join("\n");
-          return okResult("propose_report_outline", "报告大纲已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。", {
+          const markdown = say(
+            `**${args.title}** (${sections.length} sections in total)\n\n`,
+            `**${args.title}**（共 ${sections.length} 个章节）\n\n`,
+          ) + rows.join("\n");
+          return okResult("propose_report_outline", say(
+            "The report outline has been shown to the user, who will confirm or edit it with the buttons. Do not output any text.",
+            "报告大纲已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。",
+          ), {
             tool: "propose_report_outline",
             event: "report_outline",
             title: args.title,
@@ -204,7 +217,9 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
                 "again with a complete slides list.",
             );
           }
-          const rows = ["| # | 布局 | 内容摘要 |\n|---|------|---------|"];
+          const rows = [
+            say("| # | Layout | Summary |", "| # | 布局 | 内容摘要 |") + "\n|---|------|---------|",
+          ];
           slides.forEach((slide, index) => {
             const record = (slide ?? {}) as Record<string, JsonValue>;
             const layout = typeof record.layout === "string" ? record.layout : "";
@@ -215,8 +230,14 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
             const summary = extra ? `${title} · ${extra}` : title;
             rows.push(`| ${index + 1} | ${label(layout)} | ${summary} |`);
           });
-          const markdown = `**${args.title}**（共 ${slides.length} 张）\n\n` + rows.join("\n");
-          return okResult("propose_ppt_outline", "大纲已展示给用户，等待其通过按钮确认或修改。", {
+          const markdown = say(
+            `**${args.title}** (${slides.length} slides in total)\n\n`,
+            `**${args.title}**（共 ${slides.length} 张）\n\n`,
+          ) + rows.join("\n");
+          return okResult("propose_ppt_outline", say(
+            "The outline has been shown to the user, who will confirm or edit it with the buttons.",
+            "大纲已展示给用户，等待其通过按钮确认或修改。",
+          ), {
             tool: "propose_ppt_outline",
             event: "ppt_outline",
             title: args.title,
@@ -255,13 +276,19 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
         if (info === undefined) {
           return errorResult(
             "set_ppt_color_scheme",
-            `未知配色方案 '${requested}'。可用方案：${Object.keys(COLOR_SCHEMES).join(", ")}`,
+            say(
+              `Unknown color scheme '${requested}'. Available schemes: ${Object.keys(COLOR_SCHEMES).join(", ")}`,
+              `未知配色方案 '${requested}'。可用方案：${Object.keys(COLOR_SCHEMES).join(", ")}`,
+            ),
           );
         }
         colorScheme.value = requested;
         return okResult(
           "set_ppt_color_scheme",
-          `✅ 配色已切换为「${info.name}」（${info.description}），后续图表和 PPT 均使用此配色。`,
+          say(
+            `✅ Color scheme switched to "${info.name}" (${info.description()}); later charts and PPTs will use it.`,
+            `✅ 配色已切换为「${info.name}」（${info.description()}），后续图表和 PPT 均使用此配色。`,
+          ),
           { tool: "set_ppt_color_scheme", event: "ppt_scheme", scheme: requested },
         );
       },
@@ -319,10 +346,13 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
                 "again with a complete widgets list.",
             );
           }
-          const rows = ["| # | 标题 | 图表类型 | 核心字段 |", "|---|------|---------|---------|"];
+          const rows = [
+            say("| # | Title | Chart type | Key fields |", "| # | 标题 | 图表类型 | 核心字段 |"),
+            "|---|------|---------|---------|",
+          ];
           widgets.forEach((widget, index) => {
             const record = (widget ?? {}) as Record<string, JsonValue>;
-            const title = typeof record.title === "string" ? record.title : `图表 ${index + 1}`;
+            const title = typeof record.title === "string" ? record.title : say(`Chart ${index + 1}`, `图表 ${index + 1}`);
             const chartType = typeof record.chart_type === "string" ? record.chart_type : "Bar_Chart";
             const mapping = record.field_mapping;
             const fields = mapping !== null && typeof mapping === "object" && !Array.isArray(mapping)
@@ -332,10 +362,16 @@ export function createProposalTools(deps: AppToolDeps): AppTool[] {
               : "—";
             rows.push(`| ${index + 1} | ${title} | ${chartType} | ${fields || "—"} |`);
           });
-          const markdown = `**${args.name}**（共 ${widgets.length} 个组件）\n\n` + rows.join("\n");
+          const markdown = say(
+            `**${args.name}** (${widgets.length} widgets in total)\n\n`,
+            `**${args.name}**（共 ${widgets.length} 个组件）\n\n`,
+          ) + rows.join("\n");
           return okResult(
             "propose_dashboard_outline",
-            "看板大纲已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。",
+            say(
+              "The dashboard outline has been shown to the user, who will confirm or edit it with the buttons. Do not output any text.",
+              "看板大纲已展示给用户，等待其通过按钮确认或修改。请不要输出任何文字。",
+            ),
             {
               tool: "propose_dashboard_outline",
               event: "dashboard_outline",

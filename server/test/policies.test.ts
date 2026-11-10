@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach as restoreLanguage, beforeEach as useChinese } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,6 +84,10 @@ async function rawTurn(service: Service, text: string, modelTools: ToolRegistrat
   await root.submit({ type: "input", content: text, requestId: crypto.randomUUID() }, ctx);
   await root.waitForIdle(ctx);
 }
+
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage("zh"));
+restoreLanguage(() => setLanguage("en"));
 
 describe("输出类工具守卫", () => {
   test("普通对话里调用 generate_ppt 被拦下，模型收到 SYSTEM BLOCK", async () => {

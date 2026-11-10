@@ -29,9 +29,18 @@ from ._utils import (
     _new_conn, _preview_table_dict, _query, _register, _table_schema_str,
     is_write_sql,
 )
+from compute.i18n import language, say
+
 from .base import DataSource
 
 log = logging.getLogger(__name__)
+
+# Preview names of analysis cache tables; the preview endpoint accepts either language's prefix.
+_ANALYSIS_PREFIXES = ("[Analysis table] ", "[分析表] ")
+
+
+def _analysis_prefix() -> str:
+    return _ANALYSIS_PREFIXES[1] if language() == "zh" else _ANALYSIS_PREFIXES[0]
 
 # Maximum rows to pull from a remote table into DuckDB in one shot.
 # Tables larger than this are flagged as "large" and queries against them are
@@ -172,9 +181,9 @@ class SQLDataSource(DataSource):
         requested = list(dict.fromkeys(str(name).strip() for name in table_names if str(name).strip()))
         unknown = [name for name in requested if name not in catalog_set]
         if unknown:
-            raise ValueError(f"数据库中不存在这些表：{', '.join(unknown)}")
+            raise ValueError(say(f"These tables do not exist in the database: {', '.join(unknown)}", f"数据库中不存在这些表：{', '.join(unknown)}"))
         if len(requested) > 20:
-            raise ValueError("一次最多选择 20 张 SQL 分析表")
+            raise ValueError(say("At most 20 SQL analysis tables can be selected at a time", "一次最多选择 20 张 SQL 分析表"))
         self._analysis_tables = set(requested)
         return [name for name in catalog if name in self._analysis_tables]
 
@@ -184,10 +193,16 @@ class SQLDataSource(DataSource):
         denied = [name for name in referenced if name not in allowed]
         if denied:
             raise PermissionError(
-                f"SQL 表未加入当前分析范围：{', '.join(denied)}。请先在数据预览中选择分析表。"
+                say(
+                    f"SQL table(s) not in the current analysis scope: {', '.join(denied)}. Select analysis tables in the data preview first.",
+                    f"SQL 表未加入当前分析范围：{', '.join(denied)}。请先在数据预览中选择分析表。",
+                )
             )
         if not allowed and self._all_table_names():
-            raise PermissionError("尚未选择 SQL 分析表，请先在数据预览中选择一张或多张表。")
+            raise PermissionError(say(
+                "No SQL analysis tables are selected yet; select one or more tables in the data preview first.",
+                "尚未选择 SQL 分析表，请先在数据预览中选择一张或多张表。",
+            ))
         return referenced
 
     def _remote_schema_with_sample(self, table: str) -> str:
@@ -323,7 +338,7 @@ class SQLDataSource(DataSource):
         parts: List[str] = []
 
         if n > MAX_FULL:
-            loaded_note = f" ({len(self._loaded)} 张已缓存到 DuckDB)" if self._loaded else ""
+            loaded_note = say(f" ({len(self._loaded)} cached in DuckDB)", f" ({len(self._loaded)} 张已缓存到 DuckDB)") if self._loaded else ""
             parts.append(
                 f"[Database schema — {n} tables total{loaded_note}. "
                 f"Full column details shown for first {MAX_FULL} tables. "
@@ -335,7 +350,7 @@ class SQLDataSource(DataSource):
             detail_tables = all_tables
 
         for table in detail_tables:
-            cached = " [已缓存]" if table in self._loaded else ""
+            cached = say(" [cached]", " [已缓存]") if table in self._loaded else ""
             try:
                 detail = self._remote_schema_with_sample(table)
                 if cached:
@@ -359,7 +374,7 @@ class SQLDataSource(DataSource):
     def get_table_detail(self, table_name: str) -> str:
         """Full column list + row count for a single table."""
         if table_name not in set(self.get_analysis_tables()) and table_name not in self._cache_tables:
-            return f"Error: SQL 表 {table_name} 未加入当前分析范围。"
+            return say(f"Error: SQL table {table_name} is not in the current analysis scope.", f"Error: SQL 表 {table_name} 未加入当前分析范围。")
         try:
             self._inspect.clear_cache()
         except Exception:
@@ -438,9 +453,14 @@ class SQLDataSource(DataSource):
         if large_refs:
             if writing:
                 return pd.DataFrame(), (
-                    "写操作不能在远程大表上执行（大表未缓存到本地）。"
-                    "请先用 query_data 把需要的子集拉成本地分析表"
-                    "（CREATE TABLE ... AS SELECT ... WHERE ...），再对副本执行写操作。"
+                    say(
+                        "Write operations cannot run on large remote tables (they are not cached locally). "
+                        "First use query_data to pull the needed subset into a local analysis table "
+                        "(CREATE TABLE ... AS SELECT ... WHERE ...), then run the write on that copy.",
+                        "写操作不能在远程大表上执行（大表未缓存到本地）。"
+                        "请先用 query_data 把需要的子集拉成本地分析表"
+                        "（CREATE TABLE ... AS SELECT ... WHERE ...），再对副本执行写操作。",
+                    )
                 )
             log.info(
                 "[SQLDataSource] large table(s) %s in query — routing to remote DB",
@@ -526,7 +546,7 @@ class SQLDataSource(DataSource):
                 with self._duck_lock:
                     cols  = [r[0] for r in self._duck.execute(f'DESCRIBE "{t}"').fetchall()]
                     total = self._duck.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
-                result.append({"name": f"[分析表] {t}", "columns": cols, "total_rows": total})
+                result.append({"name": f"{_analysis_prefix()}{t}", "columns": cols, "total_rows": total})
             except Exception:
                 continue
 
@@ -552,8 +572,9 @@ class SQLDataSource(DataSource):
 
     def get_preview_table(self, table_name: str, max_rows: int = 100) -> dict:
         # Analysis cache
-        if table_name.startswith("[分析表] "):
-            real = table_name[len("[分析表] "):]
+        prefix = next((p for p in _ANALYSIS_PREFIXES if table_name.startswith(p)), None)
+        if prefix:
+            real = table_name[len(prefix):]
             with self._duck_lock:
                 return _preview_table_dict(self._duck, real, table_name, max_rows)
 

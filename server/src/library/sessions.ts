@@ -4,6 +4,7 @@
  * pi-durable 自己持久化会话与 entry；这里只补它没有的「用户元数据」。删除没有存储层 API，
  * 用 `LibraryStore` 的显式墓碑过滤（见 store.ts 顶部说明）。
  */
+import { say } from "../i18n.ts";
 import type { Context } from "@earendil-works/chord/context";
 import type { Conversation, ConversationId, EntryRecord, Harness } from "@earendil-works/pi-durable";
 import type { Conversations } from "../conversations/service.ts";
@@ -63,7 +64,7 @@ function messageText(content: unknown): string {
     if (typeof item !== "object" || item === null) continue;
     const block = item as { type?: unknown; text?: unknown; thinking?: unknown };
     if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
-    else if (block.type === "image") parts.push("[图片]");
+    else if (block.type === "image") parts.push(say("[image]", "[图片]"));
     // 思考内容不进导出/检索：它可能是被安全策略脱敏后的空壳，也不是用户看到的正文。
   }
   return parts.join("\n");
@@ -105,7 +106,7 @@ function entryTimestamp(entry: EntryRecord | undefined): number | null {
 }
 
 function formatTime(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms)) return "未知";
+  if (ms === null || !Number.isFinite(ms)) return say("unknown", "未知");
   return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
@@ -160,7 +161,7 @@ export class SessionLibrary {
       }
       out.push({
         ...record,
-        title: title || (record.root ? "默认会话" : "未命名会话"),
+        title: title || (record.root ? say("Default conversation", "默认会话") : say("Untitled conversation", "未命名会话")),
         pinned: meta?.pinned ?? false,
         archived: meta?.archived ?? false,
         createdAt: meta?.createdAt ?? null,
@@ -217,7 +218,7 @@ export class SessionLibrary {
     const key = String(conversation.id);
     const entries = await this.#entries(conversation);
     const meta = this.#deps.store.meta(key);
-    const title = (meta?.title ?? "").trim() || (await this.#derivedTitle(conversation.id, conversation.id === 1)) || "未命名会话";
+    const title = (meta?.title ?? "").trim() || (await this.#derivedTitle(conversation.id, conversation.id === 1)) || say("Untitled conversation", "未命名会话");
     let model: { provider: string; modelId: string } | null = null;
     try {
       const agent = await conversation.agent(this.#deps.context);
@@ -284,7 +285,7 @@ export class SessionLibrary {
       const title =
         (meta?.title ?? "").trim() ||
         (await this.#derivedTitle(conversationId, record.root)) ||
-        (record.root ? "默认会话" : "未命名会话");
+        (record.root ? say("Default conversation", "默认会话") : say("Untitled conversation", "未命名会话"));
       const titleHit = snippetAround(title, query);
       if (titleHit !== undefined) {
         hits.push({ id: record.id, title, pinned: meta?.pinned ?? false, archived: meta?.archived ?? false, updatedAt: record.updatedAt, matchedIn: "title", snippet: titleHit });
@@ -338,14 +339,14 @@ export class SessionLibrary {
   /** 没有显式标题时用第一条用户消息；最多翻 50 条 entry，避免为列表把整段历史读完。 */
   async #derivedTitle(id: ConversationId, root: boolean): Promise<string> {
     const conversation = await this.#deps.harness.conversation(id, this.#deps.context);
-    if (conversation === undefined) return root ? "默认会话" : "";
+    if (conversation === undefined) return root ? say("Default conversation", "默认会话") : "";
     const page = await conversation.entries({ order: "ascending" }, 50, undefined, this.#deps.context);
     for (const entry of page.items) {
       if (entry.kind !== "pi.user") continue;
       const text = collapse(visibleText(entry));
       if (text !== "") return truncate(text, TITLE_LIMIT);
     }
-    return root ? "默认会话" : "";
+    return root ? say("Default conversation", "默认会话") : "";
   }
 
   async #bodySnippet(conversation: Conversation, query: string): Promise<string | undefined> {
@@ -376,11 +377,14 @@ function renderMarkdown(
   const lines: string[] = [
     `# ${title}`,
     "",
-    `- 会话 ID: ${key}`,
-    `- 创建时间: ${meta?.createdAt ?? "未知"}`,
-    `- 更新时间: ${formatTime(updatedAt)}`,
-    `- 模型: ${model === null ? "未设置" : `${model.provider}/${model.modelId}`}`,
-    `- 导出时间: ${isoNow()}`,
+    say(`- Conversation ID: ${key}`, `- 会话 ID: ${key}`),
+    say(`- Created: ${meta?.createdAt ?? "unknown"}`, `- 创建时间: ${meta?.createdAt ?? "未知"}`),
+    say(`- Updated: ${formatTime(updatedAt)}`, `- 更新时间: ${formatTime(updatedAt)}`),
+    say(
+      `- Model: ${model === null ? "not set" : `${model.provider}/${model.modelId}`}`,
+      `- 模型: ${model === null ? "未设置" : `${model.provider}/${model.modelId}`}`,
+    ),
+    say(`- Exported: ${isoNow()}`, `- 导出时间: ${isoNow()}`),
     "",
     "---",
     "",
@@ -390,7 +394,7 @@ function renderMarkdown(
     if (entry.kind === "pi.user") {
       const text = visibleText(entry);
       if (text === "") continue;
-      lines.push("## 用户", "", text, "");
+      lines.push(say("## User", "## 用户"), "", text, "");
       assistantStarted = false;
       continue;
     }
@@ -399,22 +403,22 @@ function renderMarkdown(
       const calls = toolCallsOf(entry);
       if (text !== "" || calls.length > 0) {
         if (!assistantStarted) {
-          lines.push("## 助手", "");
+          lines.push(say("## Assistant", "## 助手"), "");
           assistantStarted = true;
         }
         if (text !== "") lines.push(text, "");
-        for (const call of calls) lines.push(`- 工具调用: \`${call.name}\` ${call.argumentsJson}`);
+        for (const call of calls) lines.push(say(`- Tool call: \`${call.name}\` ${call.argumentsJson}`, `- 工具调用: \`${call.name}\` ${call.argumentsJson}`));
         if (calls.length > 0) lines.push("");
       }
       continue;
     }
     if (entry.kind === "pi.compaction") {
-      lines.push("> 上下文已压缩", "");
+      lines.push(say("> Context compacted", "> 上下文已压缩"), "");
       assistantStarted = false;
       continue;
     }
     if (entry.kind === "pi.reset") {
-      lines.push("> 会话上下文已重置", "");
+      lines.push(say("> Conversation context reset", "> 会话上下文已重置"), "");
       assistantStarted = false;
     }
   }

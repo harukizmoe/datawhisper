@@ -6,6 +6,20 @@
  * 因为模型提示词里的习惯（“看到 `…[full result persisted; …]` 就去读制品”）是按这些字符串训练的。
  */
 
+import { say } from "../../i18n.ts";
+
+/** 工具执行错误文本的前缀（英文、中文）：worker 与宿主按界面语言生成，判定时两种都要认。 */
+const TOOL_EXECUTION_ERROR_PREFIXES = ["Tool execution error", "工具执行错误"] as const;
+
+/** `Tool execution error [tool]: message`，按当前界面语言。 */
+export function toolExecutionErrorText(tool: string, message: string): string {
+  return say(`Tool execution error [${tool}]: ${message}`, `工具执行错误 [${tool}]: ${message}`);
+}
+
+/** 文本是否以任一语言的「工具执行错误」前缀开头。 */
+export function isToolExecutionErrorText(text: string): boolean {
+  return TOOL_EXECUTION_ERROR_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
 /** 旧 `TOOL_RESULT_CHAR_BUDGET`：默认落盘阈值。 */
 export const TOOL_RESULT_CHAR_BUDGET = 2_000;
 /** 旧 `TOOL_RESULT_PREVIEW_CHARS`：默认预览上限（字符数，不是字节）。 */
@@ -167,7 +181,7 @@ export function classifyToolError(raw: unknown, tool = ""): string {
     return "permission_error";
   }
   if (tool === "get_schema") {
-    return text.startsWith("ERROR:") || text.startsWith("工具执行错误") ? "tool_error" : "";
+    return text.startsWith("ERROR:") || isToolExecutionErrorText(text) ? "tool_error" : "";
   }
   if (
     lower.startsWith("query returned no rows") ||
@@ -177,7 +191,7 @@ export function classifyToolError(raw: unknown, tool = ""): string {
     return "empty_result";
   }
   if (text.startsWith("[MCP ERROR]")) return "mcp_error";
-  if (text.startsWith("ERROR:") || text.startsWith("工具执行错误")) return "tool_error";
+  if (text.startsWith("ERROR:") || isToolExecutionErrorText(text)) return "tool_error";
   return "";
 }
 

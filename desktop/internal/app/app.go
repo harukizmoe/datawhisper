@@ -171,7 +171,7 @@ func (a *app) onService(st supervisor.Status) {
 	a.refreshConversations()
 	a.follow()
 	a.refreshModels()
-	a.refreshCommands()
+	a.syncLanguage()
 	switch a.nav {
 	case navSettings:
 		a.loadSettings()

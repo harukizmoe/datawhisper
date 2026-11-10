@@ -13,6 +13,7 @@
  */
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { say } from "../i18n.ts";
 import {
   PY_SPACE,
   PyDecodeError,
@@ -326,24 +327,26 @@ export class CommandRegistry {
 }
 
 // Packaging fallback for installations missing the command content folder: [name, description, icon, category].
-const FALLBACK: ReadonlyArray<readonly [string, string, string, string]> = [
-  ["help", "查看智析 Agent 可用命令及使用方法", "❓", "tools"],
-  ["clear", "清除当前对话内容，保留数据源、模型和工作目录连接", "🧹", "session"],
-  ["compact", "立即压缩当前对话上下文，保留关键结论和最近内容", "🗜️", "session"],
-  ["instruction", "设置仅对当前分析对话生效的临时指令", "📝", "session"],
-  ["sessions", "刷新已保存对话，或新建分析对话", "💬", "session"],
-  ["mcp", "打开 MCP 连接与工具管理", "🔌", "tools"],
-  ["knowledge", "打开业务知识库，管理指标口径、规则和参考资料", "🧠", "tools"],
-  ["workspace", "连接工作目录并设置只读或可编辑权限", "📁", "tools"],
-  ["checkpoint", "查看对话快照并回退文件、对话或两者", "⏪", "tools"],
-  ["status", "查看当前模型、数据源和 Token 上下文状态", "📡", "tools"],
-  ["skills", "查看、选择或刷新数据分析 Skill", "🧩", "tools"],
-  ["new", "新建一个干净的分析会话", "✨", "session"],
-  ["stop", "停止当前正在生成的回复", "⏹️", "session"],
-  ["data", "打开当前数据源和数据表预览", "🗂️", "tools"],
-  ["jobs", "打开任务历史和运行状态", "🕘", "tools"],
-  ["teams", "打开分析团队和沟通记录", "👥", "tools"],
-];
+function fallbackTable(): ReadonlyArray<readonly [string, string, string, string]> {
+  return [
+    ["help", say("Show the available DataWhisper Agent commands and how to use them", "查看智析 Agent 可用命令及使用方法"), "❓", "tools"],
+    ["clear", say("Clear the current conversation but keep the data source, model and workspace connections", "清除当前对话内容，保留数据源、模型和工作目录连接"), "🧹", "session"],
+    ["compact", say("Compact the current conversation context now, keeping key conclusions and recent content", "立即压缩当前对话上下文，保留关键结论和最近内容"), "🗜️", "session"],
+    ["instruction", say("Set a temporary instruction that applies only to the current analysis conversation", "设置仅对当前分析对话生效的临时指令"), "📝", "session"],
+    ["sessions", say("Refresh saved conversations, or start a new analysis conversation", "刷新已保存对话，或新建分析对话"), "💬", "session"],
+    ["mcp", say("Open MCP connection and tool management", "打开 MCP 连接与工具管理"), "🔌", "tools"],
+    ["knowledge", say("Open the business knowledge base to manage metric definitions, rules and references", "打开业务知识库，管理指标口径、规则和参考资料"), "🧠", "tools"],
+    ["workspace", say("Connect a workspace folder and set read-only or editable access", "连接工作目录并设置只读或可编辑权限"), "📁", "tools"],
+    ["checkpoint", say("View conversation snapshots and roll back files, the conversation, or both", "查看对话快照并回退文件、对话或两者"), "⏪", "tools"],
+    ["status", say("Show the current model, data source and token context status", "查看当前模型、数据源和 Token 上下文状态"), "📡", "tools"],
+    ["skills", say("View, select or refresh data analysis skills", "查看、选择或刷新数据分析 Skill"), "🧩", "tools"],
+    ["new", say("Start a fresh analysis session", "新建一个干净的分析会话"), "✨", "session"],
+    ["stop", say("Stop the reply that is currently being generated", "停止当前正在生成的回复"), "⏹️", "session"],
+    ["data", say("Open the current data source and table previews", "打开当前数据源和数据表预览"), "🗂️", "tools"],
+    ["jobs", say("Open task history and run status", "打开任务历史和运行状态"), "🕘", "tools"],
+    ["teams", say("Open analysis teams and their communication records", "打开分析团队和沟通记录"), "👥", "tools"],
+  ];
+}
 const FALLBACK_ACTIONS: Readonly<Record<string, string>> = {
   instruction: "plan",
   sessions: "session",
@@ -398,7 +401,7 @@ export function builtinCommands(builtinDir: string | undefined): CommandDef[] {
     }
     if (loaded.length > 0) return loaded;
   }
-  return FALLBACK.map(([name, description, icon, category]) => {
+  return fallbackTable().map(([name, description, icon, category]) => {
     const own = <T>(table: Readonly<Record<string, T>>) => (Object.hasOwn(table, name) ? table[name] : undefined);
     const isCompact = name === "compact";
     return makeCommandDef({
@@ -550,12 +553,26 @@ export function evaluateCommandAvailability(
   if (context === null) return AVAILABLE;
   if (command.name === "compact") {
     if (context.historyLength < 4) {
-      return { available: false, code: "not_enough_context", reason: "当前对话内容较少，暂时不需要压缩。" };
+      return {
+        available: false,
+        code: "not_enough_context",
+        reason: say("The conversation is too short to need compacting yet.", "当前对话内容较少，暂时不需要压缩。"),
+      };
     }
-    if (!context.modelAvailable) return { available: false, code: "model_required", reason: "请先配置并选择模型。" };
+    if (!context.modelAvailable) {
+      return {
+        available: false,
+        code: "model_required",
+        reason: say("Configure and select a model first.", "请先配置并选择模型。"),
+      };
+    }
   }
   if ((command.name === "checkpoint" || command.name === "teams") && !context.workspaceMounted) {
-    return { available: false, code: "workspace_required", reason: "请先连接工作目录。" };
+    return {
+      available: false,
+      code: "workspace_required",
+      reason: say("Connect a workspace folder first.", "请先连接工作目录。"),
+    };
   }
   return AVAILABLE;
 }

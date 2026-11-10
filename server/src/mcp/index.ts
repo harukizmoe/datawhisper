@@ -20,6 +20,7 @@
 import { defineExtension, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { type McpCatalogEntry, type McpCatalogReader, searchMcpCatalog } from "../tools/app/mcp.ts";
 import { type McpClientOptions, McpServerClient } from "./client.ts";
+import { say } from "../i18n.ts";
 import type { McpServerConfig } from "./config.ts";
 import {
   buildMcpCatalog,
@@ -192,12 +193,12 @@ export async function createMcpTools(config: McpToolsConfig): Promise<McpTools> 
         // Python `split("__", 2)`：只切前两个分隔符，原始工具名里的 `__` 保留。
         const parts = fullName.split("__");
         if (parts.length < 3 || parts[0] !== "mcp") {
-          return formatMcpError("unknown", fullName, `无效的 MCP 工具名格式: ${fullName}`);
+          return formatMcpError("unknown", fullName, say(`Invalid MCP tool name format: ${fullName}`, `无效的 MCP 工具名格式: ${fullName}`));
         }
         const serverId = parts[1]!;
         const rawName = parts.slice(2).join("__");
         const client = clients.get(serverId);
-        if (client === undefined) return formatMcpError(serverId, rawName, "服务器未注册");
+        if (client === undefined) return formatMcpError(serverId, rawName, say("Server is not registered", "服务器未注册"));
         return (await client.callTool(rawName, args)).text;
       } catch (error) {
         return formatMcpError("unknown", fullName, error instanceof Error ? error.message : String(error));

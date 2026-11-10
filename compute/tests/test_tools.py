@@ -386,7 +386,7 @@ class WorkerBehaviourTest(ToolsTestBase):
         payload = json.loads(result["text"])
         self.assertTrue(payload["ok"], payload)
         self.assertEqual(payload["source_id"], "web1")
-        self.assertIn("=== 数据源 2: stores_web ===", payload["schema"])
+        self.assertIn("=== Source 2: stores_web ===", payload["schema"])
         table = payload["tables"][0]["name"]
         rows = self.client.result("tool.query_data", {"context": self.context("web1"), "args": {
             "sql": f'SELECT COUNT(*) AS n FROM "{table}"'}})

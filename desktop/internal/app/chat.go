@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"datawhisper/desktop/internal/conversation"
+	"datawhisper/desktop/internal/i18n"
 	"datawhisper/desktop/internal/service"
 )
 
@@ -392,6 +393,29 @@ func (a *app) refreshCommands() {
 				return // 目录加载失败时输入框就不提供补全，不影响普通消息
 			}
 			a.cv.commands = commands
+		})
+	}()
+}
+
+// syncLanguage 把界面语言告诉服务（app.setLanguage），之后重新拉命令目录：命令说明由服务按语言给出。
+// 设置语言失败时服务沿用上一次的语言，目录照样拉，界面本身不受影响。
+// 服务只认 "en" 与 "zh"，界面里的中文标记是 i18n.ZH（zh-Hans），在这里换算。
+func (a *app) syncLanguage() {
+	client, lang := a.client, "en"
+	if a.lang == i18n.ZH {
+		lang = "zh"
+	}
+	if client == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = client.SetLanguage(ctx, lang)
+		a.post(func() {
+			if client == a.client {
+				a.refreshCommands()
+			}
 		})
 	}()
 }

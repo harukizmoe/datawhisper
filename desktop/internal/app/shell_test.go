@@ -505,3 +505,40 @@ func TestSettingsControlsChangeThemeAndLanguage(t *testing.T) {
 	}
 	expectTexts(t, tt, []string{"外观", "语言", "数据目录", "服务日志"}, []string{"Appearance", "Data folder"})
 }
+
+// 服务里的错误文案、命令说明跟着界面语言：连上时告诉服务当前语言，切换后再告诉一次，并重拉命令目录。
+func TestServiceLearnsTheInterfaceLanguage(t *testing.T) {
+	fs := newFakeService(t)
+	q := newQueue()
+	a := newTestApp(t, q)
+	// 真实启动时 run.go 已把偏好解析成具体语言；测试应用不经过它，这里补上。
+	a.lang = i18n.EN
+	tt := ui.NewTester(a.view, 1180, 760)
+
+	languages := func() []any {
+		var out []any
+		for _, call := range fs.callsTo("app.setLanguage") {
+			out = append(out, call["lang"])
+		}
+		return out
+	}
+
+	a.onService(fs.ready(41))
+	q.pump(t, tt, "the first language call", func() bool { return len(languages()) == 1 && len(fs.callsTo("command.list")) == 1 })
+	if got := languages(); got[0] != "en" {
+		t.Fatalf("languages on connect: %v", got)
+	}
+
+	a.setLanguage(i18n.ZH)
+	q.pump(t, tt, "the switch to Chinese", func() bool { return len(languages()) == 2 && len(fs.callsTo("command.list")) == 2 })
+	if got := languages(); got[1] != "zh" {
+		t.Fatalf("languages after the switch: %v", got)
+	}
+
+	// 偏好没有变化时不重复通知服务。
+	a.setLanguage(i18n.ZH)
+	q.run()
+	if got := languages(); len(got) != 2 {
+		t.Errorf("an unchanged language notified the service again: %v", got)
+	}
+}

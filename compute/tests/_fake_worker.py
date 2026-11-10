@@ -4,6 +4,7 @@ import os
 import sys
 import time
 
+from compute.i18n import say
 from compute.rpc import RpcError, run
 
 
@@ -53,7 +54,13 @@ def event(ctx, params):
     return {"sent": True}
 
 
+def greet(ctx, params):
+    # 返回收到的参数，证明保留参数 `_lang` 没有漏给方法。
+    return {"text": say("hello", "你好"), "params": params}
+
+
 run({
+    "greet": greet,
     "ping": lambda ctx, params: {"pid": os.getpid()},
     "echo": echo,
     "sleep": sleep,

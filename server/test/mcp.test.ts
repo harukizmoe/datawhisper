@@ -6,6 +6,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { afterEach as restoreLanguage, beforeEach as useChinese } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -77,6 +79,10 @@ async function until(predicate: () => boolean, timeoutMs = 2_000): Promise<void>
     await tick.promise;
   }
 }
+
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage("zh"));
+restoreLanguage(() => setLanguage("en"));
 
 describe("config", () => {
   test("validates like the old API (whitelist, shell metacharacters, blocked env)", () => {

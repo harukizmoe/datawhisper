@@ -8,6 +8,8 @@
  * SQLAlchemy 解析连接串时会把它们还原。
  */
 
+import { say } from "../i18n.ts";
+
 /** 表单里的数据库类型 → SQLAlchemy 驱动名与默认端口。 */
 const DRIVERS = {
   postgresql: { scheme: "postgresql+psycopg", port: 5432 },
@@ -37,21 +39,21 @@ export function sqlConfigProblem(
   // 调用方可能把连接串误放在 fields 里（存储层会把它挪进凭据库），这里与存储层口径一致。
   if ((secret.connection_string ?? fields.connection_string ?? "") !== "") return undefined;
   const driver = fields.driver ?? "";
-  if (driver === "") return { message: "请选择数据库类型，或在高级选项里填写连接串", reason: "missing_driver" };
-  if (!isDriver(driver)) return { message: `不支持的数据库类型：${driver}`, reason: "unsupported_driver" };
+  if (driver === "") return { message: say("Select a database type, or enter a connection string under advanced options", "请选择数据库类型，或在高级选项里填写连接串"), reason: "missing_driver" };
+  if (!isDriver(driver)) return { message: say(`Unsupported database type: ${driver}`, `不支持的数据库类型：${driver}`), reason: "unsupported_driver" };
   if (driver === "sqlite") {
     const file = fields.file ?? "";
-    if (file === "") return { message: "SQLite 文件路径不能为空", reason: "missing_file" };
+    if (file === "") return { message: say("SQLite file path cannot be empty", "SQLite 文件路径不能为空"), reason: "missing_file" };
     // `?` 在连接串里是查询参数的分隔符，文件路径没法转义它。
-    if (file.includes("?")) return { message: "SQLite 文件路径不能包含 ?", reason: "invalid_file" };
+    if (file.includes("?")) return { message: say("SQLite file path cannot contain ?", "SQLite 文件路径不能包含 ?"), reason: "invalid_file" };
     return undefined;
   }
-  if ((fields.host ?? "") === "") return { message: "主机不能为空", reason: "missing_host" };
+  if ((fields.host ?? "") === "") return { message: say("Host cannot be empty", "主机不能为空"), reason: "missing_host" };
   const port = fields.port ?? "";
   if (port !== "" && !(/^\d{1,5}$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
-    return { message: "端口必须是 1–65535 之间的数字", reason: "invalid_port" };
+    return { message: say("Port must be a number between 1 and 65535", "端口必须是 1–65535 之间的数字"), reason: "invalid_port" };
   }
-  if ((fields.database ?? "").includes("?")) return { message: "数据库名不能包含 ?", reason: "invalid_database" };
+  if ((fields.database ?? "").includes("?")) return { message: say("Database name cannot contain ?", "数据库名不能包含 ?"), reason: "invalid_database" };
   return undefined;
 }
 

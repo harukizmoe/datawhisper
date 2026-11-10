@@ -1,4 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { afterEach as restoreLanguage, beforeEach as useChinese } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +24,10 @@ import { FIXTURES, GOLDEN, materialize } from "./support/fs-spec.ts";
 const golden = JSON.parse(readFileSync(join(GOLDEN, "memory.json"), "utf8"));
 const memoryFixtures = join(FIXTURES, "memory");
 const temps: string[] = [];
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage("zh"));
+restoreLanguage(() => setLanguage("en"));
+
 afterAll(() => {
   for (const dir of temps) rmSync(dir, { recursive: true, force: true });
 });

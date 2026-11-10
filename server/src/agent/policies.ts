@@ -9,6 +9,7 @@ import {
   type ToolHooks,
 } from "@earendil-works/pi-durable";
 import type { Message } from "@earendil-works/pi-ai";
+import { say } from "../i18n.ts";
 import { confirmationBlock } from "../tools/guard/confirmation.ts";
 import { applyToolResultGuard } from "../tools/guard/index.ts";
 import type { EvidenceClaimStore } from "../tools/guard/evidence.ts";
@@ -102,7 +103,10 @@ export function dataWhisperPolicies(options: PolicyOptions = {}): Extension {
           if (parsed.length > 0 && !history.hasSystemNote) {
             const names = [...new Set(parsed.map((call) => call.name))].join(", ");
             return {
-              continue: `[SYSTEM NOTE] 你把工具调用写成了正文里的 XML 标签（${names}）。请改用原生工具调用重新发起，不要在正文里写标签。`,
+              continue: say(
+                `[SYSTEM NOTE] You wrote tool calls as XML tags in the message body (${names}). Re-issue them as native tool calls and do not write tags in the body.`,
+                `[SYSTEM NOTE] 你把工具调用写成了正文里的 XML 标签（${names}）。请改用原生工具调用重新发起，不要在正文里写标签。`,
+              ),
             };
           }
 

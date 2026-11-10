@@ -12,6 +12,7 @@ import { CUSTOM_PRESETS, type ModelService, type ProviderSettings, SettingsError
 import type { Jobs } from "../jobs/service.ts";
 import type { Workflows } from "../workflows/service.ts";
 import { appError, INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
+import { isLang, setLanguage } from "../i18n.ts";
 import { libraryMethods } from "./library.ts";
 import { orchestrationMethods } from "./orchestration.ts";
 import type { MapError, MethodParams, RpcMethod } from "./rpc.ts";
@@ -161,6 +162,14 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
     // 会话库/知识库/记忆/技能/hooks/仪表盘：compute 侧的数据根必须与这里一致，
     // 因此共用 `dataDir`（service.ts 给 compute 子进程设的 `BAA_DATA_DIR` 也是它）。
     ...libraryMethods({ harness, context, conversations, compute, dataDir: deps.dataDir }),
+
+    /** 桌面端的界面语言：之后服务与 compute 里面向用户、面向模型的文案都按它输出（见 `i18n.ts`）。 */
+    "app.setLanguage"(params) {
+      const lang = stringParam(params, "lang");
+      if (!isLang(lang)) throw invalidParams("'lang' must be \"en\" or \"zh\"");
+      setLanguage(lang);
+      return { lang };
+    },
 
     async health() {
       const inspection = await harness.inspect(context);

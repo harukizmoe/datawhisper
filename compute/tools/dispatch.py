@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator
 
+from compute.i18n import say
+
 BUSINESS_TOOLS = frozenset({
     "query_knowledge",
     "get_schema",
@@ -62,7 +64,7 @@ def normalize_chart_call_args(args: Dict[str, Any]) -> Dict[str, Any]:
         chart_type = "Bar_Chart"
     title = str(normalized.get("title") or "").strip()
     if not title:
-        title = f"数据可视化 · {chart_type.replace('_', ' ')}"
+        title = say(f"Data visualization · {chart_type.replace('_', ' ')}", f"数据可视化 · {chart_type.replace('_', ' ')}")
     normalized["chart_type"] = chart_type
     normalized["title"] = title[:120]
     return normalized
@@ -122,7 +124,7 @@ def run_business_tool(
         charts = [
             {
                 "html": html,
-                "title": f"数据概况分布图 {chart_offset + index}",
+                "title": say(f"Data profile distribution chart {chart_offset + index}", f"数据概况分布图 {chart_offset + index}"),
                 "chart_type": "profile",
                 "spec": {
                     "chart_type": "profile",
@@ -132,7 +134,7 @@ def run_business_tool(
             }
             for index, html in enumerate(result.get("charts", []), start=1)
         ]
-        return ToolOutcome(result.get("text", "数据概况生成失败。"), charts=charts)
+        return ToolOutcome(result.get("text", say("Data profile generation failed.", "数据概况生成失败。")), charts=charts)
     if name == "clean_data":
         return ToolOutcome((yield from host._tool_clean_data_with_jobs(
             operation=args.get("operation", ""),
@@ -153,7 +155,7 @@ def run_business_tool(
         )))
     if name == "export_report":
         return ToolOutcome((yield from host._tool_export_report_with_jobs(
-            title=args.get("title", "分析报告"),
+            title=args.get("title", say("Analysis report", "分析报告")),
             sections=args.get("sections", []),
         )))
     if name == "generate_ppt":
@@ -164,7 +166,7 @@ def run_business_tool(
         )))
     if name == "generate_dashboard":
         return ToolOutcome((yield from host._tool_generate_dashboard_with_jobs(
-            name=args.get("name", "数据看板"),
+            name=args.get("name", say("Data dashboard", "数据看板")),
             widgets=args.get("widgets", []),
             color_scheme=args.get("color_scheme", ""),
         )))

@@ -32,6 +32,7 @@ from data.sources._utils import is_write_sql
 from data.workspace import WorkspacePathAuthorization, workspace_manager
 
 from .dashboard import dashboard_path
+from .i18n import say
 from .rpc import INVALID_PARAMS, Cancelled, MethodContext, RpcError, str_param
 from .sources import Lease, SourceRegistry, _close, combined_schema
 from .tools.data import DataToolsMixin
@@ -248,12 +249,17 @@ def apply_table_selection(lease: Lease, tables: Any) -> None:
                 src.set_analysis_tables(valid)
                 lease.invalidate([source_id])
         if not src.get_analysis_tables():
-            missing.append({"source_id": source_id, "source_name": getattr(src, "name", "SQL 数据库")})
+            missing.append({"source_id": source_id, "source_name": getattr(src, "name", say("SQL database", "SQL 数据库"))})
     if missing:
         raise RpcError(
-            "SQL 数据源还没有选择分析表，所以现在看不到里面任何内容。"
-            "请告诉用户：在右侧「数据」面板里，点这个数据源卡片上的「选择数据表」（Choose tables），"
-            "勾选要分析的表并保存，然后重新提问。不要建议用户上传文件，也不要编造数据。",
+            say(
+                "This SQL source has no analysis tables selected yet, so nothing in it is visible right now. "
+                "Tell the user: in the Data panel on the right, click \"Tables\" (Choose tables) on this source's card, "
+                "tick the tables to analyze and save, then ask again. Do not suggest uploading a file and do not make up data.",
+                "SQL 数据源还没有选择分析表，所以现在看不到里面任何内容。"
+                "请告诉用户：在右侧「数据」面板里，点这个数据源卡片上的「选择数据表」（Choose tables），"
+                "勾选要分析的表并保存，然后重新提问。不要建议用户上传文件，也不要编造数据。",
+            ),
             data={"kind": "sql_table_selection_required", "sources": missing},
         )
 
@@ -286,7 +292,7 @@ def run_tool(rpc: MethodContext, registry: SourceRegistry, name: str, params: di
             log.exception("[tool] %s failed", name)
             raise RpcError(
                 str(exc),
-                data={"kind": "tool_error", "text": f"工具执行错误 [{name}]: {exc}"},
+                data={"kind": "tool_error", "text": say(f"Tool execution error [{name}]: {exc}", f"工具执行错误 [{name}]: {exc}")},
             ) from exc
         tables_changed = host.tables_touched or (
             name == "query_data" and is_write_sql(str(args.get("sql") or ""))
@@ -315,7 +321,7 @@ def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: 
     from data.table_extract import MAX_FETCH_BYTES, TableExtractError, parse_body
 
     from .tools.ingest import (
-        NO_GRIDS_TEXT, NO_TABLES_TEXT, extracted_source, extracted_source_text, fetch_error_text,
+        no_grids_text, no_tables_text, extracted_source, extracted_source_text, fetch_error_text,
     )
 
     context, args = parse_context(params)
@@ -330,17 +336,17 @@ def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: 
         raise RpcError(f"'body_base64' is not valid base64: {exc}", INVALID_PARAMS) from exc
     url = str(args.get("url") or "").strip()
     if len(raw) > MAX_FETCH_BYTES:
-        return _ingest_result(fetch_error_text("FETCH-002", f"内容超过 {MAX_FETCH_BYTES} 字节上限"))
+        return _ingest_result(fetch_error_text("FETCH-002", say(f"Content exceeds the {MAX_FETCH_BYTES}-byte limit", f"内容超过 {MAX_FETCH_BYTES} 字节上限")))
     try:
         grids = parse_body(raw, url, content_type)
     except TableExtractError as exc:
         return _ingest_result(fetch_error_text(exc.code, exc.message))
     if not grids:
-        return _ingest_result(NO_GRIDS_TEXT)
+        return _ingest_result(no_grids_text())
     rpc.check()
     source, tables, meta = extracted_source(grids, str(args.get("source_name") or "").strip(), url)
     if source is None:
-        return _ingest_result(NO_TABLES_TEXT)
+        return _ingest_result(no_tables_text())
     schema = _add_source(registry, sources, source_id, source)
     return _ingest_result(extracted_source_text(source_id, source, tables, meta, schema), source_id)
 

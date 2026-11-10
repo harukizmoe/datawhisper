@@ -11,6 +11,7 @@ import {
   ComputeError,
   ComputeUnavailable,
 } from "../../compute/client.ts";
+import { toolExecutionErrorText } from "../guard/result-policy.ts";
 import type {
   ComputeToolContext,
   ComputeToolDetails,
@@ -139,7 +140,7 @@ export function shapeToolError(tool: ComputeToolName, error: unknown): ShapedToo
       ? "compute_unavailable"
       : "tool_error";
   return {
-    text: `工具执行错误 [${tool}]: ${message}`,
+    text: toolExecutionErrorText(tool, message),
     details: { ...emptyDetails(tool), error: { kind, message, sources: [] } },
   };
 }

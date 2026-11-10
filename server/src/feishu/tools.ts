@@ -12,6 +12,7 @@
  * 读工具（列数据表）没有副作用，`replay: "safe"`：崩溃后重跑只会多读一次。
  */
 
+import { say } from "../i18n.ts";
 import type { ToolExecutionApi } from "@earendil-works/pi-durable";
 import { appendBitableRecords, createBitable, listBitableTables, updateBitableRecord } from "./bitable.ts";
 import type { FeishuClient } from "./client.ts";
@@ -72,14 +73,14 @@ async function writeOnce(
   if (claim.kind === "done") {
     const replay = replayOf(claim.entry.value);
     if (replay === undefined) {
-      return errorResult(tool, "飞书写入已执行过，但记录的结果已损坏；请读取目标表确认后再重试。");
+      return errorResult(tool, say("The Feishu write already ran, but its recorded result is corrupted; read the target table to confirm before retrying.", "飞书写入已执行过，但记录的结果已损坏；请读取目标表确认后再重试。"));
     }
     return { output: [{ type: "text", text: replay.text }], details: { ...replay.details, deduplicated: true } };
   }
   if (claim.kind === "unfinished") {
     return errorResult(
       tool,
-      "飞书多维表格写入的上一次尝试未完成，结果未知；为避免重复写入已停止，请先读取目标表确认后再重试。",
+      say("The previous Feishu Bitable write attempt did not finish and its outcome is unknown; stopped to avoid a duplicate write. Read the target table to confirm before retrying.", "飞书多维表格写入的上一次尝试未完成，结果未知；为避免重复写入已停止，请先读取目标表确认后再重试。"),
     );
   }
   try {
@@ -166,7 +167,7 @@ export function createFeishuTools(deps: FeishuToolDeps): AppTool[] {
       async execute(args, api) {
         try {
           return await writeOnce(deps, "create_feishu_bitable", api, args, async (client) => ({
-            message: "飞书多维表格已创建。请把 url 作为可点击链接交付给用户。",
+            message: say("The Feishu Bitable was created. Give the url to the user as a clickable link.", "飞书多维表格已创建。请把 url 作为可点击链接交付给用户。"),
             ...(await createBitable(client, {
               name: args.name,
               tableName: args.table_name,
@@ -205,7 +206,7 @@ export function createFeishuTools(deps: FeishuToolDeps): AppTool[] {
       async execute(args, api) {
         try {
           return await writeOnce(deps, "append_feishu_bitable_records", api, args, async (client) => ({
-            message: "分析结果已追加写入飞书多维表格。请把 url 作为可点击链接交付给用户。",
+            message: say("The analysis results were appended to the Feishu Bitable. Give the url to the user as a clickable link.", "分析结果已追加写入飞书多维表格。请把 url 作为可点击链接交付给用户。"),
             ...(await appendBitableRecords(client, {
               bitable: args.bitable,
               tableId: args.table_id,
@@ -237,7 +238,7 @@ export function createFeishuTools(deps: FeishuToolDeps): AppTool[] {
       async execute(args, api) {
         try {
           return await writeOnce(deps, "update_feishu_bitable_record", api, args, async (client) => ({
-            message: "飞书多维表格记录已更新。请把 url 作为可点击链接交付给用户。",
+            message: say("The Feishu Bitable record was updated. Give the url to the user as a clickable link.", "飞书多维表格记录已更新。请把 url 作为可点击链接交付给用户。"),
             ...(await updateBitableRecord(client, {
               bitable: args.bitable,
               tableId: args.table_id,

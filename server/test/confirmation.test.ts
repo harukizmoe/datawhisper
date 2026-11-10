@@ -6,6 +6,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { afterEach as restoreLanguage, beforeEach as useChinese } from "bun:test";
+import { setLanguage } from "../src/i18n.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { HookApi, ToolHookCall } from "@earendil-works/pi-durable";
 import { dataWhisperPolicies } from "../src/agent/policies.ts";
@@ -23,6 +25,10 @@ function check(name: string, options: { args?: Record<string, unknown>; token?: 
     message: options.message ?? "",
   });
 }
+
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage("zh"));
+restoreLanguage(() => setLanguage("en"));
 
 describe("confirmation = none", () => {
   test("放行，也不看参数与消息", () => {

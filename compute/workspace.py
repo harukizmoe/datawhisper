@@ -10,6 +10,7 @@ import re
 import traceback
 from pathlib import Path
 
+from .i18n import say
 from .rpc import Cancelled
 
 log = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
         # 算 sha256 检测变化
         current_hash = runtime.compute_file_hash(Path(file_path))
         if not current_hash:
-            errors.append(f"{name}: 无法读取文件")
+            errors.append(say(f"{name}: cannot read file", f"{name}: 无法读取文件"))
             continue
 
         old_entry = registry.get(file_key)
@@ -114,13 +115,13 @@ def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
                 if ok:
                     tables = [base_table]
                 else:
-                    errors.append(f"{name}: CSV 注册失败")
+                    errors.append(say(f"{name}: CSV registration failed", f"{name}: CSV 注册失败"))
                     continue
             else:
                 with runtime.db_lock:
                     tables = source._register_excel(file_path, base_table)
                 if not tables:
-                    errors.append(f"{name}: Excel 无可注册的 sheet")
+                    errors.append(say(f"{name}: no Excel sheet could be registered", f"{name}: Excel 无可注册的 sheet"))
                     continue
 
             # 更新 registry

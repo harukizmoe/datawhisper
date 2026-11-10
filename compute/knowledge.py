@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from .i18n import say
 from .rpc import INVALID_PARAMS, MethodContext, RpcError, int_param, str_param
 
 KNOWLEDGE_FILE_SUFFIXES = {".xlsx", ".xls", ".docx"}
@@ -214,11 +215,11 @@ def knowledge_parse(ctx: MethodContext, params: dict) -> dict:
     suffix = Path(name).suffix.lower()
     if suffix not in KNOWLEDGE_FILE_SUFFIXES:
         raise RpcError(
-            f"不支持的文件格式 {suffix}，请上传 .xlsx / .xls / .docx",
+            say(f"Unsupported file format {suffix}; upload .xlsx / .xls / .docx", f"不支持的文件格式 {suffix}，请上传 .xlsx / .xls / .docx"),
             INVALID_PARAMS, data={"kind": "unsupported_format"},
         )
     if not source.is_file():
-        raise RpcError(f"文件不存在：{source}", data={"kind": "file_not_found"})
+        raise RpcError(say(f"File does not exist: {source}", f"文件不存在：{source}"), data={"kind": "file_not_found"})
     target = _knowledge_dir() / stored_filename(name)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, target)
@@ -226,7 +227,7 @@ def knowledge_parse(ctx: MethodContext, params: dict) -> dict:
         parsed = read_knowledge_file(str(target))
     except Exception as exc:
         target.unlink(missing_ok=True)
-        raise RpcError(f"文件解析失败：{exc}", data={"kind": "parse_failed"}) from exc
+        raise RpcError(say(f"Failed to parse file: {exc}", f"文件解析失败：{exc}"), data={"kind": "parse_failed"}) from exc
     return {
         "filename": target.name,
         "format": parsed["format"],
@@ -267,18 +268,18 @@ def knowledge_confirm(ctx: MethodContext, params: dict) -> dict:
     with _knowledge_base() as kb:
         if records:
             ctx.check()
-            ctx.progress(10, "正在写入知识条目")
+            ctx.progress(10, say("Writing knowledge entries", "正在写入知识条目"))
             inserted = kb.bulk_insert(records, category_id=category_id)
         source_path = _knowledge_dir() / filename if filename else None
         if source_path and source_path.is_file() and source_path.suffix.lower() in KNOWLEDGE_FILE_SUFFIXES:
             ctx.check()
-            ctx.progress(40, "正在提取文档文本")
+            ctx.progress(40, say("Extracting document text", "正在提取文档文本"))
             text = extract_text(str(source_path))
             if text.strip():
                 ctx.check()
-                ctx.progress(60, "正在建立检索索引")
+                ctx.progress(60, say("Building search index", "正在建立检索索引"))
                 rag = kb.index_document(filename, text, source_type="file", category_id=category_id)
-    ctx.progress(100, "知识入库完成")
+    ctx.progress(100, say("Knowledge import complete", "知识入库完成"))
     return {"inserted": inserted, "rag": rag}
 
 
@@ -304,10 +305,10 @@ def knowledge_rebuild_embeddings(ctx: MethodContext, params: dict) -> dict:
     """``knowledge.rebuildEmbeddings {}``：对向量已过期（embedder 变了）的文档分块与
     记录重新计算 embedding -> ``{"rebuilt", "document_chunks",
     "structured_records"}``。skill 的向量属于 agent 服务。"""
-    ctx.progress(5, "正在重建知识库向量")
+    ctx.progress(5, say("Rebuilding knowledge base vectors", "正在重建知识库向量"))
     with _knowledge_base() as kb:
         result = kb.rebuild_all_embeddings()
-    ctx.progress(100, "知识库向量已重建")
+    ctx.progress(100, say("Knowledge base vectors rebuilt", "知识库向量已重建"))
     return result
 
 
@@ -366,7 +367,7 @@ def embed_set_cloud_config(ctx: MethodContext, params: dict) -> dict:
     except ValueError as exc:
         raise RpcError(str(exc), INVALID_PARAMS) from exc
     except Exception as exc:  # 探测时的网络或响应失败
-        raise RpcError(f"云端嵌入服务测试失败：{exc}", data={"kind": "cloud_test_failed"}) from exc
+        raise RpcError(say(f"Cloud embedding service test failed: {exc}", f"云端嵌入服务测试失败：{exc}"), data={"kind": "cloud_test_failed"}) from exc
     return {"test": None, **config}
 
 

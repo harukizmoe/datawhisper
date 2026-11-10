@@ -71,8 +71,6 @@ export type AppToolDeps = {
   /** 会话身份，写入文档/画布时使用。 */
   readonly sessionId: string;
   readonly workspaceId?: string;
-  /** 用户界面语言：影响 PPT 布局标签（`_tt` 语义）。 */
-  readonly uiLang?: "zh" | "en";
   /** 会话级配色偏好；`set_ppt_color_scheme` 就地更新它，图表/PPT 读取。 */
   readonly colorScheme?: { value: string };
   /** 时钟；测试可固定，避免真实计时器。 */

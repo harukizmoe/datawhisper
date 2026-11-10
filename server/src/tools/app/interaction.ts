@@ -8,6 +8,7 @@
 
 import type { JsonValue } from "@earendil-works/chord";
 import { BUILTIN_TOOL_REGISTRY } from "../registry.ts";
+import { say } from "../../i18n.ts";
 import { activateSkill, getSkill, type SkillDirs } from "../../agent/skills.ts";
 import { errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "./types.ts";
 import { searchMcpCatalog } from "./mcp.ts";
@@ -122,7 +123,7 @@ export function createInteractionTools(deps: AppToolDeps): AppTool[] {
         const normalized = normalizeAskUser(args);
         const problem = validateAskUser(normalized.question, normalized.options, args.options);
         if (problem !== undefined) return errorResult("ask_user", problem);
-        return okResult("ask_user", "问题已展示给用户，等待用户回答后继续。请不要输出任何文字。", {
+        return okResult("ask_user", say("The question has been shown to the user. Wait for their answer before continuing. Do not output any text.", "问题已展示给用户，等待用户回答后继续。请不要输出任何文字。"), {
           tool: "ask_user",
           question: normalized.question,
           options: normalized.options,

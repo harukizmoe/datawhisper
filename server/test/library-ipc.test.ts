@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { listMemoryRecords } from "../src/agent/memory.ts";
 import { ComputeError } from "../src/compute/client.ts";
 import { loadConfig } from "../src/config.ts";
+import { setLanguage } from "../src/i18n.ts";
 import { APP_ERROR, INVALID_PARAMS, RpcError } from "../src/ipc/errors.ts";
 import { createLibrary, type Library } from "../src/ipc/library.ts";
 import type { MethodParams } from "../src/ipc/rpc.ts";
@@ -176,11 +177,31 @@ describe("session library", () => {
     const exported = await rpc<{ filename: string; content: string }>(library, "session.export", { id, format: "md" });
     expect(exported.filename).toBe("季度复盘.md");
     expect(exported.content).toContain("# 季度复盘");
-    expect(exported.content).toContain("## 用户");
-    expect(exported.content).toContain("## 助手");
-    expect(exported.content).toContain("- 工具调用: `query_data`");
+    expect(exported.content).toContain("## User");
+    expect(exported.content).toContain("## Assistant");
+    expect(exported.content).toContain("- Tool call: `query_data`");
     expect(exported.content).toContain('"sql":"select 1"');
-    expect(exported.content.split("工具调用")).toHaveLength(2);
+    expect(exported.content.split("Tool call")).toHaveLength(2);
+  });
+});
+
+describe("session export language", () => {
+  test("markdown export follows the UI language", async () => {
+    const { library, service } = await start();
+    const id = await addConversation(service, [
+      userDraft("你好"),
+      assistantDraft("世界", { name: "query_data", args: { sql: "select 1" } }),
+    ]);
+    setLanguage("zh");
+    try {
+      const exported = await rpc<{ content: string }>(library, "session.export", { id, format: "md" });
+      expect(exported.content).toContain("## 用户");
+      expect(exported.content).toContain("## 助手");
+      expect(exported.content).toContain("- 工具调用: `query_data`");
+      expect(exported.content).toContain("- 会话 ID:");
+    } finally {
+      setLanguage("en");
+    }
   });
 });
 

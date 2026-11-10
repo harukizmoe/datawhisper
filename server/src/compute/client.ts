@@ -11,6 +11,8 @@
  * 超过 `maxRestarts`，则不再重启：此后调用以 ComputeUnavailable 失败。
  */
 
+import { language } from "../i18n.ts";
+
 export const RPC_CANCELLED = -32800;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -267,7 +269,8 @@ export class ComputeClient {
     signal?.addEventListener("abort", onAbort, { once: true });
     worker.pending.set(id, { resolve, reject, options });
     try {
-      this.write(worker, { jsonrpc: "2.0", id, method, params });
+      // 界面语言随每个请求带过去，compute 里的用户可见文案据此选语言（见 compute/i18n.py）。
+      this.write(worker, { jsonrpc: "2.0", id, method, params: { ...params, _lang: language() } });
     } catch {
       worker.pending.delete(id);
       reject(new ComputeCrashed(worker.proc.exitCode, this.tail()));

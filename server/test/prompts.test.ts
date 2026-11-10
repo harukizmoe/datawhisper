@@ -1,6 +1,8 @@
 // TS 提示词移植版与真实 Python（agent/prompts.py）的一致性。
 // 用例来自 scripts/golden/export_prompts.py -> test/golden/prompts.json。
 import { describe, expect, test } from 'bun:test'
+import { afterEach as restoreLanguage, beforeEach as useChinese } from 'bun:test'
+import { setLanguage } from '../src/i18n.ts'
 import golden from './golden/prompts.json' with { type: 'json' }
 import {
   ANALYZE_GUIDE,
@@ -35,6 +37,10 @@ import {
 } from '../src/agent/prompts.ts'
 
 const show = (s: string | null) => JSON.stringify(s)?.slice(0, 80)
+
+// 这个文件断言的是旧实现的中文文案（golden 或沿用旧文案的用例），所以按中文跑；英文输出另见 i18n 用例。
+useChinese(() => setLanguage('zh'))
+restoreLanguage(() => setLanguage('en'))
 
 describe('static blocks', () => {
   const ts: Record<string, string> = {
