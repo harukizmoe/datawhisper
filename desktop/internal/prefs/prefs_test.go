@@ -117,3 +117,33 @@ func TestLayoutChoicesFallBack(t *testing.T) {
 		t.Errorf("invalid choices kept: %+v", got)
 	}
 }
+
+// TestTranscriptChoices 断言思考与工具输出只接受已知取值；折叠开关默认开，旧文件缺这些字段时保持默认，
+// 文件里明确写了 false 就是关。
+func TestTranscriptChoices(t *testing.T) {
+	in := DefaultAppearance()
+	in.Thinking, in.ToolOutput, in.FoldRuns = ThinkingHidden, OutputCollapsed, false
+	if got := NormalizeAppearance(in); got != in {
+		t.Errorf("valid choices changed: %+v", got)
+	}
+	in.Thinking, in.ToolOutput = "peek", "all"
+	got := NormalizeAppearance(in)
+	if got.Thinking != ThinkingCollapsed || got.ToolOutput != OutputPreview {
+		t.Errorf("invalid choices kept: %+v", got)
+	}
+
+	path := filepath.Join(t.TempDir(), "ui.json")
+	if err := os.WriteFile(path, []byte(`{"appearance":{"toolOutput":"hidden"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded := Load(path).Appearance
+	if !loaded.FoldRuns || loaded.Thinking != ThinkingCollapsed || loaded.ToolOutput != OutputHidden {
+		t.Errorf("partial file %+v", loaded)
+	}
+	if err := os.WriteFile(path, []byte(`{"appearance":{"foldRuns":false}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if Load(path).Appearance.FoldRuns {
+		t.Error("foldRuns:false in the file was lost")
+	}
+}

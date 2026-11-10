@@ -23,6 +23,7 @@ func (a *app) appearanceSettings(c *ui.Context, t *ui.Theme) {
 				a.schemeSection(c, t)
 				a.accentSection(c, t)
 				a.layoutSection(c, t)
+				a.transcriptSection(c, t)
 				a.fontSection(c, t)
 				a.themeFilesSection(c, t)
 				if a.prefsErr != "" {
@@ -203,6 +204,31 @@ func (a *app) layoutSection(c *ui.Context, t *ui.Theme) {
 			a.segmentedChoice(c, a.tr("settings.chatWidth"), ap.ChatWidth, prefs.ChatWidths,
 				[]string{a.tr("settings.widthNarrow"), a.tr("settings.widthStandard"), a.tr("settings.widthWide"), a.tr("settings.widthFull")},
 				func(v string) { a.setAppearance(func(ap *prefs.Appearance) { ap.ChatWidth = v }) })
+		})
+	})
+}
+
+// transcriptSection 是对话里过程性内容的显示：工具调用折不折成一行、思考怎么显示、工具输出怎么显示
+// （参考 Tern 的 Fold tool calls 与 Expand thoughts，并多一档「隐藏」）。
+func (a *app) transcriptSection(c *ui.Context, t *ui.Theme) {
+	ap := a.appearance()
+	a.settingGroup(c, t, a.tr("settings.transcript"), a.tr("settings.transcriptTip"), func() {
+		a.labeledRow(c, t, a.tr("settings.foldRuns"), func() {
+			on := ap.FoldRuns
+			if ui.Switch(c, &on).Label(a.tr("settings.foldRuns")).Tooltip(a.tr("settings.foldRunsTip")).Changed() {
+				a.setAppearance(func(ap *prefs.Appearance) { ap.FoldRuns = on })
+			}
+			ui.Text(c, a.tr("settings.foldRunsTip")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Grow(1).MinWidth(0)
+		})
+		a.labeledRow(c, t, a.tr("settings.thinking"), func() {
+			a.segmentedChoice(c, a.tr("settings.thinking"), ap.Thinking, prefs.ThinkingModes,
+				[]string{a.tr("settings.modeCollapsed"), a.tr("settings.modeExpanded"), a.tr("settings.modeHidden")},
+				func(v string) { a.setAppearance(func(ap *prefs.Appearance) { ap.Thinking = v }) })
+		})
+		a.labeledRow(c, t, a.tr("settings.toolOutput"), func() {
+			a.segmentedChoice(c, a.tr("settings.toolOutput"), ap.ToolOutput, prefs.OutputModes,
+				[]string{a.tr("settings.modePreview"), a.tr("settings.modeCollapsed"), a.tr("settings.modeExpanded"), a.tr("settings.modeHidden")},
+				func(v string) { a.setAppearance(func(ap *prefs.Appearance) { ap.ToolOutput = v }) })
 		})
 	})
 }

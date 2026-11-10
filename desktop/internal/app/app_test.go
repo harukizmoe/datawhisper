@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"datawhisper/desktop/internal/conversation"
+	"datawhisper/desktop/internal/prefs"
 	"datawhisper/desktop/internal/service"
 	"datawhisper/desktop/internal/supervisor"
 	"github.com/egoist/mygo/ui"
@@ -509,6 +510,8 @@ func TestChatShowsTheRecordedStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &app{post: func(fn func()) { fn() }, conv: 1}
+	a.prefs = prefs.Default()
+	a.prefs.Appearance.FoldRuns = false // 这个用例检查流式过程中的工具卡片，不是折叠后的摘要行
 	tt := ui.NewTester(a.view, 1180, 760)
 	var replica conversation.Replica
 	streamed := map[string]bool{}

@@ -76,6 +76,12 @@ type Appearance struct {
 	Density   string `json:"density"`
 	Radius    string `json:"radius"`
 	ChatWidth string `json:"chatWidth"`
+	// FoldRuns：回答出现后，一轮里连续的工具调用折成一行「Worked for …」（参考 Tern 的 Fold tool calls）。
+	FoldRuns bool `json:"foldRuns"`
+	// Thinking 决定思考内容怎么显示：ThinkingCollapsed、ThinkingExpanded 或 ThinkingHidden。
+	Thinking string `json:"thinking"`
+	// ToolOutput 决定工具输出怎么显示：OutputPreview、OutputCollapsed、OutputExpanded 或 OutputHidden。
+	ToolOutput string `json:"toolOutput"`
 }
 
 // 界面风格、密度、圆角与对话宽度的取值。
@@ -95,6 +101,24 @@ const (
 	ChatWidthStandard = "standard"
 	ChatWidthWide     = "wide"
 	ChatWidthFull     = "full"
+)
+
+// 思考内容与工具输出的显示方式。失败的工具调用不受「折叠」与「隐藏」影响，始终完整显示错误。
+const (
+	ThinkingCollapsed = "collapsed" // 折成一行「思考 ›」，点开看全文
+	ThinkingExpanded  = "expanded"  // 思考全文直接显示，不进折叠组
+	ThinkingHidden    = "hidden"    // 不显示
+
+	OutputPreview   = "preview"   // 只显示末尾几行，更早的行折叠
+	OutputCollapsed = "collapsed" // 只留一行「显示输出」，点开看全文
+	OutputExpanded  = "expanded"  // 直接显示全文
+	OutputHidden    = "hidden"    // 不显示输出
+)
+
+// ThinkingModes 与 OutputModes 是各项的全部取值，设置页按这个顺序列出。
+var (
+	ThinkingModes = []string{ThinkingCollapsed, ThinkingExpanded, ThinkingHidden}
+	OutputModes   = []string{OutputPreview, OutputCollapsed, OutputExpanded, OutputHidden}
 )
 
 // Layouts、Densities、Radii 与 ChatWidths 是各项的全部取值，设置页按这个顺序列出。
@@ -127,6 +151,9 @@ func DefaultAppearance() Appearance {
 		Density:        DensityStandard,
 		Radius:         RadiusStandard,
 		ChatWidth:      ChatWidthStandard,
+		FoldRuns:       true,
+		Thinking:       ThinkingCollapsed,
+		ToolOutput:     OutputPreview,
 	}
 }
 
@@ -173,6 +200,12 @@ func NormalizeAppearance(in Appearance) Appearance {
 	}
 	if !oneOf(out.ChatWidth, ChatWidths) {
 		out.ChatWidth = def.ChatWidth
+	}
+	if !oneOf(out.Thinking, ThinkingModes) {
+		out.Thinking = def.Thinking
+	}
+	if !oneOf(out.ToolOutput, OutputModes) {
+		out.ToolOutput = def.ToolOutput
 	}
 	return out
 }

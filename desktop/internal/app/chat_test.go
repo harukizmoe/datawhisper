@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"datawhisper/desktop/internal/conversation"
+	"datawhisper/desktop/internal/prefs"
 	"datawhisper/desktop/internal/service"
 	"github.com/egoist/mygo/ui"
 )
@@ -413,6 +414,8 @@ func TestThinkingTurnMetaAndNavRail(t *testing.T) {
 		{Key: "g10", Role: "assistant", Text: "partial", Done: false},
 	}
 	a.chat.Busy = true
+	a.prefs = prefs.Default()
+	a.prefs.Appearance.FoldRuns = false // 检查单独的「Thought」行；折叠成组的情形见 chat_fold_test.go
 	tt := ui.NewTester(a.view, 1180, 900)
 	expectTexts(t, tt, []string{"Thought", "first answer", "in 1.2k", "out 300", "cache 4k", "$0.0125", "Copy", "Jump to this question"},
 		[]string{"consider the schema first"})

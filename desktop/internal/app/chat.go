@@ -45,10 +45,16 @@ type chatView struct {
 	// busyMode 是回复进行中按下 Enter 的行为：0 排队（followUp），1 插队（steer）。
 	busyMode int
 
-	// openThinking 记住哪些思考行被展开；默认折叠成一行「思考 ›」。
+	// openThinking 记住哪些思考行被点过：「折叠」方式下点开，「展开」方式下不用（那时没有切换）。
 	openThinking map[string]bool
-	// openOutputs 记住哪些工具卡片的输出被完整展开；默认只显示末尾几行（失败的卡片除外）。
+	// openOutputs 记住哪些工具卡片的输出被点过，相对「工具输出」方式的默认状态翻转一次：预览/折叠 → 全文，
+	// 展开 → 预览（失败的卡片始终是全文）。
 	openOutputs map[string]bool
+	// openRuns 记住哪些折叠的工具调用组被点开（键是组内第一条消息的 key）。
+	openRuns map[string]bool
+	// rows 与 rowOf 是这一帧的消息行划分（chat_fold.go）：rowOf[i] 是消息 i 所在的行，导航与跳转据此换算。
+	rows  []chatRow
+	rowOf []int
 	// fullChart 与 fullOpen 是全屏查看的图表（richcontent.go）。
 	fullChart conversation.Chart
 	fullOpen  bool
@@ -93,7 +99,7 @@ func (v *chatView) resetConversation() {
 	v.renaming, v.renameText, v.renameErr, v.renameBusy = false, "", "", false
 	v.modelChoice, v.thinkingChoice = "", ""
 	v.modelsTouched = false
-	v.openThinking, v.openOutputs, v.prov = nil, nil, nil
+	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
 	v.followPaused, v.fullOpen = false, false
 }
 

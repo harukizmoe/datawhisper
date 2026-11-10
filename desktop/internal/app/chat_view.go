@@ -48,20 +48,27 @@ func (a *app) chatPage(c *ui.Context) {
 		a.homeView(c)
 	} else {
 		turns := turnEnds(messages, a.chat.Busy)
+		a.cv.rows, a.cv.rowOf = chatRows(messages, a.appearance())
+		rows := a.cv.rows
 		ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
-			a.list.Key = func(i int) any { return messages[i].Key }
+			a.list.Key = func(i int) any { return rows[i].key }
 			// 跳到某条提问或某个出处之后暂停跟随底部，否则下一帧又被拉回去；回到底部后恢复（见 jumpTo）。
 			if a.cv.followPaused && a.list.AtEnd() && c.Now().Sub(a.cv.jumpedAt) > 500*time.Millisecond {
 				a.cv.followPaused = false
 			}
 			a.list.FollowEnd = !a.cv.followPaused
-			ui.List(c, &a.list, len(messages), func(i int) {
+			ui.List(c, &a.list, len(rows), func(i int) {
+				row := rows[i]
 				a.centered(c, func() {
-					a.message(c, messages[i])
-					if m := messages[i]; m.Role == "assistant" && m.Done {
-						a.provenanceRow(c, messages, i)
+					if row.folded {
+						a.foldedRun(c, row, messages[row.from:row.to])
+						return
 					}
-					if meta, ok := turns[i]; ok {
+					a.message(c, messages[row.from])
+					if m := messages[row.from]; m.Role == "assistant" && m.Done {
+						a.provenanceRow(c, messages, row.from)
+					}
+					if meta, ok := turns[row.from]; ok {
 						a.turnMeta(c, meta)
 					}
 				})
@@ -188,14 +195,18 @@ func (a *app) message(c *ui.Context, m conversation.Message) {
 	}
 }
 
-// thinkingRow 是回复前的思考：默认折叠成一行斜体灰字「思考 ›」，点开显示全文。思考仍在流式生成时显示
-// 「思考中…」与转圈。
+// thinkingRow 是回复前的思考，方式由设置里的「思考」决定（「隐藏」时根本不会走到这里，见 chatRows）：
+//   - 折叠（默认）：一行斜体灰字「思考 ›」，点开显示全文；
+//   - 展开：全文直接显示在原位，不带折叠行；仍在生成的那条保留转圈与「思考中…」（参考 Tern 的 Expand thoughts）。
+//
+// 思考仍在流式生成时显示「思考中…」与转圈。
 func (a *app) thinkingRow(c *ui.Context, m conversation.Message) {
 	t := c.Theme()
 	if a.cv.openThinking == nil {
 		a.cv.openThinking = map[string]bool{}
 	}
-	open := a.cv.openThinking[m.Key]
+	expandedMode := a.appearance().Thinking == prefs.ThinkingExpanded
+	open := expandedMode || a.cv.openThinking[m.Key]
 	label, chevron := a.tr("chat.thought"), icons.ChevronRight
 	if !m.Done {
 		label = a.tr("chat.thinking")
@@ -204,22 +215,27 @@ func (a *app) thinkingRow(c *ui.Context, m conversation.Message) {
 		chevron = icons.ChevronDown
 	}
 	ui.Column(c).Gap(6).Children(func() {
-		// 外面套一行并以 Spacer 收尾：按钮只占自己的宽度，靠左，而不是在对话列里居中。
-		ui.Row(c).Children(func() {
-			toggle := ui.ButtonBase(c).Label(label).Children(func() {
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					if !m.Done {
-						ui.Spinner(c)
-					}
-					ui.Text(c, label).Italic().TextColor(t.TextMuted)
-					ui.Icon(c, chevron).TextColor(t.TextMuted)
+		// 展开方式没有折叠行；只有思考还在进行时留一行进度。
+		if !expandedMode || !m.Done {
+			// 外面套一行并以 Spacer 收尾：按钮只占自己的宽度，靠左，而不是在对话列里居中。
+			ui.Row(c).Children(func() {
+				toggle := ui.ButtonBase(c).Label(label).Children(func() {
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						if !m.Done {
+							ui.Spinner(c)
+						}
+						ui.Text(c, label).Italic().TextColor(t.TextMuted)
+						if !expandedMode {
+							ui.Icon(c, chevron).TextColor(t.TextMuted)
+						}
+					})
 				})
+				if toggle.Clicked() && !expandedMode {
+					a.cv.openThinking[m.Key] = !open
+				}
+				ui.Spacer(c)
 			})
-			if toggle.Clicked() {
-				a.cv.openThinking[m.Key] = !open
-			}
-			ui.Spacer(c)
-		})
+		}
 		if open {
 			ui.Text(c, m.Text).Italic().TextColor(t.TextMuted).Selectable().Padding(0, 0, 0, 12).BorderWidth(0, 0, 0, 2).BorderColor(t.Border)
 		}
@@ -288,7 +304,11 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 	if a.cv.openOutputs == nil {
 		a.cv.openOutputs = map[string]bool{}
 	}
-	expanded := a.cv.openOutputs[m.Key] || failed
+	// 「隐藏」方式不画输出；失败的调用例外，错误信息不能藏起来。
+	mode := a.appearance().ToolOutput
+	if mode == prefs.OutputHidden && !failed {
+		output = ""
+	}
 	ui.Column(c).Gap(6).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Tool).TextColor(t.TextMuted)
@@ -302,7 +322,7 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 				if tool.Args != "" {
 					ui.Divider(c)
 				}
-				a.toolOutput(c, m.Key, output, expanded, failed)
+				a.toolOutput(c, m.Key, output, mode, failed)
 			}
 			if tool.Args != "" || output != "" {
 				ui.Divider(c)
@@ -341,12 +361,18 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 	})
 }
 
-// toolOutput 画工具卡片里的输出。折叠时只画末尾 toolPreviewLines 行，上方一行「前面还有 N 行 ⌃」展开；
-// 展开后全文放进限高的滚动区，末尾一行「收起」（失败的调用一直展开，不给收起）。
-func (a *app) toolOutput(c *ui.Context, key, output string, expanded, failed bool) {
+// toolOutput 画工具卡片里的输出，方式由设置里的「工具输出」决定：
+//   - 预览：只画末尾 toolPreviewLines 行，上方一行「前面还有 N 行 ⌃」展开；
+//   - 折叠：只有一行「显示输出 · N 行」；
+//   - 展开：全文放进限高的滚动区。
+//
+// 点一下相对默认状态翻转（见 chatView.openOutputs），展开后末尾一行「收起」。失败的调用始终是全文，不给收起。
+func (a *app) toolOutput(c *ui.Context, key, output, mode string, failed bool) {
 	t := c.Theme()
 	lines := strings.Split(output, "\n")
 	hidden := len(lines) - toolPreviewLines
+	flipped := a.cv.openOutputs[key]
+	full := failed || (mode == prefs.OutputExpanded) != flipped
 	toggle := func(label string, icon *ui.SVG) {
 		ui.Row(c).Children(func() {
 			if ui.ButtonBase(c).Label(label).Tooltip(a.tr("chat.toolOutputHint")).Children(func() {
@@ -355,15 +381,24 @@ func (a *app) toolOutput(c *ui.Context, key, output string, expanded, failed boo
 					ui.Icon(c, icon).TextColor(t.TextMuted)
 				})
 			}).Clicked() {
-				a.cv.openOutputs[key] = !a.cv.openOutputs[key]
+				a.cv.openOutputs[key] = !flipped
 			}
 			ui.Spacer(c)
 		})
 	}
+	// 折叠方式下没点开：只留一行入口。
+	if mode == prefs.OutputCollapsed && !full {
+		toggle(a.tr("chat.showOutput", "count", strconv.Itoa(len(lines))), icons.ChevronDown)
+		return
+	}
 	switch {
 	case hidden <= 0:
 		a.buffer(ui.Text(c, output)).Selectable().Padding(8, 14)
-	case !expanded:
+		// 折叠方式下点开的短输出也要能再收起。
+		if mode == prefs.OutputCollapsed && !failed {
+			toggle(a.tr("chat.showLess"), icons.ChevronUp)
+		}
+	case !full:
 		toggle(a.tr("chat.earlierLines", "count", strconv.Itoa(hidden)), icons.ChevronUp)
 		a.buffer(ui.Text(c, strings.Join(lines[hidden:], "\n"))).Selectable().Padding(4, 14, 8, 14)
 	default:
@@ -527,7 +562,11 @@ func (a *app) navRail(c *ui.Context, messages []conversation.Message) {
 		return
 	}
 	t := c.Theme()
-	first, _ := a.list.Visible()
+	// 列表按行渲染，视口里第一行换算回它的第一条消息。
+	first := 0
+	if row, _ := a.list.Visible(); row >= 0 && row < len(a.cv.rows) {
+		first = a.cv.rows[row].from
+	}
 	current := users[0]
 	for _, i := range users {
 		if i <= first {
@@ -848,9 +887,20 @@ func (a *app) provenanceRow(c *ui.Context, messages []conversation.Message, i in
 	})
 }
 
-// jumpTo 把消息列表滚到第 i 行（提问或工具卡片），并暂停跟随底部，直到用户滚回底部、发出新消息或换会话。
+// jumpTo 把消息列表滚到第 i 条消息（提问或工具卡片）所在的行，并暂停跟随底部，直到用户滚回底部、发出新消息或换会话。
+// 目标在折叠的工具调用组里时先把组点开，否则只会停在那一行摘要上。
 func (a *app) jumpTo(c *ui.Context, i int) {
 	a.cv.followPaused, a.cv.jumpedAt = true, c.Now()
 	a.list.FollowEnd = false
-	a.list.ScrollTo(i, ui.Start)
+	row := i
+	if i >= 0 && i < len(a.cv.rowOf) {
+		row = a.cv.rowOf[i]
+		if row >= 0 && row < len(a.cv.rows) && a.cv.rows[row].folded {
+			if a.cv.openRuns == nil {
+				a.cv.openRuns = map[string]bool{}
+			}
+			a.cv.openRuns[a.cv.rows[row].key] = true
+		}
+	}
+	a.list.ScrollTo(row, ui.Start)
 }
