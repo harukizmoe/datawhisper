@@ -77,5 +77,5 @@ scripts/build/build-app.sh
 ## 提交
 
 - 子代理不提交、不切换分支、不 pop/drop stash；由整合者检查后统一提交。
-- 重构在 `refactor/pi-durable` 分支上进行，`main` 保持 `87489fb` 不变。
+- 重构在 `refactor/pi-durable` 分支上完成并以 v0.1.0 合入 `main`；`87489fb` 是重构前的最后一个提交，可用 `git show 87489fb` 取回。
 - 提交信息用中文，写清「做了什么 + 证据」。
