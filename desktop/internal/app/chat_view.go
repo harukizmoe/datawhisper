@@ -789,7 +789,12 @@ func (a *app) statusLine(c *ui.Context, busy bool) {
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(0, 4).Children(func() {
 		if busy {
 			ui.Spinner(c)
-			ui.Text(c, a.tr("chat.working")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			// 正在跑工具时说出是哪个：模型在等结果的那段时间里，只有「Working」看不出卡在哪。
+			label := a.tr("chat.working")
+			if action := a.currentAction(); action != "" {
+				label = a.tr("chat.actionTool", "name", action)
+			}
+			ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			if !a.cv.busySince.IsZero() {
 				elapsed := c.Now().Sub(a.cv.busySince)
 				if elapsed < 0 {
@@ -810,6 +815,18 @@ func (a *app) statusLine(c *ui.Context, busy bool) {
 				BorderWidth(1).BorderColor(t.Border).Tooltip(tip + "\n" + q.Text).Shrink(1).MinWidth(0).SingleLine()
 		}
 	})
+}
+
+// currentAction 是当前正在运行的工具名；没有在跑的工具时返回空串（思考或写正文阶段）。
+func (a *app) currentAction() string {
+	for i := len(a.chat.Messages) - 1; i >= 0; i-- {
+		message := a.chat.Messages[i]
+		if message.Role != "tool" || message.Done || message.Tool == nil {
+			continue
+		}
+		return message.Tool.Name
+	}
+	return ""
 }
 
 // contextMeter 是输入框上方的一条细进度条：最近一次回复用掉的上下文占当前模型上下文窗口的比例。
