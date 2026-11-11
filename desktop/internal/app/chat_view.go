@@ -701,6 +701,8 @@ func (a *app) composer(c *ui.Context) {
 			a.contextMeter(c)
 			// 没有焦点、没有草稿时折叠成一行（参考 Tern）：点一下展开并取得焦点。失焦要持续一小会儿才折叠：
 			// 选了下拉框的一项后焦点会短暂离开卡片，当场折叠会让还没处理的选择丢掉。
+			menuOpen := a.cv.menuOpen
+			a.cv.menuOpen = false
 			focused := a.cv.cardRef.FocusWithin(c)
 			switch {
 			case focused:
@@ -708,7 +710,7 @@ func (a *app) composer(c *ui.Context) {
 			case a.cv.composerSeen && a.cv.blurSince.IsZero():
 				a.cv.blurSince = c.Now()
 			}
-			if a.cv.composerSeen && !focused && strings.TrimSpace(a.input) == "" && !a.slashOpen() {
+			if a.cv.composerSeen && !focused && !menuOpen && strings.TrimSpace(a.input) == "" && !a.slashOpen() {
 				if wait := composerGrace - c.Now().Sub(a.cv.blurSince); wait > 0 {
 					c.After(wait)
 				} else {

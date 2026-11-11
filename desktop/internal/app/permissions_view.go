@@ -13,6 +13,7 @@ func (a *app) modeChip(c *ui.Context) {
 	t := c.Theme()
 	mode := a.perm.scope.Mode
 	chip := ui.PopoverMenuButton(c, a.modeLabel(mode), func(m *ui.Menu) {
+		a.menuShown()
 		for _, option := range permissionModes {
 			option := option
 			if m.Item(a.modeLabel(option) + "  ·  " + a.modeDescription(option)).Radio(option == mode).Chosen() {

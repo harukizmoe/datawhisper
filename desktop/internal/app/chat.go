@@ -70,6 +70,10 @@ type chatView struct {
 	composerSeen bool
 	wantFocus    bool
 	blurSince    time.Time
+	// menuOpen 记着上一帧有没有芯片菜单在显示：弹出菜单会拿走焦点，在菜单里挑选（尤其是子菜单）的时候卡片
+	// 失焦，折叠就会把芯片连同菜单一起收掉。菜单的 build 回调只在菜单打开时才跑，所以回调里置真、
+	// 折叠判断时读走并清零，菜单一关下一帧就恢复正常折叠。
+	menuOpen bool
 	// railFirst、railLast 是上一帧消息列表显示的首尾行；它们一变就是在滚动，scrolledAt 记下那一刻，
 	// 导航轨上的滚动滑块据此只在刚滚动过的一小会儿显示（navRail）。
 	railFirst, railLast int
@@ -122,7 +126,7 @@ func (v *chatView) resetConversation() {
 	v.modelsTouched = false
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
 	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0
-	v.composerSeen, v.wantFocus, v.blurSince = false, false, time.Time{}
+	v.composerSeen, v.wantFocus, v.blurSince, v.menuOpen = false, false, time.Time{}, false
 	v.followPaused, v.fullOpen = false, false
 }
 

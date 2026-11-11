@@ -25,6 +25,9 @@ func (a *app) sessionCost() float64 {
 	return total
 }
 
+// menuShown 由芯片菜单的 build 回调调用：告诉输入区此刻有菜单开着，别折叠。
+func (a *app) menuShown() { a.cv.menuOpen = true }
+
 // collapsedComposer 画折叠成一行的输入区。
 func (a *app) collapsedComposer(c *ui.Context, busy bool) {
 	t := c.Theme()

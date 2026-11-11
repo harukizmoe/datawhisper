@@ -1428,7 +1428,7 @@ func TestSidebarGroupsChatsByWorkspace(t *testing.T) {
 	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"sales", "in the workspace", "plain chat", "Today"}, nil)
+	expectTexts(t, tt, []string{"Workspaces", "sales", "in the workspace", "plain chat", "Today"}, nil)
 }
 
 func TestNewChatGoesIntoTheChosenWorkspace(t *testing.T) {
@@ -1511,18 +1511,42 @@ func TestWorkspaceGroupFoldsAndUnfolds(t *testing.T) {
 	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"sales", "in the workspace"}, nil)
+	expectTexts(t, tt, []string{"Workspaces", "in the workspace"}, nil)
 
-	// 点分组标题折叠：组里的会话收起，普通聊天不受影响。
-	if err := tt.Click("sales"); err != nil {
+	// 点「Workspaces」折叠：组里的会话收起，普通聊天不受影响。
+	if err := tt.Click("Workspaces"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	expectTexts(t, tt, []string{"sales", "plain chat"}, []string{"in the workspace"})
+	expectTexts(t, tt, []string{"Workspaces", "plain chat"}, []string{"in the workspace"})
 
-	if err := tt.Click("sales"); err != nil {
+	if err := tt.Click("Workspaces"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	expectTexts(t, tt, []string{"in the workspace"}, nil)
+}
+
+func TestChipMenuSurvivesTheComposerGracePeriod(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace index", func() bool { return len(a.ws.list) == 1 })
+	a.show(1) // 普通聊天：底栏是范围芯片
+	q.run()
+	tt.Frame()
+
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Move to workspace"); err != nil {
+		t.Fatal(err)
+	}
+	// 在菜单里停留的时间超过输入区失焦后的宽限：输入区不能折叠，否则芯片和菜单一起消失。
+	tt.Advance(composerGrace * 4)
+	tt.Frame()
+	tt.Advance(composerGrace * 4)
+	tt.Frame()
+	expectTexts(t, tt, []string{"sales"}, []string{"Write a message"})
 }

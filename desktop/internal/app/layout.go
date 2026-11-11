@@ -91,13 +91,22 @@ func (a *app) sidebar(c *ui.Context) {
 		hits := a.bodyHits(groups)
 		archived := a.archivedSessions()
 		if ui.Sidebar(c, &a.nav, func() {
-			// 工作区的会话单独成组，排在时间分组之前（同一批会话不会再出现在「今天」里）。
-			for _, g := range workspaces {
-				ui.SidebarSection(c, g.label, a.groupOpen(g.workspaceID), func() {
-					for _, session := range g.sessions {
-						a.sessionItem(c, session)
+			// 工作区的会话单独成一个「Workspaces」分组（样式同「今天」），排在时间分组之前；组内每个工作区是一行小标题，
+			// 同一批会话不会再出现在「今天」里。
+			if len(workspaces) > 0 {
+				open := !a.ws.folded
+				ui.SidebarSection(c, a.tr("ws.section"), &open, func() {
+					for _, g := range workspaces {
+						ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(6, 8, 2, 8).Children(func() {
+							ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
+							ui.Text(c, g.label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().MinWidth(0)
+						})
+						for _, session := range g.sessions {
+							a.sessionItem(c, session)
+						}
 					}
 				})
+				a.ws.folded = !open
 			}
 			for _, g := range groups {
 				ui.SidebarSection(c, g.label, nil, func() {
