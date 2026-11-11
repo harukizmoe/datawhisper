@@ -80,6 +80,20 @@ export function checkParams(params: MethodParams, rules: ParamRules): void {
   }
 }
 
+/** 会话 id：正整数；文案与 `conversationIdParam` 一致。 */
+export const CONVERSATION_ID_RULE: ParamRule = {
+  type: "integer",
+  message: "'conversationId' must be a positive integer",
+};
+
+/** 来源 id 的固定形状：`s_` 加 8 位小写十六进制。 */
+export const SOURCE_ID_RULE: ParamRule = {
+  type: "string",
+  pattern: /^s_[a-f0-9]{8}$/,
+  message: "'sourceId' must look like s_xxxxxxxx",
+  missingMessage: "'sourceId' must be a non-empty string",
+};
+
 /** 读出必填的工作区 id；形状不对时报与旧实现相同的两句话。 */
 export function workspaceIdParam(params: MethodParams): string {
   checkParams(params, { workspaceId: WORKSPACE_ID_RULE });
