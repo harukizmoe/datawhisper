@@ -120,6 +120,13 @@ type WorkspaceMount struct {
 	Reused    int              `json:"reused"`
 }
 
+// WorkspaceList 是 workspace.update 的结果。
+type WorkspaceList struct {
+	OK         bool        `json:"ok"`
+	Workspace  Workspace   `json:"workspace"`
+	Workspaces []Workspace `json:"workspaces"`
+}
+
 // WorkspaceRemoved 是 workspace.remove 的结果：只删除挂载记录，绝不动目录本身。
 type WorkspaceRemoved struct {
 	OK          bool   `json:"ok"`

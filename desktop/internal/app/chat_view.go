@@ -130,6 +130,10 @@ func (a *app) homeView(c *ui.Context) {
 				})
 				return
 			}
+			// 新对话在这里选范围：普通聊天，或某个工作区（沿用上次的选择）。
+			if a.conv == 0 {
+				a.scopePicker(c)
+			}
 			ui.Icon(c, icons.Sparkles).FontSize(a.fs(textHero)).TextColor(t.Accent)
 			ui.Text(c, a.tr("chat.homeTitle")).Bold().FontSize(a.fs(textHero))
 			ui.Text(c, a.tr("chat.homeHint")).TextColor(t.TextMuted)
@@ -162,6 +166,10 @@ func (a *app) chatHeader(c *ui.Context) {
 	ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(10, 20).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 		// Grow+MinWidth(0) 让它把多余宽度让给右侧控件，SingleLine 在放不下时以省略号结尾。
 		ui.Text(c, title).Bold().FontSize(a.fs(textSection)).SingleLine().Grow(1).MinWidth(0).Tooltip(title)
+		// 范围标签：属于工作区的对话在标题旁边显示工作区名。
+		if workspaceID := a.perm.scope.WorkspaceID; workspaceID != "" {
+			ui.Text(c, "📁 "+a.workspaceName(workspaceID)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0).SingleLine()
+		}
 		ui.Toolbar(c, func() {
 			if a.conv != 0 && iconTextButton(c, icons.Pencil, a.tr("chat.rename")).Tooltip(a.tr("chat.renameTip")).Clicked() {
 				a.openRename()
@@ -887,6 +895,7 @@ func formatDuration(ms int64) string {
 
 // chatModals 画聊天页的弹窗（标题重命名）。
 func (a *app) chatModals(c *ui.Context) {
+	a.workspaceDialogView(c)
 	if !a.cv.renaming {
 		return
 	}

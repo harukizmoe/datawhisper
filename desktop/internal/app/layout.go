@@ -77,17 +77,29 @@ func (a *app) sidebar(c *ui.Context) {
 			ui.Icon(c, icons.Sparkles).TextColor(t.Accent)
 			ui.Text(c, "DataWhisper").Bold().FontSize(a.fs(textSection)).SingleLine()
 		})
-		ui.Row(c).Children(func() {
+		ui.Row(c).Gap(6).Children(func() {
 			if iconTextButton(c, icons.Plus, a.tr("sidebar.newChat")).Grow(1).Clicked() {
 				a.newChat()
+			}
+			if iconTextButton(c, icons.FolderOpen, a.tr("ws.new")).Tooltip(a.tr("ws.newTip")).Shrink(0).Clicked() {
+				a.openWorkspaceDialog("")
 			}
 		})
 		ui.SearchField(c, &a.sideSearch).Label(a.tr("sidebar.search")).Placeholder(a.tr("sidebar.search"))
 		a.maybeSearch(c)
 		groups := a.sessionGroups(c.Now())
+		workspaces := a.workspaceGroups(c.Now())
 		hits := a.bodyHits(groups)
 		archived := a.archivedSessions()
 		if ui.Sidebar(c, &a.nav, func() {
+			// 工作区的会话单独成组，排在时间分组之前（同一批会话不会再出现在「今天」里）。
+			for _, g := range workspaces {
+				ui.SidebarSection(c, g.label, nil, func() {
+					for _, session := range g.sessions {
+						a.sessionItem(c, session)
+					}
+				})
+			}
 			for _, g := range groups {
 				ui.SidebarSection(c, g.label, nil, func() {
 					for _, session := range g.sessions {
@@ -222,14 +234,18 @@ type sessionGroup struct {
 	sessions []service.Session
 }
 
-// sessionGroups 把会话按「置顶 / 今天 / 昨天 / 7 天内 / 更早」分组（服务端已按更新时间倒序），归档的不显示；
-// 搜索框有字时只留标题里包含它的会话（不分大小写）。
+// sessionGroups 把普通聊天按「置顶 / 今天 / 昨天 / 7 天内 / 更早」分组（服务端已按更新时间倒序），归档的与
+// 属于工作区的不显示；搜索框有字时只留标题里包含它的会话（不分大小写）。
 func (a *app) sessionGroups(now time.Time) []sessionGroup {
 	query := strings.ToLower(strings.TrimSpace(a.sideSearch))
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	buckets := []sessionGroup{{label: a.tr("sidebar.pinned")}, {label: a.tr("sidebar.today")}, {label: a.tr("sidebar.yesterday")}, {label: a.tr("sidebar.week")}, {label: a.tr("sidebar.earlier")}}
 	for _, s := range a.sessions {
 		if s.Archived {
+			continue
+		}
+		// 属于工作区的会话由 workspaceGroups 单独成组，这里只留普通聊天。
+		if a.scopeOf(s.ID) != "" {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(a.sessionTitle(s.ID)), query) {

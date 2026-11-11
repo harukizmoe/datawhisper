@@ -90,6 +90,11 @@ type app struct {
 	cv chatView
 	// perm 是当前对话的权限模式与待审批的工具调用（permissions.go）。
 	perm permState
+	// ws 是工作区索引（侧栏分组与新对话选择器），wsDlg 是「New workspace」对话框（workspaces.go）。
+	ws    workspaceIndex
+	wsDlg workspaceDialog
+	// newChatScope 是下一条新对话要归属的工作区 id；空串是普通聊天。
+	newChatScope string
 	// openOnReady 在服务就绪后打开这个会话（-open 启动参数）；0 表示停在新对话上。
 	openOnReady int
 
@@ -191,6 +196,7 @@ func (a *app) onService(st supervisor.Status) {
 		a.loadSkills()
 	}
 	a.sourcesReady()
+	a.loadWorkspaces()
 	a.loadPermissions()
 }
 
@@ -317,13 +323,14 @@ func (a *app) send() {
 	p := *a.pending
 	a.input, a.sending, a.sendErr, a.needModel = "", true, "", false
 	a.cv.followPaused = false // 发出新消息后回到底部看回复
-	client, conv := a.client, a.conv
+	client, conv, scope := a.client, a.conv, a.newChatScope
 	command, whenBusy := slashCommandName(text, a.cv.commands), a.whenBusy()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if conv == 0 {
-			id, err := client.CreateConversation(ctx, service.CreateConversationRequest{})
+			// 新对话按首页选择的归属创建：工作区对话一创建就属于它（权限模式从 Manual 开始）。
+			id, err := client.CreateConversation(ctx, service.CreateConversationRequest{WorkspaceID: scope})
 			if err != nil {
 				a.post(func() { a.sendFailed(p, "Could not start the conversation: ", err) })
 				return

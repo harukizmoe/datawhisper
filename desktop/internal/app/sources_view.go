@@ -586,7 +586,12 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 					ui.Badge(c, a.tr("data.badgeMounted"))
 				})
 				ui.Text(c, current.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable()
+				// 权限模式在输入区底栏切换：这里只说明它管什么。
+				ui.Text(c, a.tr("ws.modeHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			})
+		} else if len(a.src.workspaces) > 0 {
+			// 普通聊天可以移入一个已有的工作区（移入后不能退出，服务端只允许单向）。
+			ui.Text(c, a.tr("ws.moveHere")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
 		if len(a.src.workspaces) > 0 {
 			ui.Text(c, a.tr("data.knownFolders")).Bold().FontSize(a.fs(textSection))
@@ -604,7 +609,13 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, ws.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Tooltip(ws.Workdir)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spacer(c)
-					// 对话一旦属于某个工作区就不能退出，所以当前这一个没有操作；其余的可以删记录。
+					// 当前对话不属于任何工作区时，可以把本对话移进去；属于某个工作区后就不能退出或改挂。
+					if a.src.current == nil {
+						if ui.Button(c, a.tr("ws.moveIn")).Tooltip(a.tr("ws.moveInTip", "name", label)).Clicked() {
+							a.moveCurrentToWorkspace(ws.WorkspaceID)
+						}
+					}
+					// 属于本对话的工作区没有操作；其余的可以删记录（仍有对话在用时服务端拒绝）。
 					if ws.Current {
 						ui.Badge(c, a.tr("data.badgeMounted"))
 					} else if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeFolderTip", "name", label)).Clicked() {

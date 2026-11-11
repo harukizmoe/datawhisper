@@ -65,6 +65,9 @@ test("工作区对话的系统提示带工作区块，普通聊天没有；目�
   expect(listed.workspace?.workspace_id).toBe(workspaceId);
   const plain = await run.pipe.client.request<{ workspace: unknown }>("workspace.list", { conversationId: chat.id });
   expect(plain.workspace).toBeNull();
+  // 侧栏按工作区分组靠它：只列工作区对话，普通聊天不出现。
+  const scopes = await run.pipe.client.request<{ scopes: { conversationId: number; workspace_id: string }[] }>("conversation.scopes");
+  expect(scopes.scopes).toEqual([{ conversationId: scoped.id, workspace_id: workspaceId }]);
 
   await submit(run, scoped.id, "hello scoped");
   const scopedPrompt = requestText(run.stub, 0);

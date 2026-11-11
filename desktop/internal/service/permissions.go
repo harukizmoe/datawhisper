@@ -84,6 +84,59 @@ func (c *Client) dispatchPermission(method string, params json.RawMessage) {
 	}
 }
 
+// ConversationScopeEntry 是 conversation.scopes 里的一行：某个对话属于哪个工作区。
+type ConversationScopeEntry struct {
+	ConversationID int    `json:"conversationId"`
+	WorkspaceID    string `json:"workspace_id"`
+}
+
+// ConversationScopes 返回全部工作区对话的归属（普通聊天不列出）。
+func (c *Client) ConversationScopes(ctx context.Context) ([]ConversationScopeEntry, error) {
+	var out struct {
+		Scopes []ConversationScopeEntry `json:"scopes"`
+	}
+	err := c.callInto(ctx, "conversation.scopes", nil, &out)
+	return out.Scopes, err
+}
+
+// CreateWorkspace 登记一个目录（已登记过则原样返回），并导入其中的数据文件。
+func (c *Client) CreateWorkspace(ctx context.Context, path, name, instructions string) (WorkspaceMount, error) {
+	params := map[string]any{"path": path}
+	if name != "" {
+		params["name"] = name
+	}
+	if instructions != "" {
+		params["instructions"] = instructions
+	}
+	var out WorkspaceMount
+	err := c.callInto(ctx, "workspace.create", params, &out)
+	return out, err
+}
+
+// UpdateWorkspace 改工作区的名称或说明；只传要改的字段，说明传空串表示清空。
+func (c *Client) UpdateWorkspace(ctx context.Context, workspaceID, name, instructions string) (WorkspaceList, error) {
+	params := map[string]any{"workspaceId": workspaceID, "instructions": instructions}
+	if name != "" {
+		params["name"] = name
+	}
+	var out WorkspaceList
+	err := c.callInto(ctx, "workspace.update", params, &out)
+	return out, err
+}
+
+// MoveToWorkspace 把普通聊天移入工作区；对话已经在工作区里时服务端拒绝。
+func (c *Client) MoveToWorkspace(ctx context.Context, conversationID int, workspaceID string) ([]Source, error) {
+	var out struct {
+		OK      bool     `json:"ok"`
+		Sources []Source `json:"sources"`
+	}
+	err := c.callInto(ctx, "conversation.moveToWorkspace", struct {
+		ConversationID int    `json:"conversationId"`
+		WorkspaceID    string `json:"workspaceId"`
+	}{conversationID, workspaceID}, &out)
+	return out.Sources, err
+}
+
 // PendingPermissions 列出某个对话里还在等回复的请求（重连、切换对话后用它补齐界面）。
 func (c *Client) PendingPermissions(ctx context.Context, conversationID int) ([]PermissionRequest, error) {
 	var out struct {

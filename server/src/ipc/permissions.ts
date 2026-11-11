@@ -17,6 +17,8 @@ export type PermissionMethodDeps = {
   readonly state: SourceDocStore;
   /** 会话文档变了（模式或允许名单）：宿主据此刷新本轮暴露的工具状态。 */
   readonly onChanged?: (conversationId: number) => void;
+  /** 全部对话 id；省略时 `conversation.scopes` 恒为空。 */
+  readonly conversationIds?: () => Promise<readonly number[]>;
 };
 
 const REPLIES: readonly PermissionReply[] = ["allow", "allow_chat", "deny"];
@@ -71,6 +73,16 @@ export function permissionMethods(deps: PermissionMethodDeps): Record<string, Rp
 
     /** 对话属于哪个范围；工作区对话还带当前权限模式与「本对话都允许」的工具。 */
     "conversation.scope": async (params) => scopeView(conversationIdParam(params)),
+
+    /** 全部工作区对话的归属（普通聊天不列出）：侧栏据此按工作区分组。 */
+    "conversation.scopes": async () => {
+      const scopes: { conversationId: number; workspace_id: string }[] = [];
+      for (const conversationId of (await deps.conversationIds?.()) ?? []) {
+        const doc = await state.read(conversationId).catch(() => undefined);
+        if (doc?.scope?.kind === "workspace") scopes.push({ conversationId, workspace_id: doc.scope.workspaceId });
+      }
+      return { scopes };
+    },
 
     "conversation.setMode": async (params) => {
       const conversationId = conversationIdParam(params);

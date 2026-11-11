@@ -40,6 +40,9 @@ type sourceFake struct {
 	// mode 与 requests 是假服务的权限状态：当前模式（空表示手动）与等着回复的请求。
 	mode     string
 	requests []service.PermissionRequest
+	// sessions 是 conversation.list 返回的会话；scopes 把对话映射到工作区。
+	sessions []service.Session
+	scopes   map[int]string
 	arts     []service.Artifact
 	artText  map[string]string
 	configs  []service.SourceConfig
@@ -198,6 +201,22 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 		switch req.Method {
 		case "conversation.list":
 			respond(req.ID, map[string]any{"conversations": []any{}})
+		case "session.list":
+			f.mu.Lock()
+			sessions := append([]service.Session{}, f.sessions...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"conversations": sessions})
+		case "conversation.create":
+			f.record(req.Method, req.Params)
+			respond(req.ID, map[string]any{"id": 3})
+		case "conversation.scopes":
+			f.mu.Lock()
+			scopes := make([]map[string]any, 0, len(f.scopes))
+			for conversationID, workspaceID := range f.scopes {
+				scopes = append(scopes, map[string]any{"conversationId": conversationID, "workspace_id": workspaceID})
+			}
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"scopes": scopes})
 		case "conversation.subscribe":
 			// 与真服务一致：先推 snapshot，再回订阅响应。
 			event(1, "snapshot", map[string]any{"seq": 0, "view": fakeView(1)})
@@ -1379,4 +1398,79 @@ func TestAnySourceCanBeRenamed(t *testing.T) {
 		t.Fatalf("source.rename params: %v", params)
 	}
 	q.pump(t, tt, "the refreshed list", func() bool { return len(a.src.sources) == 1 && a.src.sources[0].Name == "Monthly sales" })
+}
+
+// seedWorkspaces 给假服务放一个工作区索引：一个工作区，对话 2 属于它。
+func seedWorkspaces(f *sourceFake) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.work = []service.Workspace{{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}}
+	f.sessions = []service.Session{
+		{ID: 1, Title: "plain chat"},
+		{ID: 2, Title: "in the workspace"},
+	}
+	f.scopes = map[int]string{2: "ws_0000000000000001"}
+}
+
+func TestSidebarGroupsChatsByWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"📁 sales", "in the workspace", "plain chat", "Today"}, nil)
+}
+
+func TestNewChatGoesIntoTheChosenWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace index", func() bool { return len(a.ws.list) == 1 })
+
+	a.newChat()
+	q.run()
+	tt.Frame()
+	// 首页的范围选择：选中工作区后创建出来的对话自带 workspaceId（选择器的选项由工作区列表生成）。
+	a.setNewScope("ws_0000000000000001")
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"New chat in"}, nil)
+
+	a.input = "hello"
+	a.send()
+	q.pump(t, tt, "the created conversation", func() bool { return f.call("conversation.create") != nil })
+	if call := f.call("conversation.create"); call["workspaceId"] != "ws_0000000000000001" {
+		t.Errorf("conversation.create params: %v", call)
+	}
+}
+
+func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	dir := t.TempDir()
+	a, q, tt := openChat(t, f)
+	q.run()
+	tt.Frame()
+	if err := tt.Click("New workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
+	expectTexts(t, tt, []string{"New workspace", "Folder", "Name", "Instructions for this workspace", "Create"}, nil)
+	if err := tt.Click("Choose a folder first."); err == nil {
+		t.Fatal("Create worked with an empty folder")
+	}
+	a.wsDlg.path = dir
+	a.wsDlg.name = "Sales"
+	tt.Frame()
+	if err := tt.Click("Create"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the created workspace", func() bool { return f.call("workspace.create") != nil && !a.wsDlg.open })
+	create := f.call("workspace.create")
+	if create["path"] != dir || create["name"] != "Sales" {
+		t.Errorf("workspace.create params: %v", create)
+	}
+	if a.newScope() != "ws_0000000000000001" {
+		t.Errorf("the new workspace became the next chat's scope: %q", a.newScope())
+	}
 }

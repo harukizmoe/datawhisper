@@ -144,6 +144,8 @@ type ModelRef struct {
 type CreateConversationRequest struct {
 	Model         *ModelRef `json:"model,omitempty"`
 	ThinkingLevel string    `json:"thinkingLevel,omitempty"`
+	// WorkspaceID 给出时对话一创建就属于该工作区（权限模式从 Manual 开始）。
+	WorkspaceID string `json:"workspaceId,omitempty"`
 }
 
 // SetModelRequest 是 conversation.setModel 的参数；ThinkingLevel 为 nil 表示清空（用默认值）。
@@ -242,6 +244,9 @@ func (c *Client) CreateConversation(ctx context.Context, req CreateConversationR
 	}
 	if req.ThinkingLevel != "" {
 		params["thinkingLevel"] = req.ThinkingLevel
+	}
+	if req.WorkspaceID != "" {
+		params["workspaceId"] = req.WorkspaceID
 	}
 	var out struct {
 		ID int `json:"id"`

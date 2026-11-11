@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 新增：桌面端的工作区入口（S2）。侧栏「New chat」旁边是「New workspace」：选一个本机文件夹、填名称与说明，创建后该文件夹里的数据文件自动登记成表；新对话首页多一个「New chat in」选择器，可以让下一条对话直接属于某个工作区。侧栏里属于工作区的会话按工作区分组（`📁 名称`），普通聊天仍按「置顶 / 今天 / 昨天 / 7 天内 / 更早」分组。标题栏在属于工作区的对话旁显示工作区名；数据面板的工作区页签可以把当前普通聊天移入某个已有工作区（单向，移入后不能退出）。新增 `conversation.scopes` 供界面分组。
 - 新增：工作区对话的权限模式（参照 Claude Code），设计见 `docs/refactor/workspace-modes.md`「权限模式」。取代原来的工作区「只读/可读写」：旧数据迁移时只读 → `plan`，可读写 → `accept_edits`；`workspace.create/update` 不再有 `permission`。
   - 五档：Manual（每次改动都问）、Accept edits（写/改文件与导出自动放行，删除/移动/命令仍问）、Plan（任何改动都拒绝，让模型先把计划写成文字）、Auto（编辑放行，只读命令放行，删除/移动/其余命令仍问）、Bypass permissions（全部放行）。模式记在对话上，新对话从 Manual 开始；只有工作区对话有模式，普通聊天没有。
   - 询问发生在服务端 `beforeTool` 的一道闸门：挂起这次工具调用，推 `permission.requested` 通知，界面用 `permission.respond` 回复（允许 / 本对话都允许 / 拒绝）；中止这一轮会撤下请求。「本对话都允许」只给编辑类工具，破坏性操作永远逐次询问。新方法：`conversation.scope`、`conversation.setMode`、`permission.pending`、`permission.respond`。

@@ -207,7 +207,12 @@ export async function startService(config: Config, options: ServiceOptions = {})
     outputsDir: join(config.dataDir, "outputs"),
     projectRoot: config.projectRoot,
   });
-  const permissionApi = permissionMethods({ broker: permissions, state: sourceState });
+  const permissionApi = permissionMethods({
+    broker: permissions,
+    state: sourceState,
+    // `conversations` 在下面才创建；只在调用时用到，那时一定就绪。
+    conversationIds: async () => (await conversations.list()).conversations.map((item) => item.id),
+  });
 
   const workExecutors = new WorkExecutorRegistry();
   const jobs = createJobs({ harness, context, executors: workExecutors });

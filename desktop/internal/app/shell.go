@@ -402,6 +402,7 @@ func (a *app) about() {
 // reload 重新拉取当前页面的数据：会话列表、打开着的数据面板，以及已经加载过的设置。
 func (a *app) reload() {
 	a.refreshConversations()
+	a.loadWorkspaces()
 	if a.src.open {
 		a.loadSources()
 	}
