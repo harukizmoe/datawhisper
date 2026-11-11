@@ -65,8 +65,21 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
     void notify("feishu.status", status).catch((error: unknown) => log("推送飞书状态失败", error));
   });
   if (options.autoStartFeishu !== false) void feishu.start();
+  // 工作区对话的权限审批：请求出现时推给界面弹卡片，被回复或被中止时撤下。
+  const unsubscribePermissions = service.permissions.onEvent((event) => {
+    const push =
+      event.type === "requested"
+        ? notify("permission.requested", event.request)
+        : notify("permission.resolved", {
+            requestId: event.request.requestId,
+            conversationId: event.request.conversationId,
+            reply: event.reply,
+          });
+    void push.catch((error: unknown) => log("推送权限请求失败", error));
+  });
   void service.closed.then(() => {
     unsubscribeFeishu();
+    unsubscribePermissions();
     void feishu.stop();
   });
 

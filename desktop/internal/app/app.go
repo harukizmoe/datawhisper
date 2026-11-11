@@ -88,6 +88,8 @@ type app struct {
 	src sourcesState
 	// cv 是聊天页自己的界面状态（输入、工具折叠、ask_user 选择、模型选择），见 chat.go。
 	cv chatView
+	// perm 是当前对话的权限模式与待审批的工具调用（permissions.go）。
+	perm permState
 	// openOnReady 在服务就绪后打开这个会话（-open 启动参数）；0 表示停在新对话上。
 	openOnReady int
 
@@ -163,6 +165,14 @@ func (a *app) onService(st supervisor.Status) {
 	a.recovered, a.recoveredAt = a.everReady, time.Time{}
 	a.everReady = true
 	a.client = service.New(st.Pipe)
+	client := a.client
+	client.SetPermissionHandler(func(ev service.PermissionEvent) {
+		a.post(func() {
+			if client == a.client {
+				a.onPermission(ev)
+			}
+		})
+	})
 	if a.openOnReady != 0 {
 		// -open：启动后直接显示这个会话，只订阅一次。
 		a.conv, a.nav = a.openOnReady, navOf(a.openOnReady)
@@ -181,6 +191,7 @@ func (a *app) onService(st supervisor.Status) {
 		a.loadSkills()
 	}
 	a.sourcesReady()
+	a.loadPermissions()
 }
 
 func (a *app) cancelFollow() {
@@ -276,6 +287,7 @@ func (a *app) show(conv int) {
 	a.rich.ReleaseChat()
 	a.rich.ReleasePanel()
 	a.sourcesConversationChanged()
+	a.permissionsConversationChanged()
 	a.follow()
 }
 

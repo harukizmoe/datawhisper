@@ -85,12 +85,11 @@ type PreviewTable struct {
 	TotalRows *int       `json:"total_rows"`
 }
 
-// Workspace 是工作区的一条记录。Permission 为 "read_only" 或 "read_write"。
+// Workspace 是工作区的一条记录。
 type Workspace struct {
 	WorkspaceID  string `json:"workspace_id"`
 	Workdir      string `json:"workdir"`
 	Name         string `json:"name"`
-	Permission   string `json:"permission"`
 	SourceID     string `json:"source_id"`
 	Current      bool   `json:"current"`
 	Available    bool   `json:"available"`
@@ -119,13 +118,6 @@ type WorkspaceMount struct {
 	Errors    []string         `json:"errors"`
 	Skipped   int              `json:"skipped"`
 	Reused    int              `json:"reused"`
-}
-
-// WorkspaceList 是 workspace.update 的结果。
-type WorkspaceList struct {
-	OK         bool        `json:"ok"`
-	Workspace  Workspace   `json:"workspace"`
-	Workspaces []Workspace `json:"workspaces"`
 }
 
 // WorkspaceRemoved 是 workspace.remove 的结果：只删除挂载记录，绝不动目录本身。
@@ -370,13 +362,9 @@ func (c *Client) Workspaces(ctx context.Context, conversationID int) (WorkspaceV
 }
 
 // MountWorkspace 登记本机目录（已登记过则复用）、导入其中的数据文件，并把当前对话移入该工作区。
-// readOnly 决定 agent 能否写盘。对话一旦属于某个工作区就不能改挂另一个，服务端会拒绝。
-func (c *Client) MountWorkspace(ctx context.Context, conversationID int, path, name string, readOnly bool) (WorkspaceMount, error) {
-	permission := "read_write"
-	if readOnly {
-		permission = "read_only"
-	}
-	params := map[string]any{"path": path, "permission": permission}
+// 对话一旦属于某个工作区就不能改挂另一个，服务端会拒绝；改动文件的权限由对话的权限模式管，不在这里。
+func (c *Client) MountWorkspace(ctx context.Context, conversationID int, path, name string) (WorkspaceMount, error) {
+	params := map[string]any{"path": path}
 	if name != "" {
 		params["name"] = name
 	}
@@ -393,17 +381,6 @@ func (c *Client) MountWorkspace(ctx context.Context, conversationID int, path, n
 	}
 	created.Workspace, created.Sources = moved.Workspace, moved.Sources
 	return created, nil
-}
-
-// SetWorkspacePermission 改工作区的权限（"read_only" 或 "read_write"）。
-func (c *Client) SetWorkspacePermission(ctx context.Context, conversationID int, workspaceID, permission string) (WorkspaceList, error) {
-	var out WorkspaceList
-	err := c.callInto(ctx, "workspace.update", struct {
-		ConversationID int    `json:"conversationId"`
-		WorkspaceID    string `json:"workspaceId"`
-		Permission     string `json:"permission"`
-	}{conversationID, workspaceID, permission}, &out)
-	return out, err
 }
 
 // RemoveWorkspace 删除一条工作区记录；目录本身不会被删。仍有对话属于它时服务端拒绝。

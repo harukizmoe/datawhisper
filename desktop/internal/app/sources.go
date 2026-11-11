@@ -36,11 +36,6 @@ const (
 	confirmWorkspace = "workspace"
 )
 
-// permissionLabels 是工作区权限的两个标签，顺序与 permissionFromLabel 一致；标签随界面语言变化。
-func (a *app) permissionLabels() []string {
-	return []string{a.tr("data.permReadOnly"), a.tr("data.permReadWrite")}
-}
-
 // remoteKind 是一个远程来源类型：id 与服务端一致，label 是下拉框里的写法。
 type remoteKind struct {
 	ID    string
@@ -140,10 +135,8 @@ type sourcesState struct {
 	workspaceErr string
 	mountPath    string
 	mountName    string
-	mountPerm    int // 0 read_only / 1 read_write
 	mountBusy    bool
 	mountErr     string
-	permBusy     string // 正在改权限的 workspaceId
 
 	// 产物。
 	artifacts      []service.Artifact
@@ -1069,13 +1062,12 @@ func (a *app) mountWorkspace() {
 		a.src.mountErr = path + " is not a folder this app can read."
 		return
 	}
-	readOnly := a.src.mountPerm == 0
 	name := strings.TrimSpace(a.src.mountName)
 	a.src.mountBusy, a.src.mountErr = true, ""
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		out, err := client.MountWorkspace(ctx, conv, path, name, readOnly)
+		out, err := client.MountWorkspace(ctx, conv, path, name)
 		a.post(func() {
 			if client != a.client {
 				return
@@ -1096,6 +1088,8 @@ func (a *app) mountWorkspace() {
 				a.src.notice, a.src.noticeErr = a.tr("data.mounted", "label", label), false
 			}
 			a.loadSources()
+			// 对话现在属于这个工作区了：底栏要出现权限模式芯片。
+			a.loadPermissions()
 		})
 	}()
 }
@@ -1119,32 +1113,6 @@ func (a *app) removeWorkspace(id string) {
 				return
 			}
 			a.src.notice, a.src.noticeErr = a.tr("data.folderRemoved"), false
-			a.loadSources()
-		})
-	}()
-}
-
-// setWorkspacePermission 改一个工作区的读写权限。
-func (a *app) setWorkspacePermission(id, permission string) {
-	client, conv := a.client, a.src.conv
-	if client == nil {
-		return
-	}
-	a.src.permBusy = id
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_, err := client.SetWorkspacePermission(ctx, conv, id, permission)
-		a.post(func() {
-			if client != a.client {
-				return
-			}
-			a.src.permBusy = ""
-			if err != nil {
-				a.src.notice, a.src.noticeErr = a.tr("data.permFailed", "error", a.sourceErr(err)), true
-				return
-			}
-			a.src.notice, a.src.noticeErr = a.tr("data.permSaved"), false
 			a.loadSources()
 		})
 	}()

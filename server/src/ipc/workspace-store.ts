@@ -13,13 +13,10 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { writePrivateJson } from "../models/credentials.ts";
 
-export type WorkspacePermission = "read_only" | "read_write";
-
 export type WorkspaceRecord = {
   workspaceId: string;
   workdir: string;
   name: string;
-  permission: WorkspacePermission;
   /** 应用侧保存的工作区说明，并入属于该工作区的每一轮系统提示。 */
   instructions: string;
   /** 目录同步出的持久化来源 id，整个工作区共用一个；尚未同步时为空。 */
@@ -51,10 +48,6 @@ export function isDirectory(path: string): boolean {
   }
 }
 
-function permissionOf(value: unknown): WorkspacePermission {
-  return value === "read_write" ? "read_write" : "read_only";
-}
-
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -73,7 +66,6 @@ function parseRecords(raw: unknown): WorkspaceRecord[] {
       workspaceId,
       workdir,
       name: text(entry.name),
-      permission: permissionOf(entry.permission),
       instructions: text(entry.instructions),
       sourceId: text(entry.sourceId),
       lastSyncedAt: text(entry.lastSyncedAt),

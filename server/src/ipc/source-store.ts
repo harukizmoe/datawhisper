@@ -23,6 +23,7 @@ import type { CredentialStore } from "@earendil-works/pi-ai";
 import { defineDoc, type ConversationId, type Harness } from "@earendil-works/pi-durable";
 import { writePrivateJson } from "../models/credentials.ts";
 import type { TurnState } from "../conversations/service.ts";
+import type { PermissionMode } from "../agent/permission-mode.ts";
 import { appError } from "./errors.ts";
 
 /** compute 侧认识的来源类型（与 `compute/sources.py::restore_source` 一致）。 */
@@ -70,6 +71,10 @@ export type SourceDoc = {
   sources: StoredSource[];
   /** 缺省等同于普通聊天。 */
   scope?: ConversationScope;
+  /** 工作区对话的权限模式；缺省按 `DEFAULT_PERMISSION_MODE`。普通聊天没有这个概念。 */
+  permissionMode?: PermissionMode;
+  /** 用户选了「本对话都允许」的 edit 类工具名。 */
+  permissionAllow?: string[];
   /** 只会出现在迁移前写下的文档里。 */
   workspaces?: LegacyWorkspaceRecord[];
 };

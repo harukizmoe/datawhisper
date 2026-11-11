@@ -25,6 +25,10 @@ import { sourceMethods } from "./ipc/sources.ts";
 import { migrateLegacyWorkspaces } from "./ipc/workspace-migrate.ts";
 import { createWorkspaceStore, isDirectory, type WorkspaceStore } from "./ipc/workspace-store.ts";
 import { renderWorkspaceSection } from "./agent/workspace-section.ts";
+import { createPermissionBroker, type PermissionBroker } from "./agent/permission-broker.ts";
+import { createPermissionGate } from "./agent/permission-gate.ts";
+import { DEFAULT_PERMISSION_MODE } from "./agent/permission-mode.ts";
+import { permissionMethods } from "./ipc/permissions.ts";
 import { appError } from "./ipc/errors.ts";
 import { say } from "./i18n.ts";
 import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
@@ -62,6 +66,8 @@ export type Service = {
   readonly workflows: Workflows;
   /** 数据源、工作区与产物（`source.*` / `workspace.*` / `artifact.*`）的 IPC 方法表。 */
   readonly sourceMethods: Record<string, RpcMethod>;
+  /** 待用户审批的工具调用（工作区对话的权限模式）；界面经通知与 `permission.*` 方法与它交互。 */
+  readonly permissions: PermissionBroker;
   /** 团队的只读视图与委托取消（`teams.*`）。 */
   readonly teamMethods: Record<string, RpcMethod>;
   /** 工作流定义与启动（`workflow.definitions.*`、`workflow.start`）的 IPC 方法表。 */
@@ -112,7 +118,7 @@ async function readTurnState(
       ),
     );
   }
-  return { ...base, workspaceSection: renderWorkspaceSection(record, dataDir) };
+  return { ...base, workspaceSection: renderWorkspaceSection(record, dataDir, doc.permissionMode ?? DEFAULT_PERMISSION_MODE) };
 }
 
 export async function startService(config: Config, options: ServiceOptions = {}): Promise<Service> {
@@ -151,12 +157,15 @@ export async function startService(config: Config, options: ServiceOptions = {})
         })
       : undefined;
   const tools = options.tools ?? assembled!.tools;
+  // 工作区对话的权限闸门：来源文档要等会话服务建好，所以用迟绑定的取值函数。
+  const permissions = createPermissionBroker();
+  const permissionGate = createPermissionGate({ state: () => sourceState, broker: permissions });
 
   const registry = options.registry ?? createRegistry();
   // 系统提示扩展常驻；工具必须真的装进注册表，否则 `configure({ modelTools })` 只是在空集合里筛选。
   registry.install(dataWhisperPrompts());
   // 输出侧策略（工具守卫、数字溯源、文本形式工具调用、外溢与证据声明）与提示同在一个注册表上。
-  registry.install(dataWhisperPolicies(assembled === undefined ? {} : { toolResults: assembled.toolResults }));
+  registry.install(dataWhisperPolicies({ permissions: permissionGate, ...(assembled === undefined ? {} : { toolResults: assembled.toolResults }) }));
   if (tools.length > 0) {
     registry.install(defineExtension({ name: "datawhisper-tools", tools }));
   }
@@ -198,6 +207,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     outputsDir: join(config.dataDir, "outputs"),
     projectRoot: config.projectRoot,
   });
+  const permissionApi = permissionMethods({ broker: permissions, state: sourceState });
 
   const workExecutors = new WorkExecutorRegistry();
   const jobs = createJobs({ harness, context, executors: workExecutors });
@@ -253,7 +263,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
     context,
     jobs,
     workflows,
-    sourceMethods: sourceApis,
+    sourceMethods: { ...sourceApis, ...permissionApi },
+    permissions,
     teamMethods: teams,
     workflowMethods: workflowApi,
     workflowCatalog: catalog,

@@ -30,6 +30,8 @@ type Client struct {
 	subscriptions map[int]*subscription
 	// early 缓存订阅响应之前就到达的通知：服务先发 snapshot（以及可能的 ops）再回响应，这些通知不能丢。
 	early map[int][]Event
+	// onPermission 处理权限通知（见 permissions.go）；没登记时丢弃。
+	onPermission func(PermissionEvent)
 }
 
 // New 在 conn 上建客户端。服务退出（管道 EOF）时未完成的请求得到 ErrClosed，Done 关闭。
@@ -45,10 +47,13 @@ func New(conn Conn) *Client {
 // Done 在管道结束时关闭：服务进程退出，或管道断了。
 func (c *Client) Done() <-chan struct{} { return c.rpc.Done() }
 
-// notify 处理服务的通知；现在只有订阅事件。它在读循环上运行，不能阻塞。
+// notify 处理服务的通知：订阅事件与权限请求。它在读循环上运行，不能阻塞。
 func (c *Client) notify(method string, params json.RawMessage) {
-	if method == notifyConversationEvent {
+	switch method {
+	case notifyConversationEvent:
 		c.publish(params)
+	case notifyPermissionRequested, notifyPermissionResolved:
+		c.dispatchPermission(method, params)
 	}
 }
 

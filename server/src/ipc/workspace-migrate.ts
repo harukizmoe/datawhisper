@@ -36,7 +36,6 @@ export async function migrateLegacyWorkspaces(options: {
           workspaceId: item.workspaceId,
           workdir: item.workdir,
           name: item.name,
-          permission: item.permission === "read_write" ? "read_write" : "read_only",
           instructions: "",
           sourceId,
           lastSyncedAt: item.mountedAt,
@@ -57,6 +56,8 @@ export async function migrateLegacyWorkspaces(options: {
         if (target !== undefined) source.id = target;
       }
       draft.scope = mounted === undefined ? { kind: "chat" } : { kind: "workspace", workspaceId: mounted.workspaceId };
+      // 旧的只读/可读写并入权限模式：只读 ≈ 计划模式，可读写 ≈ 自动接受编辑（旧实现写文件不询问）。
+      if (mounted !== undefined) draft.permissionMode = mounted.permission === "read_write" ? "accept_edits" : "plan";
       delete draft.workspaces;
     });
     migrated += 1;

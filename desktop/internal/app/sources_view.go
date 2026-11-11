@@ -563,13 +563,6 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 		ui.Field(c, a.tr("data.fieldName"), func() {
 			ui.TextInput(c, &a.src.mountName).Label(a.tr("data.folderName")).Placeholder(a.tr("data.optional"))
 		})
-		ui.Field(c, a.tr("data.fieldPermission"), func() {
-			permLabels := a.permissionLabels()
-			perm := permLabels[a.src.mountPerm]
-			if ui.Select(c, &perm, permLabels).Label(a.tr("data.workspacePermission")).Changed() {
-				a.src.mountPerm = permissionIndex(a.permissionFromLabel(perm))
-			}
-		})
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			mount := ui.PrimaryButton(c, a.tr("data.mount"))
 			if a.src.mountBusy {
@@ -593,16 +586,6 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 					ui.Badge(c, a.tr("data.badgeMounted"))
 				})
 				ui.Text(c, current.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable()
-				ui.Field(c, a.tr("data.fieldPermission"), func() {
-					permLabels := a.permissionLabels()
-					perm := permLabels[permissionIndex(current.Permission)]
-					if ui.Select(c, &perm, permLabels).Label(a.tr("data.permissionOf", "name", current.Name)).Changed() && perm != permLabels[permissionIndex(current.Permission)] {
-						a.setWorkspacePermission(current.WorkspaceID, a.permissionFromLabel(perm))
-					}
-				})
-				if a.src.permBusy == current.WorkspaceID {
-					ui.Spinner(c)
-				}
 			})
 		}
 		if len(a.src.workspaces) > 0 {
@@ -617,7 +600,6 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 			ui.Column(c).Gap(4).Padding(8).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Children(func() {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, label).Grow(1).MinWidth(0).SingleLine()
-					ui.Badge(c, permissionLabel(ws.Permission))
 				})
 				ui.Text(c, ws.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Tooltip(ws.Workdir)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -633,30 +615,6 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 			})
 		}
 	})
-}
-
-// permissionIndex 把服务端的权限值映射成 Select 的下标。
-func permissionIndex(permission string) int {
-	if permission == "read_write" {
-		return 1
-	}
-	return 0
-}
-
-// permissionFromLabel 把 Select 的标签翻回服务端的权限值。
-func (a *app) permissionFromLabel(label string) string {
-	if label == a.permissionLabels()[1] {
-		return "read_write"
-	}
-	return "read_only"
-}
-
-// permissionLabel 给列表用的短标签。
-func permissionLabel(permission string) string {
-	if permission == "read_write" {
-		return "read & write"
-	}
-	return "read only"
 }
 
 // artifactsTab 是「产物」页签：列出导出文件，文本产物就地预览，HTML/SVG 用 web view 预览。

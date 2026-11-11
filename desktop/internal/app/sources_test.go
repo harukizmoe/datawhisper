@@ -37,9 +37,12 @@ type sourceFake struct {
 	schema  map[string]string
 	work    []service.Workspace
 	current *service.Workspace
-	arts    []service.Artifact
-	artText map[string]string
-	configs []service.SourceConfig
+	// mode 与 requests 是假服务的权限状态：当前模式（空表示手动）与等着回复的请求。
+	mode     string
+	requests []service.PermissionRequest
+	arts     []service.Artifact
+	artText  map[string]string
+	configs  []service.SourceConfig
 
 	// 上传：uploadDir 是 staging 目录，maxBytes 是 begin 声明的上限。
 	uploadDir string
@@ -489,7 +492,6 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 				continue
 			}
 			path, _ := params["path"].(string)
-			permission, _ := params["permission"].(string)
 			name, _ := params["name"].(string)
 			if name == "" {
 				name = filepath.Base(path)
@@ -498,7 +500,6 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 				WorkspaceID: "ws_0000000000000001",
 				Workdir:     path,
 				Name:        name,
-				Permission:  permission,
 				SourceID:    "s_00000004",
 				Available:   true,
 			}
@@ -535,24 +536,52 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"ok": true, "workspace": moved, "sources": list})
 
-		case "workspace.update":
+		case "conversation.scope":
 			f.record(req.Method, req.Params)
-			id, _ := params["workspaceId"].(string)
-			permission, _ := params["permission"].(string)
 			f.mu.Lock()
-			var updated service.Workspace
-			for i := range f.work {
-				if f.work[i].WorkspaceID == id {
-					f.work[i].Permission = permission
-					updated = f.work[i]
-					if f.current != nil && f.current.WorkspaceID == id {
-						f.current.Permission = permission
-					}
+			scope := map[string]any{"scope": "chat", "workspace_id": nil, "mode": nil, "allowed_tools": []string{}}
+			if f.current != nil {
+				mode := f.mode
+				if mode == "" {
+					mode = service.ModeManual
+				}
+				scope = map[string]any{"scope": "workspace", "workspace_id": f.current.WorkspaceID, "mode": mode, "allowed_tools": []string{}}
+			}
+			f.mu.Unlock()
+			respond(req.ID, scope)
+
+		case "conversation.setMode":
+			f.record(req.Method, req.Params)
+			mode, _ := params["mode"].(string)
+			f.mu.Lock()
+			f.mode = mode
+			workspaceID := ""
+			if f.current != nil {
+				workspaceID = f.current.WorkspaceID
+			}
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "scope": "workspace", "workspace_id": workspaceID, "mode": mode, "allowed_tools": []string{}})
+
+		case "permission.pending":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			pending := append([]service.PermissionRequest(nil), f.requests...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"requests": pending})
+
+		case "permission.respond":
+			f.record(req.Method, req.Params)
+			id, _ := params["requestId"].(string)
+			f.mu.Lock()
+			kept := make([]service.PermissionRequest, 0, len(f.requests))
+			for _, request := range f.requests {
+				if request.RequestID != id {
+					kept = append(kept, request)
 				}
 			}
-			list := append([]service.Workspace(nil), f.work...)
+			f.requests = kept
 			f.mu.Unlock()
-			respond(req.ID, map[string]any{"ok": true, "workspace": updated, "workspaces": list})
+			respond(req.ID, map[string]any{"ok": true})
 
 		case "workspace.remove":
 			f.record(req.Method, req.Params)
@@ -812,7 +841,7 @@ func TestDataPanelExplainsUploadRefusals(t *testing.T) {
 	}
 }
 
-func TestDataPanelMountsWorkspaceWithPermission(t *testing.T) {
+func TestDataPanelMountsWorkspace(t *testing.T) {
 	f := newSourceFake(t)
 	dir := t.TempDir()
 	a, q, tt := openDataPanel(t, f, 1400, 1400)
@@ -825,26 +854,97 @@ func TestDataPanelMountsWorkspaceWithPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Type(dir)
-	if err := tt.Click("Workspace permission"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if err := tt.Click("Read & write"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
 	if err := tt.Click("Mount"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the mounted folder", func() bool { return a.src.current != nil })
 	create := f.call("workspace.create")
-	if create == nil || create["path"] != dir || create["permission"] != "read_write" {
+	if create == nil || create["path"] != dir {
 		t.Errorf("workspace.create params: %v", create)
+	}
+	if _, hasPermission := create["permission"]; hasPermission {
+		t.Errorf("workspace.create still sends a permission: %v", create)
 	}
 	if move := f.call("conversation.moveToWorkspace"); move == nil || move["workspaceId"] != "ws_0000000000000001" {
 		t.Errorf("conversation.moveToWorkspace params: %v", move)
 	}
-	expectTexts(t, tt, []string{dir, "mounted", "Known folders"}, nil)
+	// 挂载之后对话属于工作区：底栏出现权限模式芯片，默认是手动。
+	q.pump(t, tt, "the permission mode", func() bool { return a.perm.scope.Mode == service.ModeManual })
+	expectTexts(t, tt, []string{dir, "mounted", "Known folders", "Manual"}, nil)
+}
+
+// openChat 启动假服务并切到会话 1，不展开数据面板。
+func openChat(t *testing.T, f *sourceFake) (*app, *uiQueue, *ui.Tester) {
+	t.Helper()
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, 1400, 1000)
+	a.onService(f.ready(61))
+	a.show(1)
+	q.run()
+	tt.Frame()
+	return a, q, tt
+}
+
+func TestWorkspaceChatSwitchesPermissionMode(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales"}
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the permission mode", func() bool { return a.perm.scope.Mode == service.ModeManual })
+	expectTexts(t, tt, []string{"Manual"}, nil)
+
+	if err := tt.Click("Manual"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{
+		"Manual  ·  Always ask before making changes",
+		"Accept edits  ·  Automatically accept file edits",
+		"Plan  ·  Create a plan before making changes",
+		"Auto  ·  Routine changes go through, risky ones still ask",
+		"Bypass permissions  ·  Accepts all permissions",
+	}, nil)
+	if err := tt.Click("Plan  ·  Create a plan before making changes"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the plan mode", func() bool { return a.perm.scope.Mode == service.ModePlan })
+	if call := f.call("conversation.setMode"); call == nil || call["mode"] != "plan" || call["conversationId"] != float64(1) {
+		t.Errorf("conversation.setMode params: %v", call)
+	}
+	expectTexts(t, tt, []string{"Plan"}, []string{"Manual"})
+}
+
+func TestPlainChatHasNoPermissionMode(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the scope", func() bool { return f.call("conversation.scope") != nil })
+	q.run()
+	tt.Frame()
+	if a.perm.scope.Scope != "chat" || a.perm.scope.Mode != "" {
+		t.Errorf("scope = %+v", a.perm.scope)
+	}
+	expectTexts(t, tt, nil, []string{"Manual", "Bypass permissions"})
+}
+
+func TestPendingPermissionShowsCardAndAnswers(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales"}
+	f.requests = []service.PermissionRequest{{
+		RequestID: "r1", ConversationID: 1, Tool: "workspace_write_file",
+		Summary: "Write file note.md", Detail: "hello", AllowChat: true,
+	}}
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the permission card", func() bool { return len(a.perm.requests) == 1 })
+	expectTexts(t, tt, []string{"Permission needed", "Write file note.md", "hello", "Allow", "Allow for this chat", "Deny"}, nil)
+
+	if err := tt.Click("Allow for this chat"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the answer", func() bool { return len(a.perm.requests) == 0 })
+	if call := f.call("permission.respond"); call == nil || call["requestId"] != "r1" || call["decision"] != "allow_chat" {
+		t.Errorf("permission.respond params: %v", call)
+	}
+	expectTexts(t, tt, nil, []string{"Permission needed", "Write file note.md"})
 }
 
 func TestDataPanelNeverShowsSecrets(t *testing.T) {

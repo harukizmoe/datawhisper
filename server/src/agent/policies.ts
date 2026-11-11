@@ -13,6 +13,7 @@ import { say } from "../i18n.ts";
 import { confirmationBlock } from "../tools/guard/confirmation.ts";
 import { applyToolResultGuard } from "../tools/guard/index.ts";
 import type { EvidenceClaimStore } from "../tools/guard/evidence.ts";
+import type { PermissionGate } from "./permission-gate.ts";
 import type { ToolResultStore } from "../tools/guard/spill.ts";
 import { getToolSpec } from "../tools/registry.ts";
 import { auditReportNumbers, collectNumberEvidence, NUMBER_EVIDENCE_TOOLS } from "./number-audit.ts";
@@ -46,6 +47,8 @@ export type PolicyOptions = {
   readonly evidenceClaims?: EvidenceClaimStore;
   /** 本会话工作区 id，写入外溢制品与证据声明。 */
   readonly workspaceId?: string;
+  /** 工作区对话的权限闸门；省略时不做权限判断（普通聊天、单元测试）。 */
+  readonly permissions?: PermissionGate;
 };
 
 export function dataWhisperPolicies(options: PolicyOptions = {}): Extension {
@@ -64,7 +67,9 @@ export function dataWhisperPolicies(options: PolicyOptions = {}): Extension {
         token,
         message: turn.message,
       });
-      return block === undefined ? undefined : { block };
+      if (block !== undefined) return { block };
+      // ③ 工作区对话的权限模式：放行、询问用户或拒绝（询问时这里会挂起，直到用户回复或中止本轮）。
+      return options.permissions?.check(call, api.conversationId as unknown as number, context);
     },
   };
 

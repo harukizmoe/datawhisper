@@ -46,7 +46,7 @@ import {
   within,
 } from "./source-store.ts";
 import { sqlConfigProblem, sqlConnectionString } from "./sql-connection.ts";
-import { isDirectory, workspaceIdFor, type WorkspacePermission, type WorkspaceRecord, type WorkspaceStore } from "./workspace-store.ts";
+import { isDirectory, workspaceIdFor, type WorkspaceRecord, type WorkspaceStore } from "./workspace-store.ts";
 
 /** 只下载/预览、可能很大的产物不放进 JSONL：`artifact.read` 返回服务端路径。 */
 export const MAX_ARTIFACT_TEXT_BYTES = 1024 * 1024;
@@ -179,15 +179,6 @@ function remoteKindParam(params: MethodParams): RemoteSourceKind {
   return value as RemoteSourceKind;
 }
 
-function permissionParam(params: MethodParams, fallback: WorkspacePermission): WorkspacePermission {
-  const value = params.permission;
-  if (value === undefined) return fallback;
-  if (value !== "read_only" && value !== "read_write") {
-    throw invalidParams(say("permission must be read_only or read_write.", "permission 必须是 read_only 或 read_write。"));
-  }
-  return value;
-}
-
 function stringArrayParam(params: MethodParams, key: string): string[] {
   const value = params[key];
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
@@ -307,7 +298,6 @@ function publicWorkspace(record: WorkspaceRecord, current: string | undefined): 
     workspace_id: record.workspaceId,
     workdir: record.workdir,
     name: record.name,
-    permission: record.permission,
     instructions: record.instructions,
     source_id: record.sourceId,
     available: isDirectory(record.workdir),
@@ -1310,7 +1300,6 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
 
     /** 登记一个目录并导入其中的数据文件；同一目录已登记过时原样返回，不重复导入。 */
     "workspace.create": async (params) => {
-      const permission = permissionParam(params, "read_only");
       const checked = validateWorkspacePath(stringParam(params, "path"), {
         projectRoot: deps.projectRoot,
         blockedRoots: deps.blockedWorkspaceRoots,
@@ -1328,7 +1317,6 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         workspaceId,
         workdir: checked.path,
         name: cleanWorkspaceName(display === undefined || display.trim() === "" ? basename(checked.path).slice(0, 80) : display),
-        permission,
         instructions: instructions === undefined ? "" : cleanWorkspaceInstructions(instructions),
         sourceId: "",
         lastSyncedAt: "",
@@ -1350,7 +1338,6 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
       const next: WorkspaceRecord = { ...record, updatedAt: iso() };
       if (params.name !== undefined) next.name = cleanWorkspaceName(stringParam(params, "name"));
-      if (params.permission !== undefined) next.permission = permissionParam(params, record.permission);
       if (params.instructions !== undefined) {
         if (typeof params.instructions !== "string") throw invalidParams("'instructions' must be a string");
         next.instructions = cleanWorkspaceInstructions(params.instructions);

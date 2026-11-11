@@ -25,7 +25,7 @@
 | 能力 | 普通聊天 | 工作区内的对话 |
 |---|---|---|
 | 数据来源 | 上传、连接（仅本对话可见） | 同左，另加工作区共享来源（本工作区所有对话可见） |
-| `workspace_*` 文件工具 | 不暴露 | 暴露；写类工具要求权限为 `read_write` |
+| `workspace_*` 文件工具 | 不暴露 | 暴露；改动类工具受对话的权限模式约束 |
 | SQL `read_csv` 白名单 | uploads、Information | 另加工作区目录及其 `artifacts`、`.baa_cache`、`.zhixi` |
 | 导出文件落点 | `<dataDir>/outputs/exports` | `<目录>/artifacts/` |
 | 附加说明 | 无 | 工作区说明（instructions）并入系统提示 |
@@ -38,7 +38,7 @@
 工作区注册表 `<dataDir>/workspaces.json`（原子写，风格同数据源配置存储）：
 
 ```
-{ id, name, path, permission: "read_only" | "read_write",
+{ id, name, path,
   instructions,            // ≤ 8000 字，存在应用目录，不写进用户文件夹
   sourceId,                // 目录同步出的持久化来源，全工作区共用一个
   sharedConfigIds[],       // 工作区共享的远程来源配置
@@ -60,7 +60,7 @@
 
 - `hasWorkspace` = scope 为 workspace 且注册表有记录且目录仍存在。工具收敛逻辑（`toolsForTurn`）不改。
 - `assemble.ts` 给 compute 的上下文补发 `workspace_id`、`workspace_root`。
-- 回合开始时把工作区名称、路径、权限、说明作为一段 turn 文档并入系统提示。
+- 回合开始时把工作区名称、路径、当前权限模式、说明作为一段 turn 文档并入系统提示。
 - 目录被删或不可读：本轮明确报错，不静默退回普通聊天。
 - 同步时机：创建工作区时、用户点「刷新」时；不在每轮同步。变更检测沿用 `registry.json` 的 sha256。
 - 迁移：首次启动把各会话里 `mounted` 的工作区按路径去重，提升为全局记录，会话 scope 指向它；未挂载的历史记录变成无会话绑定的注册表项。
@@ -76,9 +76,9 @@
 ### 侧栏与标签
 
 - 侧栏顶部：「New chat」「New workspace」。会话按组显示：每个工作区一组（组头有「新建对话」），其余归「Chats」。
-- 输入区上方的范围标签：`Chat` 或 `📁 sales-2026 · read-only`。点开菜单：普通聊天可「Move to workspace…」；工作区对话显示工作区信息与「Open settings」。
-- 「New workspace」对话框：文件夹选择、名称、权限（Select）、说明（多行）。
-- 工作区设置页（S4）：名称、权限、说明、共享来源、刷新、移除。移除只删注册和缓存的 `.zhixi`，不动用户文件，需二次确认。
+- 输入区上方的范围标签：`Chat` 或 `📁 sales-2026`。点开菜单：普通聊天可「Move to workspace…」；工作区对话显示工作区信息与「Open settings」。权限模式芯片在输入区底栏，只在工作区对话里出现。
+- 「New workspace」对话框：文件夹选择、名称、说明（多行）。
+- 工作区设置页（S4）：名称、说明、共享来源、刷新、移除。移除只删注册和缓存的 `.zhixi`，不动用户文件，需二次确认。
 - 界面文案英文，中文只放 `i18n.go`。
 
 ### 工作区文件树（参照 Tern 的文件面板）
@@ -87,7 +87,7 @@
 
 布局，自上而下：
 
-- 头部：文件夹图标、工作区名、权限徽标（`read-only`）、折叠按钮。
+- 头部：文件夹图标、工作区名、折叠按钮。
 - 页签图标：Files（树）、Changes（`±`，列出尚未导入或自上次导入后变化的数据文件，一键导入）。Tern 的第三个页签（git 分支）不做。
 - 树：每行 = 展开箭头、类型图标、名称、右侧徽标。目录在前文件在后，各自按名称不区分大小写排序。
 - 单子目录链折叠成一行，如 `docs / refactor`、`outputs / charts`。
@@ -108,7 +108,7 @@
 
 - 点目录：展开或折叠，首次展开才向 server 取这一层。
 - 点数据文件：预览前若干行（已导入的走 `source.previewTable`）；点文本文件：预览文本。
-- 右键菜单（窗口内弹出菜单）：「Import」「Reference in chat」（把相对路径插入输入框）。面板不提供删除、重命名等写操作，改用户文件只由 agent 的 `workspace_*` 工具完成，并受 `read_write` 约束。
+- 右键菜单（窗口内弹出菜单）：「Import」「Reference in chat」（把相对路径插入输入框）。面板不提供删除、重命名等写操作，改用户文件只由 agent 的 `workspace_*` 工具完成，并受对话的权限模式约束。
 
 实现要点：
 
@@ -118,6 +118,31 @@
 - 导入状态来自 `registry.json` 的 sha256 与当前文件对比，不在列目录时算哈希（大文件会卡）：先比 size 与 mtime，不一致才标 `!`，确认哈希放到导入时。
 - 图标用 Lucide 子集（`desktop/internal/icons`）：文件夹、文件、文本、表格、数据库、图片、代码；按扩展名选，不按目录名做特殊图标。
 - 一律用 MyGo 官方组件；行数很多时用虚拟列表组件。
+
+## 权限模式
+
+照 Claude Code 的五档，只在工作区对话里出现（普通聊天没有会改文件的工具）。模式记在对话上（`SourceDoc.permissionMode`），新对话从 `manual` 开始，没有工作区级默认值；输入区底栏的模式芯片随时可改，下一次工具调用起生效。
+
+「会改东西」的工具分两类（`agent/permission-mode.ts`，其余工具不受管）：
+
+- 编辑：`workspace_write_file`、`workspace_edit_file`、`export_excel`、`export_report`、`generate_ppt`、`generate_dashboard`；
+- 破坏性：`workspace_delete_file`、`workspace_move_file`、`workspace_bash`。
+
+| 模式 | 编辑 | 破坏性 |
+|---|---|---|
+| `manual` | 询问 | 询问 |
+| `accept_edits` | 放行 | 询问 |
+| `plan` | 拒绝，理由要求模型改写成文字计划 | 拒绝 |
+| `auto` | 放行 | 只读 bash（白名单命令，不含重定向、`;`、`&&`、命令替换）放行，其余询问 |
+| `bypass` | 放行 | 放行 |
+
+- 「本对话都允许」只对编辑类、只在 `manual` 下有效，名单存在对话文档里；破坏性操作永远逐次询问。
+- 询问发生在 `beforeTool` 之后一道闸门（`agent/permission-gate.ts`）：先过输出守卫与注册表 `confirmation`，再按模式判断；要询问时挂起这次调用，推 `permission.requested` 通知，界面用 `permission.respond` 回复（允许 / 本对话都允许 / 拒绝）；中止这一轮会撤下请求（`permission.resolved`，`reply: "cancelled"`）。请求只在内存里：进程重启后被挂起的调用由调度器重放，会重新询问。
+- 目录边界、敏感文件过滤、读后写检查仍由工具本身执行，`bypass` 也不绕过它们。
+- 方法：`conversation.scope`（范围、模式、允许名单）、`conversation.setMode`、`permission.pending`、`permission.respond`。
+- 系统提示的 `[WORKSPACE]` 块写明当前模式，模型据此调整做法。
+
+不做：Claude Code 的「退出计划模式前让用户批准计划」流程（现在 plan 只是只读，用户自己切模式）；按命令/路径的细粒度允许规则；让模型逐次判断的 auto。
 
 ## 取舍
 
@@ -141,6 +166,6 @@
 下面四项我给过建议，未收到异议，按建议执行；要改请说：
 
 1. 范围不能脱离，只能从普通聊天移入工作区。
-2. `read_only` 下导出可以写 `artifacts/`；`read_only` 只禁 `workspace_write/edit/delete/move/bash`。
+2. 工作区不再有「只读/可读写」，并入权限模式（见「权限模式」一节）；旧数据迁移时只读 → `plan`，可读写 → `accept_edits`。
 3. 共享来源放 S4，不阻塞 S1 至 S3。
 4. 侧栏按工作区分组，不做筛选。

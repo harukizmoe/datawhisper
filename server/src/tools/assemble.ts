@@ -69,7 +69,7 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
     }
     return record;
   };
-  /** 每个（目录, 权限）一个文件系统实例：编辑前必须先读的跟踪状态随之保持。 */
+  /** 每个目录一个文件系统实例：编辑前必须先读的跟踪状态随之保持。 */
   const workspaceFsCache = new Map<string, WorkspaceFs>();
   /** 文件类工具按调用的会话选文件系统：工作区对话得到挂载了该目录的实例，普通聊天得到无用户目录的那份。 */
   const workspaceFor = async (api: ToolExecutionApi<never>): Promise<WorkspaceFs> => {
@@ -77,14 +77,15 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
     const doc = await options.sources().read(api.conversationId as unknown as number).catch(() => undefined);
     const record = doc === undefined ? undefined : await workspaceOf(doc);
     if (record === undefined) return workspace;
-    const key = `${record.workdir}\0${record.permission}`;
+    const key = record.workdir;
     let instance = workspaceFsCache.get(key);
     if (instance === undefined) {
       instance = new NodeWorkspaceFs({
         dataRoot: config.dataDir,
         resourceRoot: config.dataDir,
         userRoot: record.workdir,
-        userPermission: record.permission,
+        // 写入由权限模式在 `beforeTool` 里把关；文件系统层只负责目录边界与敏感文件过滤。
+        userPermission: "read_write",
         metaDir: join(record.workdir, ".zhixi"),
         cacheDir: join(record.workdir, ".baa_cache"),
       });

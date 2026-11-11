@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -85,4 +85,77 @@ test("工作区对话的系统提示带工作区块，普通聊天没有；目�
   // 已有的工作区对话在目录消失后提交，也要明确报错，而不是悄悄退成普通聊天。
   const orphan = await run.pipe.client.request("conversation.submit", { id: scoped.id, requestId: "again", text: "still there?" }).catch((error: unknown) => error);
   expect(orphan).toBeInstanceOf(RpcError);
+}, 60_000);
+
+/** 只发出这一轮、不等它结束：权限询问会让这一轮停在工具调用上。 */
+async function send(run: Running, id: number, text: string): Promise<void> {
+  await run.pipe.client.request("conversation.submit", { id, requestId: `req-${id}-${text}`, text });
+}
+
+async function idle(run: Running, id: number): Promise<void> {
+  const conversation = (await run.service.harness.conversation(id as never, BACKGROUND_CONTEXT))!;
+  await conversation.waitForIdle(BACKGROUND_CONTEXT);
+}
+
+const writeCall = (file: string, content: string): string => `CALL:workspace_write_file{"file_path":"${file}","content":"${content}"}`;
+
+type PendingRequest = { requestId: string; tool: string; summary: string; detail: string; allowChat: boolean };
+
+/** 等到界面收到一条新的 `permission.requested` 通知，返回它的载荷。 */
+async function nextRequest(run: Running, seen: number): Promise<PendingRequest> {
+  const requested = () => run.pipe.client.notifications.filter((item) => item.method === "permission.requested");
+  await run.pipe.client.until(() => requested().length > seen);
+  return requested()[seen]!.params as PendingRequest;
+}
+
+test("权限模式：manual 询问并按回复放行或拒绝，plan 拦截、bypass 直通，普通聊天没有模式", async () => {
+  const run = await start();
+  const workdir = join(run.dir, "notes");
+  mkdirSync(workdir, { recursive: true });
+  const created = await run.pipe.client.request<{ workspace: { workspace_id: string } }>("workspace.create", { path: workdir });
+  const { id } = await run.pipe.client.request<{ id: number }>("conversation.create", { workspaceId: created.workspace.workspace_id });
+  const chat = await run.pipe.client.request<{ id: number }>("conversation.create");
+
+  const scope = await run.pipe.client.request<{ scope: string; mode: string | null }>("conversation.scope", { conversationId: id });
+  expect(scope).toMatchObject({ scope: "workspace", mode: "manual" });
+  expect(await run.pipe.client.request("conversation.scope", { conversationId: chat.id })).toMatchObject({ scope: "chat", mode: null });
+  const noMode = await run.pipe.client.request("conversation.setMode", { conversationId: chat.id, mode: "bypass" }).catch((error: unknown) => error);
+  expect(noMode).toBeInstanceOf(RpcError);
+
+  // manual：这一轮停在工具调用上，界面收到请求；允许后文件写出。
+  await send(run, id, writeCall("one.md", "first"));
+  const first = await nextRequest(run, 0);
+  expect(first).toMatchObject({ tool: "workspace_write_file", summary: "Write file one.md", detail: "first", allowChat: true });
+  expect((await run.pipe.client.request<{ requests: unknown[] }>("permission.pending", { conversationId: id })).requests).toHaveLength(1);
+  expect(existsSync(join(workdir, "one.md"))).toBe(false);
+  await run.pipe.client.request("permission.respond", { requestId: first.requestId, decision: "allow" });
+  await idle(run, id);
+  expect(readFileSync(join(workdir, "one.md"), "utf8")).toBe("first");
+  expect(run.pipe.client.notifications.some((item) => item.method === "permission.resolved")).toBe(true);
+  // 同一个请求不能回复两次。
+  const twice = await run.pipe.client.request("permission.respond", { requestId: first.requestId, decision: "deny" }).catch((error: unknown) => error);
+  expect(twice).toBeInstanceOf(RpcError);
+
+  // 拒绝：文件不写，模型收到拒绝理由。
+  await send(run, id, writeCall("two.md", "second"));
+  const second = await nextRequest(run, 1);
+  await run.pipe.client.request("permission.respond", { requestId: second.requestId, decision: "deny" });
+  await idle(run, id);
+  expect(existsSync(join(workdir, "two.md"))).toBe(false);
+  expect(run.stub.log.at(-1)!.lastTool).toContain("denied workspace_write_file");
+
+  // plan：不询问，直接把拒绝理由交给模型。
+  await run.pipe.client.request("conversation.setMode", { conversationId: id, mode: "plan" });
+  await send(run, id, writeCall("three.md", "third"));
+  await idle(run, id);
+  expect(existsSync(join(workdir, "three.md"))).toBe(false);
+  expect(run.stub.log.at(-1)!.lastTool).toContain("Plan mode");
+  expect(requestText(run.stub, run.stub.log.length - 1)).toContain("Permission mode: plan");
+
+  // bypass：直接写出，不再有新的请求。
+  await run.pipe.client.request("conversation.setMode", { conversationId: id, mode: "bypass" });
+  await send(run, id, writeCall("four.md", "fourth"));
+  await idle(run, id);
+  expect(readFileSync(join(workdir, "four.md"), "utf8")).toBe("fourth");
+  expect(run.pipe.client.notifications.filter((item) => item.method === "permission.requested")).toHaveLength(2);
 }, 60_000);

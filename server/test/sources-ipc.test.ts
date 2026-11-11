@@ -751,7 +751,6 @@ describe("工作区", () => {
     workspace_id: string;
     workdir: string;
     name: string;
-    permission: string;
     instructions: string;
     source_id: string;
     available: boolean;
@@ -772,11 +771,11 @@ describe("工作区", () => {
   const callsOf = (method: string) => compute.calls.filter((call) => call.method === method);
 
   test("create 登记目录并导入数据；同一目录再次 create 原样返回、不重复导入", async () => {
-    const { workdir, result, id } = await createWorkspace("project", { permission: "read_write", instructions: " 只看 data.csv " });
+    const { workdir, result, id } = await createWorkspace("project", { instructions: " 只看 data.csv " });
     expect(id).toMatch(/^ws_[a-f0-9]{16}$/);
     expect(result).toMatchObject({
       existing: false,
-      workspace: { workdir, name: "project", permission: "read_write", instructions: "只看 data.csv", available: true, current: false },
+      workspace: { workdir, name: "project", instructions: "只看 data.csv", available: true, current: false },
     });
     expect(result.added).toEqual([{ source_name: "data.csv", tables: ["data"] }]);
     expect(callsOf("workspace.sync")).toHaveLength(1);
@@ -828,7 +827,7 @@ describe("工作区", () => {
     expect(store.peek(1).scope).toEqual({ kind: "workspace", workspaceId: first.id });
   });
 
-  test("update 改名、权限与说明；非法值被拒绝；带 conversationId 时共享来源跟着改名", async () => {
+  test("update 改名与说明；非法值被拒绝；带 conversationId 时共享来源跟着改名", async () => {
     const { id } = await createWorkspace("project");
     await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: id });
 
@@ -836,17 +835,13 @@ describe("工作区", () => {
       conversationId: 1,
       workspaceId: id,
       name: "  年度   报表 ",
-      permission: "read_write",
       instructions: " 结果写进 artifacts ",
     });
-    expect(renamed.result!.workspace).toMatchObject({ name: "年度 报表", permission: "read_write", instructions: "结果写进 artifacts" });
+    expect(renamed.result!.workspace).toMatchObject({ name: "年度 报表", instructions: "结果写进 artifacts" });
     expect(store.peek(1).sources[0]!.name).toContain("年度 报表");
-    expect((await workspaces.get(id))!.permission).toBe("read_write");
 
     const badName = await server.call("workspace.update", { workspaceId: id, name: "x".repeat(81) });
     expect(reasonOf(badName)).toBe("invalid_workspace_name");
-    const badPermission = await server.call("workspace.update", { workspaceId: id, permission: "admin" });
-    expect(badPermission.error?.code).toBe(INVALID_PARAMS);
     const badInstructions = await server.call("workspace.update", { workspaceId: id, instructions: "a\u0000b" });
     expect(badInstructions.error).toBeDefined();
     expect((await workspaces.get(id))!.instructions).toBe("结果写进 artifacts");

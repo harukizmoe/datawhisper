@@ -48,10 +48,24 @@ describe("旧版每对话工作区记录迁移", () => {
     expect(doc.workspaces).toBeUndefined();
     expect(await workspaces.get(WORKSPACE_ID)).toMatchObject({
       workdir: "/data/project",
-      permission: "read_write",
       sourceId: "s_old",
       instructions: "",
     });
+    expect(doc.permissionMode).toBe("accept_edits");
+  });
+
+  test("旧的只读/可读写并入对话的权限模式：只读 → plan，可读写 → accept_edits", async () => {
+    const state = createMemorySourceStore([1, 2]);
+    const workspaces = createMemoryWorkspaceStore();
+    await state.update(1, (draft) => {
+      draft.workspaces = [legacy({ permission: "read_only" })];
+    });
+    await state.update(2, (draft) => {
+      draft.workspaces = [legacy({ permission: "read_write" })];
+    });
+    await migrateLegacyWorkspaces({ state, workspaces, conversationIds: [1, 2] });
+    expect(state.peek(1).permissionMode).toBe("plan");
+    expect(state.peek(2).permissionMode).toBe("accept_edits");
   });
 
   test("两个对话挂过同一目录：共用第一份来源 id，第二个对话的来源被改名指向它", async () => {

@@ -686,6 +686,7 @@ func (a *app) composer(c *ui.Context) {
 			if a.slashOpen() {
 				a.slashMenu(c)
 			}
+			a.permissionCards(c)
 			if busy || len(a.chat.QueuedInputs) > 0 {
 				a.statusLine(c, busy)
 			}
@@ -739,6 +740,9 @@ func (a *app) composer(c *ui.Context) {
 						if sel.Changed() {
 							a.chooseThinking(a.cv.thinkingChoice)
 						}
+					}
+					if a.perm.scope.Scope == "workspace" && a.perm.scope.Mode != "" {
+						a.modeChip(c)
 					}
 					if busy {
 						ui.Segmented(c, &a.cv.busyMode, a.tr("chat.queue"), a.tr("chat.steer")).Shrink(0).Label(a.tr("chat.enterMode")).FontSize(a.fs(textCaption))
