@@ -31,7 +31,9 @@ type treeDir struct {
 // fileTree 是当前工作区的树状态；工作区一变就整体丢掉重来。
 type fileTree struct {
 	workspaceID string
-	dirs        map[string]*treeDir
+	// sourceID 是这个工作区的共享来源（预览数据文件要用），每次构建时从工作区同步过来。
+	sourceID string
+	dirs     map[string]*treeDir
 	// outline 是 MyGo 的树组件状态：展开的目录（Open）、行与键盘导航都在里面，行内容自己画。
 	outline ui.OutlineState[string]
 	// entries 是当前已知的条目索引（路径 → 条目），来自已加载的每一层，供树的行使用。
@@ -44,6 +46,12 @@ type fileTree struct {
 	pendingErr string
 	pendingCut bool
 	importing  []string
+	// 点文件后的预览：数据文件走来源预览（表格 + schema），其它文件读开头若干字节。
+	previewPath    string
+	previewText    string
+	previewErr     string
+	previewCut     bool
+	previewLoading bool
 }
 
 func (a *app) treeDirAt(path string) *treeDir {
@@ -103,6 +111,7 @@ func (a *app) fileTreeView(c *ui.Context, t *ui.Theme, current *service.Workspac
 	if a.ft.workspaceID != current.WorkspaceID {
 		a.ft = fileTree{workspaceID: current.WorkspaceID}
 	}
+	a.ft.sourceID = current.SourceID
 	root := a.treeDirAt("")
 	// 已加载的每一层合成一个索引：树的行只拿得到路径，图标与徽标从这里查。
 	a.ft.entries = make(map[string]service.TreeEntry)
@@ -151,6 +160,92 @@ func (a *app) fileTreeView(c *ui.Context, t *ui.Theme, current *service.Workspac
 			if root.loaded && root.truncated {
 				ui.Text(c, a.tr("ws.treeMore", "count", strconv.Itoa(root.total-len(root.entries)))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			}
+			if a.ft.previewPath != "" {
+				a.workspacePreview(c, t, current)
+			}
+		}
+	})
+}
+
+// previewWorkspaceFile 点文件时给个预览：已导入的数据文件直接看表，其它读开头的文本。
+func (a *app) previewWorkspaceFile(entry service.TreeEntry) {
+	client, workspaceID := a.client, a.ft.workspaceID
+	a.ft.previewPath, a.ft.previewText, a.ft.previewErr, a.ft.previewCut = entry.Path, "", "", false
+	if entry.Data && len(entry.Tables) > 0 {
+		// 共享来源已经在的话直接换表；没有来源就只提示还没导入。
+		if sourceID := a.ft.sourceID; sourceID != "" {
+			// refreshPreview 的完成回调按 previewID 认领结果，先把它设成这个来源。
+			a.ft.previewLoading = false
+			a.src.previewID, a.src.preview, a.src.previewTable, a.src.table = sourceID, nil, entry.Tables[0], nil
+			a.refreshPreview(sourceID, entry.Tables[0], true)
+			return
+		}
+	}
+	if client == nil {
+		return
+	}
+	a.ft.previewLoading = true
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		file, err := client.ReadWorkspaceFile(ctx, workspaceID, entry.Path)
+		a.post(func() {
+			if client != a.client || a.ft.workspaceID != workspaceID || a.ft.previewPath != entry.Path {
+				return
+			}
+			a.ft.previewLoading = false
+			if err != nil {
+				a.ft.previewErr = a.sourceErr(err)
+				return
+			}
+			a.ft.previewText, a.ft.previewCut = file.Text, file.Truncated
+		})
+	}()
+}
+
+// workspacePreview 画文件预览：数据文件是来源预览面板，其它是等宽文本。
+func (a *app) workspacePreview(c *ui.Context, t *ui.Theme, current *service.Workspace) {
+	name := filepath.Base(a.ft.previewPath)
+	ui.Column(c).Gap(6).Padding(10).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Shrink(0).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, name).Bold().Grow(1).MinWidth(0).SingleLine()
+			if a.ft.previewLoading {
+				ui.Spinner(c)
+			}
+			if iconButton(c, icons.Close, a.tr("ws.previewClose")).Clicked() {
+				a.ft.previewPath = ""
+				a.src.previewID, a.src.preview, a.src.previewTable, a.src.table = "", nil, "", nil
+			}
+		})
+		if a.ft.previewErr != "" {
+			ui.Text(c, a.ft.previewErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
+			return
+		}
+		// 数据文件：复用来源预览面板（表选择、行数据、schema）。
+		if a.src.previewID != "" && a.src.previewID == current.SourceID {
+			ui.Scroll(c).Height(a.fs(textBody) * 16).Children(func() {
+				a.previewPanel(c, t)
+			})
+			return
+		}
+		if a.ft.previewLoading {
+			ui.Text(c, a.tr("ws.treeLoading")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			return
+		}
+		if a.ft.previewText == "" {
+			ui.Text(c, a.tr("ws.previewEmpty")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			return
+		}
+		// 高度跟着行数走，超过 14 行再滚动：Scroll 不给尺寸时不会自己长高。
+		lines := strings.Count(a.ft.previewText, "\n") + 1
+		if lines > 14 {
+			lines = 14
+		}
+		ui.Scroll(c).Height(float32(lines)*a.fs(textSmall)*1.5 + 4).Children(func() {
+			ui.Text(c, a.ft.previewText).FontSize(a.fs(textSmall)).Selectable()
+		})
+		if a.ft.previewCut {
+			ui.Text(c, a.tr("ws.previewTruncated")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
 	})
 }
@@ -221,14 +316,17 @@ func (a *app) treeRow(c *ui.Context, t *ui.Theme, path string) {
 		case entry.Kind == "file" && entry.Data && entry.ImportState == "imported":
 			ui.Icon(c, icons.Table).TextColor(t.TextMuted).Shrink(0).Tooltip(a.tr("ws.imported"))
 		}
-		if entry.Kind == "dir" && !entry.Empty {
-			// 点目录名也能展开：箭头太小，用户点的是名字。展开状态由树组件持有。
-			if row.Clicked() {
+		if row.Clicked() {
+			switch {
+			case entry.Kind == "dir" && !entry.Empty:
+				// 点目录名也能展开：箭头太小，用户点的是名字。展开状态由树组件持有。
 				if a.ft.outline.Open.Has(path) {
 					a.ft.outline.Open.Remove(path)
 				} else {
 					a.ft.outline.Open.Add(path)
 				}
+			case entry.Kind == "file":
+				a.previewWorkspaceFile(entry)
 			}
 		}
 	})

@@ -174,6 +174,8 @@ type TreeEntry struct {
 	ImportState string `json:"importState"`
 	// Pending 是目录下没导入或已变化的数据文件数。
 	Pending int `json:"pending"`
+	// Tables 是已导入的数据文件在共享来源里的表名，点文件预览时先用第一张。
+	Tables []string `json:"tables"`
 }
 
 // PendingFile 是「Changes」页签里的一项：还没导入或导入后变了的数据文件。
@@ -206,6 +208,21 @@ func (c *Client) WorkspacePending(ctx context.Context, workspaceID string) ([]Pe
 	}
 	err := c.callInto(ctx, "workspace.pending", map[string]any{"workspaceId": workspaceID}, &out)
 	return out.Files, out.Truncated, err
+}
+
+// TextFile 是工作区里一个文本文件的开头，供文件树里点文件预览。
+type TextFile struct {
+	Path      string `json:"path"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated"`
+	Size      int64  `json:"size"`
+}
+
+// ReadWorkspaceFile 读工作区里一个文本文件的开头；二进制与越界路径由服务端拒绝。
+func (c *Client) ReadWorkspaceFile(ctx context.Context, workspaceID, path string) (TextFile, error) {
+	var out TextFile
+	err := c.callInto(ctx, "workspace.readFile", map[string]any{"workspaceId": workspaceID, "path": path}, &out)
+	return out, err
 }
 
 // ImportWorkspaceFiles 只导入指定的数据文件（相对工作区根的路径），返回导入结果与最新的工作区。

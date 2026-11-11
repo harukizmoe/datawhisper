@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listDirectory, listPendingFiles, TREE_LIMIT, workspaceTreeMethods } from "../src/ipc/workspace-tree.ts";
+import { listDirectory, listPendingFiles, readTextFile, TREE_LIMIT, workspaceTreeMethods } from "../src/ipc/workspace-tree.ts";
 
 const dirs: string[] = [];
 function workdir(): string {
@@ -157,6 +157,40 @@ describe("listPendingFiles", () => {
 
   test("两个 RPC 都注册了", () => {
     const methods = workspaceTreeMethods({ workspaces: { list: async () => [], get: async () => undefined, put: async () => {}, remove: async () => {} } });
-    expect(Object.keys(methods).sort()).toEqual(["workspace.pending", "workspace.tree"]);
+    expect(Object.keys(methods).sort()).toEqual(["workspace.pending", "workspace.readFile", "workspace.tree"]);
+  });
+});
+
+describe("readTextFile", () => {
+  test("读文本；超长截断并说明；二进制与敏感文件拒绝", () => {
+    const root = workdir();
+    writeFileSync(join(root, "notes.md"), "# hello\n");
+    writeFileSync(join(root, "big.txt"), "x".repeat(300 * 1024));
+    writeFileSync(join(root, "bin.dat"), Buffer.from([0x61, 0x00, 0x62]));
+    writeFileSync(join(root, ".env"), "SECRET=1");
+    expect(readTextFile(root, "notes.md")).toMatchObject({ text: "# hello\n", truncated: false });
+    const big = readTextFile(root, "big.txt");
+    expect(big.truncated).toBe(true);
+    expect(big.text.length).toBe(256 * 1024);
+    expect(() => readTextFile(root, "bin.dat")).toThrow("Not a text file");
+    expect(() => readTextFile(root, ".env")).toThrow();
+    expect(() => readTextFile(root, "../outside.txt")).toThrow("inside the workspace");
+    expect(() => readTextFile(root, "missing.txt")).toThrow("does not exist");
+    expect(() => readTextFile(root, "")).toThrow();
+  });
+
+  test("树条目带上已导入文件的表名", () => {
+    const root = workdir();
+    writeFileSync(join(root, "sales.csv"), "a\n1\n");
+    const stats = statSync(join(root, "sales.csv"));
+    mkdirSync(join(root, ".zhixi"));
+    writeFileSync(
+      join(root, ".zhixi", "registry.json"),
+      JSON.stringify({ "sales.csv": { sha256: "x", size: stats.size, mtime_ns: Math.round(stats.mtimeMs * 1e6), tables: ["sales"] } }),
+    );
+    expect(listDirectory(root, "").entries.find((entry) => entry.name === "sales.csv")).toMatchObject({
+      importState: "imported",
+      tables: ["sales"],
+    });
   });
 });
