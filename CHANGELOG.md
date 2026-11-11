@@ -4,6 +4,7 @@
 
 ### 发布前的最后一批改动：工作区、权限模式与界面打磨
 
+- 新增：工作区文件预览。文件树里点文件，面板下方给出预览：已导入的数据文件直接看表（表选择、前 100 行与 schema），其它文件读开头 256 KiB 的文本（二进制与敏感文件由服务端拒绝，超长标明「只显示文件开头」）。新增 `workspace.readFile`，`workspace.tree` 的条目带上已导入文件的表名。
 - 新增：工作区按文件导入与导入状态。文件树右键「Import」、数据面板新增「Changes」页签列出未导入或导入后变化的数据文件并可一键导入；文件行标 `?`（未导入）/`!`（已变化）/表格图标（已导入），目录行有圆点时表示子树里还有待导入的。新增 `workspace.importFiles` 与 `workspace.pending`；compute 的 `workspace.sync` 支持 `paths` 只导入指定文件，并在 registry 里记下大小与修改时间，列目录时只比这两个值、不重算哈希。
 - 发布流程重写：`build-release.yml` 改为走 `scripts/build/build-app.sh` 出 Linux 安装包（deb + tar.gz），打包后校验三件套齐全、服务与 compute 各起一次，再附 `SHA256SUMS` 建 Release；版本必须与 `desktop/mygo.json` 一致。`build-app.sh` 改用 `desktop/go.mod` 里固定的 mygo 版本，代理抖动或离线时也能打包。
 - 调整：数据面板第一次展开时的宽度与分割线。`ui.SplitPercent` 的第一个分栏是对话，旧默认 38 实际让面板占 62%；现在默认对话 78%、面板 22%，且面板不小于 440 DIP（窗口不够宽时对话让位）。图表高度与面板可用宽度的换算方向一并修正。Islands 下两座岛之间的分割线静止时隐藏，鼠标移到调整区域或拖动时才以强调色出现。

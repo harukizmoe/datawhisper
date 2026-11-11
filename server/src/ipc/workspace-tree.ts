@@ -25,11 +25,13 @@ const HIDDEN_SUFFIXES: ReadonlySet<string> = new Set([".key", ".pem", ".crt", ".
 const DATA_SUFFIXES: ReadonlySet<string> = new Set([".csv", ".tsv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"]);
 /** 一次请求里为算徽标最多 stat 多少个文件；超出后目录徽标可能不完整。 */
 const PENDING_SCAN_LIMIT = 2000;
+/** 文本预览一次最多读这么多字节；超过就截断，界面提示。 */
+const TEXT_PREVIEW_BYTES = 256 * 1024;
 
 /** 导入状态：没导入过、导入后变了、已导入，或不是数据文件。 */
 export type ImportState = "new" | "changed" | "imported" | "none";
 
-type RegistryEntry = { readonly size?: number; readonly mtime_ns?: number };
+type RegistryEntry = { readonly size?: number; readonly mtime_ns?: number; readonly tables?: readonly string[] };
 
 /** 读取 compute 写的 `.zhixi/registry.json`（导入过哪些文件、当时多大）。坏了就当空。 */
 function readRegistry(workdir: string): Record<string, RegistryEntry> {
@@ -65,6 +67,8 @@ export type TreeEntry = {
   readonly data: boolean;
   /** 仅数据文件：导入状态。 */
   readonly importState: ImportState;
+  /** 仅已导入的数据文件：它在共享来源里的表名。 */
+  readonly tables: string[];
   /** 仅目录：这棵子树里没导入或变了的数据文件数。 */
   readonly pending: number;
 };
@@ -172,6 +176,7 @@ export function listDirectory(workdir: string, rel: string): TreeListing {
         empty: isEmptyDir(chain.dir),
         data: false,
         importState: "none",
+        tables: [],
         pending: pendingDirs.get(relative(root, chain.dir).split(sep).join("/")) ?? 0,
       });
     } else if (child.isFile()) {
@@ -187,6 +192,7 @@ export function listDirectory(workdir: string, rel: string): TreeListing {
         importState: DATA_SUFFIXES.has(extname(child.name).toLowerCase())
           ? importStateOf(registry, relative(root, full).split(sep).join("/"), { size: stats.size, mtimeMs: stats.mtimeMs })
           : "none",
+        tables: registry[relative(root, full).split(sep).join("/")]?.tables?.slice() ?? [],
         pending: 0,
       });
     }
@@ -294,6 +300,42 @@ export function listPendingFiles(workdir: string): { files: PendingFile[]; trunc
   return { files, truncated };
 }
 
+/** 相对路径落到工作区内的一个普通文件；越界、符号链接、敏感名字都拒绝。 */
+function resolveFileInside(workdir: string, rel: string): string {
+  if (isAbsolute(rel) || rel.split(/[\\/]/).includes("..")) {
+    throw badPath(say(`The path must stay inside the workspace: ${rel}`, `路径必须在工作区内：${rel}`));
+  }
+  const root = realpathSync.native(workdir);
+  const target = join(root, rel);
+  let entry;
+  try {
+    entry = lstatSync(target);
+  } catch {
+    throw badPath(say(`Path does not exist: ${rel}`, `路径不存在：${rel}`));
+  }
+  const name = target.split(sep).at(-1) ?? "";
+  if (entry.isSymbolicLink() || isHidden(name)) throw badPath(say(`Cannot read ${rel}`, `无法读取 ${rel}`));
+  if (!entry.isFile()) throw badPath(say(`Path is not a file: ${rel}`, `路径不是文件：${rel}`));
+  const real = realpathSync.native(target);
+  if (!real.startsWith(root + sep)) throw badPath(say(`The path must stay inside the workspace: ${rel}`, `路径必须在工作区内：${rel}`));
+  return real;
+}
+
+/** 读一个文本文件的开头（界面里点文件预览）：二进制文件拒绝，超长截断。 */
+export function readTextFile(workdir: string, rel: string): { path: string; text: string; truncated: boolean; size: number } {
+  const full = resolveFileInside(workdir, rel);
+  const size = statSync(full).size;
+  const buffer = readFileSync(full);
+  const slice = buffer.subarray(0, TEXT_PREVIEW_BYTES);
+  if (slice.includes(0)) throw badPath(say(`Not a text file: ${rel}`, `不是文本文件：${rel}`));
+  return {
+    path: rel,
+    text: slice.toString("utf8"),
+    truncated: size > TEXT_PREVIEW_BYTES,
+    size,
+  };
+}
+
 export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore }): Record<string, RpcMethod> {
   const requireRecord = async (params: MethodParams) => {
     const workspaceId = params.workspaceId;
@@ -311,6 +353,22 @@ export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore
   };
 
   return {
+    /** 读一个文本文件的开头：文件树里点文件时的预览。 */
+    "workspace.readFile": async (params: MethodParams) => {
+      const path = params.path;
+      if (typeof path !== "string" || path.trim() === "") throw invalidParams("'path' must be a non-empty string");
+      const record = await requireRecord(params);
+      try {
+        return { workspaceId: record.workspaceId, ...readTextFile(record.workdir, path) };
+      } catch (error) {
+        if (error instanceof RpcError) throw error;
+        throw new RpcError(say("The workspace folder is not available.", "工作区目录不可用。"), INVALID_PARAMS, {
+          kind: "invalid_input",
+          reason: "workspace_unavailable",
+        });
+      }
+    },
+
     /** 还没导入或已变化的数据文件：数据面板「Changes」页签的列表。 */
     "workspace.pending": async (params: MethodParams) => {
       const record = await requireRecord(params);

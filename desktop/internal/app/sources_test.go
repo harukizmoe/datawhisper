@@ -47,6 +47,8 @@ type sourceFake struct {
 	tree map[string][]service.TreeEntry
 	// pending 是 workspace.pending 的结果。
 	pending []service.PendingFile
+	// texts 是 workspace.readFile 能读到的文件内容，键是相对工作区根的路径。
+	texts   map[string]string
 	arts    []service.Artifact
 	artText map[string]string
 	configs []service.SourceConfig
@@ -71,6 +73,7 @@ func newSourceFake(t *testing.T) *sourceFake {
 		rows:      map[string]service.PreviewTable{},
 		schema:    map[string]string{},
 		artText:   map[string]string{},
+		texts:     map[string]string{},
 		uploadDir: t.TempDir(),
 		maxBytes:  512 << 20,
 	}
@@ -524,6 +527,21 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			entries := append([]service.TreeEntry{}, f.tree[treeParams.Path]...)
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"path": treeParams.Path, "entries": entries, "truncated": false, "total": len(entries)})
+
+		case "workspace.readFile":
+			f.record(req.Method, req.Params)
+			var readParams struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(req.Params, &readParams)
+			f.mu.Lock()
+			text, ok := f.texts[readParams.Path]
+			f.mu.Unlock()
+			if !ok {
+				fail(req.ID, map[string]any{"code": -32000, "message": "cannot read", "data": map[string]any{"kind": "invalid_input", "reason": "invalid_path"}})
+				continue
+			}
+			respond(req.ID, map[string]any{"path": readParams.Path, "text": text, "truncated": false, "size": len(text)})
 
 		case "workspace.pending":
 			f.record(req.Method, req.Params)
@@ -1788,6 +1806,63 @@ func TestModelChosenOnTheNewChatPageIsUsedToCreateTheConversation(t *testing.T) 
 	q.pump(t, tt, "the new conversation", func() bool { return a.conv == 3 })
 	if a.cv.modelsErr != "" || a.cv.draftModel != nil {
 		t.Errorf("stale model state after the conversation was created: err=%q draft=%v", a.cv.modelsErr, a.cv.draftModel)
+	}
+}
+
+// 点文本文件：读开头显示在树下面；点已导入的数据文件：直接看表。
+func TestFileTreePreviewsATextFileAndAnImportedTable(t *testing.T) {
+	f := newSourceFake(t)
+	three := 3
+	f.seedSource(
+		service.Source{ID: "s_00000003", Name: "sales", Kind: "workspace_persistent", Active: true},
+		[]string{"q3"},
+		service.SourcePreview{SourceName: "sales", Tables: []service.PreviewTableInfo{{
+			Name: "q3", Columns: []string{"region", "amount"}, TotalRows: &three,
+		}}},
+		"CREATE TABLE q3(region TEXT, amount INT)",
+	)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", SourceID: "s_00000003", Available: true}
+	f.mu.Lock()
+	f.tree = map[string][]service.TreeEntry{
+		"": {
+			{Name: "notes.md", Path: "notes.md", Kind: "file", Size: 12},
+			{Name: "q3.csv", Path: "q3.csv", Kind: "file", Size: 40, Data: true, ImportState: "imported", Tables: []string{"q3"}},
+		},
+	}
+	f.texts["notes.md"] = "# 销售摘要\n总额 128 万\n"
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+
+	if err := tt.Click("notes.md"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the text preview", func() bool { return a.ft.previewText != "" })
+	expectTexts(t, tt, []string{"notes.md", "# 销售摘要", "总额 128 万"}, nil)
+	if call := f.call("workspace.readFile"); call["path"] != "notes.md" || call["workspaceId"] != "ws_0000000000000001" {
+		t.Errorf("workspace.readFile params: %v", call)
+	}
+
+	if err := tt.Click("q3.csv"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the table preview", func() bool {
+		return a.src.previewID == "s_00000003" && a.src.table != nil && a.ft.previewPath == "q3.csv"
+	})
+	tt.Frame()
+	expectTexts(t, tt, []string{"q3.csv", "region", "amount", "alpha"}, nil)
+
+	// 关掉预览：面板回到只有树。
+	if err := tt.Click("Close the preview"); err != nil {
+		t.Fatal(err)
+	}
+	q.run()
+	tt.Frame()
+	if a.ft.previewPath != "" || a.src.previewID != "" {
+		t.Errorf("preview state after closing: path=%q source=%q", a.ft.previewPath, a.src.previewID)
 	}
 }
 
