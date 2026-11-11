@@ -28,6 +28,18 @@ jobs:
           bun-version: 1.4.4
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: compute/requirements.txt
+      - name: Create the compute virtualenv
+        # 服务端默认到仓库根的 .venv 找 compute 的 Python；真实 compute 的测试要用它。
+        working-directory: .
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r compute/requirements.txt
       - name: Typecheck
         run: bunx tsc --noEmit -p .
       - name: Test
@@ -44,14 +56,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements/test.txt
+          cache-dependency-path: compute/requirements.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install -r requirements/test.txt
+          python -m pip install -r compute/requirements.txt
       - name: Test
         # 与 docs/refactor/pi-durable-plan.md 记录的三个测试文件一致；用 timeout 防止 RPC 测试挂住。
         run: |
