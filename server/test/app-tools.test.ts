@@ -55,8 +55,8 @@ function textOf(result: { output?: readonly { type: string; text?: string }[] })
 
 const API = {} as unknown as ToolExecutionApi<AppToolDetails>;
 
-function run(tool: AppTool, args: object = {}) {
-  return tool.execute(args, API, BACKGROUND_CONTEXT);
+function run(tool: AppTool, args: object = {}, api: ToolExecutionApi<AppToolDetails> = API) {
+  return tool.execute(args, api, BACKGROUND_CONTEXT);
 }
 
 function byName(tools: readonly AppTool[], name: string): AppTool {
@@ -251,7 +251,7 @@ async function statusRoot(tools: readonly AppTool[]): Promise<string> {
 }
 
 describe("app tool registry", () => {
-  test("exposes the 41 typed tools in stable order", () => {
+  test("exposes the 44 typed tools in stable order", () => {
     const { tools } = makeHarness();
     expect(tools.map((tool) => tool.name)).toEqual([...APP_TOOL_NAMES]);
     expect(tools).toHaveLength(APP_TOOL_NAMES.length);
@@ -266,7 +266,7 @@ describe("app tool registry", () => {
       "propose_ppt_outline", "propose_dashboard_outline",
       "ask_user", "browse_webpage", "read_tool_result", "search_mcp_tools",
       "plan_complete", "get_diagram", "memory_read", "load_analysis_skill",
-      "list_feishu_bitable_tables", "workflow_list", "workflow_status",
+      "list_feishu_bitable_tables", "workflow_list", "workflow_status", "browser_extract_tables",
     ]);
     for (const tool of tools) {
       expect({ name: tool.name, replay: tool.replay }).toEqual({
@@ -274,6 +274,66 @@ describe("app tool registry", () => {
         replay: safe.has(tool.name) ? "safe" : "unsafe",
       });
     }
+  });
+});
+
+describe("ingest tools", () => {
+  test("fetch_table hands the bytes to the ingest port and reports the attached sources", async () => {
+    const seen: { conversationId: number; url: string; contentType: string; bytes: number }[] = [];
+    const { tools } = makeHarness({
+      fetch: (async () =>
+        new Response("<html><table></table></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        })) as unknown as typeof fetch,
+      ingest: {
+        fetchTables: async (conversationId, request) => {
+          seen.push({ conversationId, url: request.url, contentType: request.contentType, bytes: request.body.byteLength });
+          return { added: [{ name: "stores", tables: ["stores"] }], text: "attached 1 table" };
+        },
+        loadBitable: async () => ({ added: [], text: "" }),
+      },
+    });
+    const inChat = { conversationId: 1 } as unknown as ToolExecutionApi<AppToolDetails>;
+    const reply = textOf(await run(byName(tools, "fetch_table"), { url: "http://93.184.216.34/stores.html" }, inChat));
+    expect(reply).toContain("attached 1 table");
+    expect(seen).toEqual([
+      { conversationId: 1, url: "http://93.184.216.34/stores.html", contentType: "text/html; charset=utf-8", bytes: 28 },
+    ]);
+
+    const blocked = await run(byName(tools, "fetch_table"), { url: "http://127.0.0.1/x" }, inChat);
+    expect(textOf(blocked)).toContain("local/private network URLs are not allowed");
+  });
+
+  test("load_feishu_bitable reads records through the bot and attaches them", async () => {
+    const { tools } = makeHarness({
+      feishu: {
+        connections: async () => ({
+          client: {
+            token: async () => "tenant-token",
+            request: async () => ({
+              status: 200,
+              body: { code: 0, data: { items: [{ record_id: "rec1", fields: { region: "East", amount: 10 } }], has_more: false } },
+            }),
+          },
+        }),
+      } as never,
+      ingest: {
+        fetchTables: async () => ({ added: [], text: "" }),
+        loadBitable: async (_conversationId, read, sourceName) => ({
+          added: [{ name: sourceName || "bitable", tables: [String(read.table_id)] }],
+          text: "attached the bitable",
+        }),
+      },
+    });
+    const reply = textOf(
+      await run(
+        byName(tools, "load_feishu_bitable"),
+        { bitable: "https://example.feishu.cn/base/bascnX?table=tblX", source_name: "feishu_sales" },
+        { conversationId: 1 } as unknown as ToolExecutionApi<AppToolDetails>,
+      ),
+    );
+    expect(reply).toContain("attached the bitable");
   });
 });
 

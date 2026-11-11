@@ -258,6 +258,12 @@ function publicSource(record: StoredSource, open: ReadonlySet<string>): Record<s
   };
 }
 
+/** 抓取工具的结果正文：compute 的解析摘要 + 已登记进本会话的来源清单（模型据此知道新的来源 id）。 */
+function ingestedText(added: readonly { name: string; tables: readonly string[] }[], computeText: string): string {
+  const lines = added.map((item) => `- ${item.name}: ${item.tables.join(", ") || "(no tables)"}`);
+  return `${computeText}\n\nAttached to this conversation: \n${lines.join("\n")}`;
+}
+
 /** 在已有来源里找一个不重名的显示名：先原名，再 `名 (2)`、`名 (3)`…… */
 function uniqueSourceName(existing: readonly StoredSource[], name: string): string {
   const taken = new Set(existing.map((item) => item.name));
@@ -414,7 +420,10 @@ type UploadTicket = {
 
 // ── 方法表 ──────────────────────────────────────────────────────────────────
 
-export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
+/** 装配期填进来的抓取/飞书端口：工具拿不到会话文档与 compute，只有这里能安全地登记来源。 */
+export type IngestPortHolder = { ingest?: import("../tools/app/types.ts").IngestPort };
+
+export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): Record<string, RpcMethod> {
   const now = deps.now ?? (() => new Date());
   const iso = (): string => now().toISOString();
   const maxUploadBytes = deps.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
@@ -494,6 +503,96 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       for (const [key, value] of Object.entries(secret ?? {})) descriptor[key] = value;
     }
     return descriptor;
+  };
+
+  /** 抓取/飞书工具要的 compute 上下文：本会话参与分析的来源与工作区信息。 */
+  const ingestContext = async (conversationId: number): Promise<Record<string, JsonValue>> => {
+    const doc = await state.read(conversationId);
+    const active = doc.sources.filter((source) => source.active);
+    const tables: Record<string, JsonValue> = {};
+    for (const source of active) tables[source.id] = [...(source.tables ?? [])];
+    const workspace =
+      doc.scope?.kind === "workspace" ? await deps.workspaces.get(doc.scope.workspaceId) : undefined;
+    return {
+      sources: active.map((source) => source.id),
+      ...(active.length === 0 ? {} : { primary: active[0]!.id }),
+      tables,
+      ...(workspace === undefined ? {} : { workspaceId: workspace.workspaceId, workspaceRoot: workspace.workdir }),
+    };
+  };
+
+  /** 把落盘的 CSV 逐张登记成会话来源；返回界面里看到的表名。 */
+  const registerCsvFiles = async (
+    conversationId: number,
+    sourceName: string,
+    files: readonly string[],
+  ): Promise<{ name: string; tables: readonly string[] }[]> => {
+    const added: { name: string; tables: readonly string[] }[] = [];
+    for (const file of files) {
+      const sourceId = randomId("s_");
+      const descriptor: SourceDescriptor = { kind: "csv", file_path: file };
+      const opened = await openCompute(sourceId, descriptor);
+      openIds.add(sourceId);
+      const fallback = basename(file).replace(/\.[^.]+$/u, "");
+      const record: StoredSource = {
+        id: sourceId,
+        kind: "csv",
+        name: sourceName === "" ? fallback : sourceName,
+        active: true,
+        descriptor,
+        uploadPath: file,
+        tables: opened.tables,
+        createdAt: iso(),
+        updatedAt: iso(),
+      };
+      await appendSource(conversationId, record);
+      added.push({ name: record.name, tables: opened.tables });
+    }
+    return added;
+  };
+
+  /** 让 compute 把抓来的内容解析成表并落成 CSV（内存 source 重启就没了，文件才留得住）。 */
+  const dumpIngest = async (
+    conversationId: number,
+    method: "tool.fetch_table_parse" | "tool.load_feishu_bitable",
+    params: Record<string, unknown>,
+  ): Promise<{ files: string[]; text: string }> => {
+    const scratch = randomId("s_");
+    const dumpDir = join(incomingDir, scratch);
+    try {
+      const result = await deps.compute.call<{ text: string; files?: string[] }>(method, {
+        context: await ingestContext(conversationId),
+        source_id: scratch,
+        dump_dir: dumpDir,
+        ...params,
+      });
+      return { files: result.files ?? [], text: result.text };
+    } finally {
+      // 这次解析用的内存 source 只为拿表；表已经写成 CSV，下面按文件来源重新登记。
+      await deps.compute.closeSource(scratch).catch(() => undefined);
+    }
+  };
+
+  ports.ingest = {
+    async fetchTables(conversationId, request) {
+      const dumped = await dumpIngest(conversationId, "tool.fetch_table_parse", {
+        content_type: request.contentType,
+        body_base64: Buffer.from(request.body).toString("base64"),
+        args: { url: request.url, source_name: request.sourceName ?? "" },
+      });
+      if (dumped.files.length === 0) return { added: [], text: dumped.text };
+      const added = await registerCsvFiles(conversationId, request.sourceName ?? "", dumped.files);
+      return { added, text: ingestedText(added, dumped.text) };
+    },
+    async loadBitable(conversationId, read, sourceName) {
+      const dumped = await dumpIngest(conversationId, "tool.load_feishu_bitable", {
+        records: read,
+        args: { bitable: read.url, source_name: sourceName ?? "" },
+      });
+      if (dumped.files.length === 0) return { added: [], text: dumped.text };
+      const added = await registerCsvFiles(conversationId, sourceName ?? "", dumped.files);
+      return { added, text: ingestedText(added, dumped.text) };
+    },
   };
 
   /** 保证记录在 compute 侧是打开的；返回 compute 报告的表名。 */

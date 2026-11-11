@@ -69,24 +69,22 @@ server ──stdio JSON-RPC 2.0──▶ compute (Python)
 | `infrastructure/*` | **保留** | `paths`、`artifact_lifecycle` 被 compute 与 `data/` 直接使用；`gpu_detect` 被 `training_device` 使用；`cpu_pool`、`training_router` 被 `Function/Analyze/*` 使用 |
 | `chart.png` | 不存在，无需处理 | 图表以模板与内联数据生成 |
 
-## 已知缺口：注册表里没有执行器的三个工具
+## 网表/飞书表的入口（原「没有执行器」的三个工具）
 
-`BUILTIN_TOOL_REGISTRY` 里声明了 `fetch_table`、`browser_extract_tables`、`load_feishu_bitable`，但：
+`fetch_table`、`load_feishu_bitable` 已经可用；`browser_extract_tables` 按既定范围（不做浏览器交互）只保留声明，
+调用时明确回答「这一版没有浏览器自动化，请改用 fetch_table 或上传文件」。
 
-- server 没有对应的执行器（`createAppTools` 不产出它们，`TOOL_SCHEMAS` 里也没有）；
-- `filterToolsForTurn` 只会从**真实注册的工具**里挑选，所以模型永远看不到它们；
-- 但它们的发现关键词仍会参与 `discoverToolNamesForQuery`，命中后可能挤掉同一分支里真正可用的工具（例如飞书分支的 `list_feishu_bitable_tables`）；
-- 与之配套的 `## Web table ingestion rules` 提示块会在「消息里同时有 URL 和数据词」时挂给模型，而它点名要求的 `fetch_table` / `browser_extract_tables` 并不存在。
+链路：
 
-compute 侧还留着两个对应的 RPC（`tool.fetch_table_parse`、`tool.load_feishu_bitable`）与 `compute/tools/ingest.py`，它们**没有调用方**（`server/src` 全仓无引用）。
-
-补齐的正确做法（尚未做）：在 server 暴露一个「来源注册端口」——把字节落到 uploads、写会话来源记录、打开 compute source——然后：
-
-- `fetch_table`：SSRF 校验后取回 URL，按 `Content-Type` 交给 `source.open`（CSV/JSON/PDF 已有解析路径），HTML 表格需要新的解析依赖；
-- `load_feishu_bitable`：复用 `readBitableRecords` 读记录，再走同一个端口登记为来源；
-- `browser_extract_tables`：按既定范围（不做浏览器交互）**删除**。
-
-在端口落地之前，这三个声明与 `ingest-rules` 提示块属于「说了但做不到」；它们与 `test/golden/{registry,exposure,prompts,skills}.json` 深度耦合，删除必须同时改四份 golden，因此单独作为一次变更处理，未混在本次清理里。
+1. **工具层**（`server/src/tools/app/ingest.ts`）负责取字节：`fetch_table` 做 SSRF 校验（URL 协议、私网字面量、
+   DNS 解析、重定向后的最终地址）、30 秒超时、12 MiB 上限；`load_feishu_bitable` 通过飞书机器人读记录
+   （`readBitableRecords`，凭据不经过工具）。
+2. **登记端口**（`IngestPort`，由 `sourceMethods` 装配时填入）：带上本会话的 compute 上下文，让 compute 跑
+   `tool.fetch_table_parse` / `tool.load_feishu_bitable`，并把解析出的每张表写成 CSV 到
+   `<数据目录>/uploads/incoming/<scratch>/`。
+3. compute 侧临时注册的内存来源在落盘后立刻关掉；CSV 再按普通 `csv` 来源逐张登记进会话文档，所以
+   **重启后仍然打得开**（此前只能活在内存里）。
+4. 结果正文 = compute 的解析摘要（表名、行数、列名、截断标记）+ 已登记的来源清单。
 
 ## 参数校验：现状与目标
 
