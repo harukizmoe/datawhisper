@@ -164,6 +164,25 @@ func TestWorkflowApprovalWithEdits(t *testing.T) {
 	expectTexts(t, tt, []string{"ap_1 · plan: approved with changes"}, []string{"Apply edits"})
 }
 
+// TestDataPanelDividerDragPersists 断言拖动分栏后新的比值写回 a.src.split：布局每帧用的是
+// 夹过最小面板宽度的局部值，不写回的话下一帧会弹回去。
+func TestDataPanelDividerDragPersists(t *testing.T) {
+	_, _, a, tt := openWorkflowRuns(t)
+	before := a.src.split
+	rect, ok := tt.Find("Divider")
+	if !ok {
+		t.Fatal("no divider")
+	}
+	x, y := rect.X+rect.W/2, rect.Y+rect.H/2
+	tt.Press(x, y)
+	tt.Move(x-80, y)
+	tt.Release(x-80, y)
+	tt.Frame()
+	if a.src.split == before {
+		t.Errorf("drag left the split at %v", before)
+	}
+}
+
 // TestWorkflowReworkCarriesTheComment 断言「Rework」把意见框里的话交给服务；只有 key 审批才有「Approve」。
 func TestWorkflowReworkCarriesTheComment(t *testing.T) {
 	fs, q, a, tt := openWorkflowRuns(t)

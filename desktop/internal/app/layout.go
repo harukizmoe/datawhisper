@@ -39,15 +39,36 @@ func (a *app) view(c *ui.Context) {
 				a.skillsPage(c)
 			case a.src.open:
 				// Islands 下对话与数据面板各是一座岛，分栏的拖动条落在两座岛之间的间隙里。
-				ui.SplitPercent(c, &a.src.split, func() {
-					chat := ui.Column(c).Grow(1).MinWidth(0)
-					if a.islands() {
-						chat = a.island(chat.Background(t.Background)).Margin(0, islandGap/2, 0, 0)
+				// 窗口太窄时 splitForLayout 会把面板限制在最小宽度，拖动后的比值写回 a.src.split。
+				split := a.splitForLayout()
+				pane := func(build func()) func() {
+					return func() {
+						// 分栏主题只把 Border 换成透明（隐藏静止时的分割线），岛内的控件仍用原主题。
+						ui.Themed(c, t).Background(ui.Transparent).Fill().Children(build)
 					}
-					chat.Children(func() { a.chatPage(c) })
-				}, func() {
-					a.sourcesPanel(c)
-				}).Fill()
+				}
+				buildSplit := func() {
+					if ui.SplitPercent(c, &split, pane(func() {
+						chat := ui.Column(c).Grow(1).MinWidth(0)
+						if a.islands() {
+							chat = a.island(chat.Background(t.Background)).Margin(0, islandGap/2, 0, 0)
+						}
+						chat.Children(func() { a.chatPage(c) })
+					}), pane(func() {
+						a.sourcesPanel(c)
+					})).Fill().Changed() {
+						a.src.split = split
+					}
+				}
+				if a.islands() {
+					// 两座岛之间已有间隙，分割线只在鼠标移到调整区域（悬停或拖动）时显示：
+					// 静止时画透明的 Border，悬停时框架改用强调色。
+					gap := *t
+					gap.Border = ui.Transparent
+					ui.Themed(c, &gap).Background(ui.Transparent).Fill().Children(buildSplit)
+				} else {
+					buildSplit()
+				}
 			default:
 				a.chatPage(c)
 			}

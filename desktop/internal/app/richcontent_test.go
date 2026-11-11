@@ -111,7 +111,7 @@ func (e *richTestEnv) chatWithChart(t *testing.T) conversation.Chart {
 // 给一个空的客户端（本用例不会发起请求）。
 func (e *richTestEnv) showArtifact(art service.Artifact) {
 	e.app.client = &service.Client{}
-	e.app.src.open, e.app.src.split = true, 38
+	e.app.src.open, e.app.src.split = true, defaultChatSplit
 	e.app.src.tab = sourcesTabArtifacts
 	e.app.src.conv, e.app.src.loaded = 1, true
 	e.app.src.artifacts = []service.Artifact{art}
@@ -196,7 +196,7 @@ func TestChartHeightFollowsTheWidth(t *testing.T) {
 func TestChatChartWidthAccountsForThePanel(t *testing.T) {
 	a := &app{}
 	full := a.chatChartWidth()
-	a.src.open, a.src.split = true, 38
+	a.src.open, a.src.split = true, defaultChatSplit
 	half := a.chatChartWidth()
 	if half >= full {
 		t.Errorf("panel width %v is not narrower than %v", half, full)
