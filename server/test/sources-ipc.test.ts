@@ -7,7 +7,7 @@
 import { validateWorkspacePath } from "../src/ipc/source-store.ts";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { setLanguage } from "../src/i18n.ts";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ComputeError, type SourceDescriptor } from "../src/compute/client.ts";
@@ -21,6 +21,7 @@ import {
   type SourceConfigStore,
 } from "../src/ipc/source-store.ts";
 import { sourceMethods, type ComputeSourceClient } from "../src/ipc/sources.ts";
+import { createMemoryWorkspaceStore, type WorkspaceStore } from "../src/ipc/workspace-store.ts";
 import { memoryServer, type MemoryServer, type RpcReply } from "./support/rpc.ts";
 
 type Call = { method: string; params: Record<string, unknown> };
@@ -122,6 +123,7 @@ let server: MemoryServer;
 let compute: FakeCompute;
 let store: MemorySourceDocStore;
 let configs: SourceConfigStore;
+let workspaces: WorkspaceStore;
 let changed: number[];
 /** 假飞书读取：记下被读的 `appToken/tableId`；`feishuError` 非空时模拟飞书拒绝。 */
 let feishuReads: string[];
@@ -131,6 +133,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "dw-sources-"));
   mkdirSync(join(dir, "repo"));
   store = createMemorySourceStore([1, 2]);
+  workspaces = createMemoryWorkspaceStore();
   const credentials = await SecretCredentialStore.open(
     join(dir, "credentials.json"),
     join(dir, "credentials.index.json"),
@@ -145,6 +148,8 @@ beforeEach(async () => {
     compute: compute.client,
     state: store,
     configs,
+    workspaces,
+    conversationIds: async () => [1, 2],
     feishuRecords: async (appToken, tableId) => {
       feishuReads.push(`${appToken}/${tableId}`);
       if (feishuError !== undefined) throw new Error(feishuError);
@@ -328,15 +333,14 @@ describe("来源生命周期与透传", () => {
     expect(store.peek(1).sources).toHaveLength(0);
   });
 
-  test("removeAll 同时清空工作区挂载记录", async () => {
+  test("removeAll 保留工作区的共享来源，只清掉其余来源", async () => {
     const workdir = join(dir, "remove-all-ws");
     mkdirSync(workdir, { recursive: true });
-    await server.call("workspace.mount", { conversationId: 1, path: workdir });
+    const created = await server.call<{ workspace: { workspace_id: string } }>("workspace.create", { path: workdir });
+    await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: created.result!.workspace.workspace_id });
     await openUpload("a.csv", "a\n1\n");
     await server.call("source.removeAll", { conversationId: 1 });
-    const listed = await server.call<{ workspace: unknown }>("workspace.list", { conversationId: 1 });
-    expect(listed.result!.workspace).toBeNull();
-    expect(store.peek(1).workspaces.every((record) => record.sourceId === "")).toBe(true);
+    expect(store.peek(1).sources.map((source) => source.kind)).toEqual(["workspace_persistent"]);
   });
 
   test("写入成功后通知宿主刷新 turnState，turnStateFor 反映当前来源", async () => {
@@ -743,100 +747,183 @@ describe("工作区", () => {
     return workdir;
   }
 
-  test("mount 同步数据并把持久化来源挂进会话", async () => {
-    const workdir = makeWorkspace("project");
-    const mounted = await server.call<{
-      workspace: { workspace_id: string; workdir: string; mounted: boolean; permission: string };
-      sources: { kind: string; open: boolean }[];
+  type PublicWorkspace = {
+    workspace_id: string;
+    workdir: string;
+    name: string;
+    permission: string;
+    instructions: string;
+    source_id: string;
+    available: boolean;
+    current: boolean;
+  };
+
+  async function createWorkspace(name: string, extra: Record<string, unknown> = {}) {
+    const workdir = makeWorkspace(name);
+    const reply = await server.call<{
+      existing: boolean;
+      workspace: PublicWorkspace;
       added: { source_name: string; tables?: string[] }[];
-    }>("workspace.mount", { conversationId: 1, path: workdir, permission: "read_write" });
-    expect(mounted.error).toBeUndefined();
-    expect(mounted.result!.workspace).toMatchObject({ workdir, mounted: true, permission: "read_write" });
-    expect(mounted.result!.workspace.workspace_id).toMatch(/^ws_[a-f0-9]{16}$/);
-    expect(mounted.result!.sources[0]).toMatchObject({ kind: "workspace_persistent", open: true });
-    expect(mounted.result!.added).toEqual([{ source_name: "data.csv", tables: ["data"] }]);
-    const sync = compute.calls.find((call) => call.method === "workspace.sync")!;
-    expect(sync.params).toMatchObject({ workspace_id: mounted.result!.workspace.workspace_id, workdir });
-    expect(sync.params.source_id).toBeUndefined();
+    }>("workspace.create", { path: workdir, ...extra });
+    expect(reply.error).toBeUndefined();
+    return { workdir, result: reply.result!, id: reply.result!.workspace.workspace_id };
+  }
+
+  const callsOf = (method: string) => compute.calls.filter((call) => call.method === method);
+
+  test("create 登记目录并导入数据；同一目录再次 create 原样返回、不重复导入", async () => {
+    const { workdir, result, id } = await createWorkspace("project", { permission: "read_write", instructions: " 只看 data.csv " });
+    expect(id).toMatch(/^ws_[a-f0-9]{16}$/);
+    expect(result).toMatchObject({
+      existing: false,
+      workspace: { workdir, name: "project", permission: "read_write", instructions: "只看 data.csv", available: true, current: false },
+    });
+    expect(result.added).toEqual([{ source_name: "data.csv", tables: ["data"] }]);
+    expect(callsOf("workspace.sync")).toHaveLength(1);
+    expect(callsOf("workspace.sync")[0]!.params.source_id).toBeUndefined();
+    expect(callsOf("source.open")).toHaveLength(1);
+    expect(result.workspace.source_id).toStartWith("s_");
+
+    const again = await server.call<{ existing: boolean; workspace: PublicWorkspace }>("workspace.create", { path: workdir });
+    expect(again.result).toMatchObject({ existing: true, workspace: { workspace_id: id } });
+    expect(callsOf("workspace.sync")).toHaveLength(1);
+    expect(await workspaces.list()).toHaveLength(1);
   });
 
-  test("重复挂载复用同一来源；rename / setPermission / unmount / remove", async () => {
-    const workdir = makeWorkspace("project");
-    await server.call("workspace.mount", { conversationId: 1, path: workdir });
-    const again = await server.call<{ workspace: { workspace_id: string } }>("workspace.mount", {
-      conversationId: 1,
-      path: workdir,
-    });
-    const workspaceId = again.result!.workspace.workspace_id;
-    // 第二次挂载把已打开的 source 作为导入目标，而不是重新 open。
-    expect(compute.calls.filter((call) => call.method === "workspace.sync").at(-1)!.params.source_id).toBeString();
-    expect(compute.calls.filter((call) => call.method === "source.open")).toHaveLength(1);
+  test("moveToWorkspace 写 scope 并挂上共享来源；第二个对话复用同一来源", async () => {
+    const { id } = await createWorkspace("project");
+    const moved = await server.call<{ workspace: PublicWorkspace; sources: { kind: string; open: boolean }[] }>(
+      "conversation.moveToWorkspace",
+      { conversationId: 1, workspaceId: id },
+    );
+    expect(moved.error).toBeUndefined();
+    expect(moved.result!.workspace.current).toBe(true);
+    expect(moved.result!.sources[0]).toMatchObject({ kind: "workspace_persistent", open: true });
+    expect(store.peek(1).scope).toEqual({ kind: "workspace", workspaceId: id });
+    expect(turnStateFor(store.peek(1))).toMatchObject({ hasWorkspace: true, hasDataSource: true });
 
-    const renamed = await server.call<{ workspace: { name: string } }>("workspace.rename", {
+    await server.call("conversation.moveToWorkspace", { conversationId: 2, workspaceId: id });
+    expect(store.peek(2).sources[0]!.id).toBe(store.peek(1).sources[0]!.id);
+    expect(callsOf("workspace.sync")).toHaveLength(1);
+    expect(callsOf("source.open")).toHaveLength(1);
+
+    const mine = await server.call<{ workspace: PublicWorkspace | null; workspaces: PublicWorkspace[] }>("workspace.list", {
       conversationId: 1,
-      workspaceId,
+    });
+    expect(mine.result!.workspace).toMatchObject({ workspace_id: id, current: true });
+    const chat = await server.call<{ workspace: unknown; workspaces: unknown[] }>("workspace.list", {});
+    expect(chat.result!.workspace).toBeNull();
+    expect(chat.result!.workspaces).toHaveLength(1);
+  });
+
+  test("对话已属于某个工作区后不能改挂另一个；重复挂同一个是幂等的", async () => {
+    const first = await createWorkspace("one");
+    const second = await createWorkspace("two");
+    await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: first.id });
+    const again = await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: first.id });
+    expect(again.error).toBeUndefined();
+    expect(store.peek(1).sources).toHaveLength(1);
+    const other = await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: second.id });
+    expect(reasonOf(other)).toBe("already_in_workspace");
+    expect(store.peek(1).scope).toEqual({ kind: "workspace", workspaceId: first.id });
+  });
+
+  test("update 改名、权限与说明；非法值被拒绝；带 conversationId 时共享来源跟着改名", async () => {
+    const { id } = await createWorkspace("project");
+    await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: id });
+
+    const renamed = await server.call<{ workspace: PublicWorkspace }>("workspace.update", {
+      conversationId: 1,
+      workspaceId: id,
       name: "  年度   报表 ",
+      permission: "read_write",
+      instructions: " 结果写进 artifacts ",
     });
-    expect(renamed.result!.workspace.name).toBe("年度 报表");
+    expect(renamed.result!.workspace).toMatchObject({ name: "年度 报表", permission: "read_write", instructions: "结果写进 artifacts" });
+    expect(store.peek(1).sources[0]!.name).toContain("年度 报表");
+    expect((await workspaces.get(id))!.permission).toBe("read_write");
 
-    const badName = await server.call("workspace.rename", {
-      conversationId: 1,
-      workspaceId,
-      name: "x".repeat(81),
-    });
+    const badName = await server.call("workspace.update", { workspaceId: id, name: "x".repeat(81) });
     expect(reasonOf(badName)).toBe("invalid_workspace_name");
-
-    const permission = await server.call<{ workspace: { permission: string } }>("workspace.setPermission", {
-      conversationId: 1,
-      workspaceId,
-      permission: "read_only",
-    });
-    expect(permission.result!.workspace.permission).toBe("read_only");
-    const badPermission = await server.call("workspace.setPermission", {
-      conversationId: 1,
-      workspaceId,
-      permission: "admin",
-    });
+    const badPermission = await server.call("workspace.update", { workspaceId: id, permission: "admin" });
     expect(badPermission.error?.code).toBe(INVALID_PARAMS);
+    const badInstructions = await server.call("workspace.update", { workspaceId: id, instructions: "a\u0000b" });
+    expect(badInstructions.error).toBeDefined();
+    expect((await workspaces.get(id))!.instructions).toBe("结果写进 artifacts");
+  });
 
-    const beforeUnmount = await server.call("workspace.remove", { conversationId: 1, workspaceId, confirmed: true });
-    expect(reasonOf(beforeUnmount)).toBe("workspace_connected");
+  test("sync 把已打开的共享来源作为导入目标；未知 id 报 not_found", async () => {
+    const { id } = await createWorkspace("project");
+    const synced = await server.call<{ ok: boolean; added: unknown[] }>("workspace.sync", { workspaceId: id });
+    expect(synced.result!.ok).toBe(true);
+    expect(callsOf("workspace.sync")).toHaveLength(2);
+    expect(callsOf("workspace.sync")[1]!.params.source_id).toBeString();
+    expect(callsOf("source.open")).toHaveLength(1);
 
-    const unmounted = await server.call<{ workspace: { mounted: boolean }; sources: unknown[] }>("workspace.unmount", {
-      conversationId: 1,
-    });
-    expect(unmounted.result!.workspace.mounted).toBe(false);
-    expect(unmounted.result!.sources).toHaveLength(0);
+    const unknown = await server.call("workspace.sync", { workspaceId: "ws_0000000000000000" });
+    expect(unknown.error?.data).toMatchObject({ kind: "not_found" });
+    const malformed = await server.call("workspace.sync", { workspaceId: "nope" });
+    expect(malformed.error?.code).toBe(INVALID_PARAMS);
+  });
 
-    const notConfirmed = await server.call("workspace.remove", { conversationId: 1, workspaceId });
-    expect(reasonOf(notConfirmed)).toBe("confirmation_required");
-    const removed = await server.call<{ removed_workspace_id: string }>("workspace.remove", {
-      conversationId: 1,
-      workspaceId,
+  test("目录被删后报 workspace_unavailable，list 标出不可用，对话不会被悄悄挂上", async () => {
+    const { workdir, id } = await createWorkspace("project");
+    rmSync(workdir, { recursive: true, force: true });
+
+    const synced = await server.call("workspace.sync", { workspaceId: id });
+    expect(reasonOf(synced)).toBe("workspace_unavailable");
+    const prepared = await server.call("workspace.prepare", { workspaceId: id });
+    expect(reasonOf(prepared)).toBe("workspace_unavailable");
+    const moved = await server.call("conversation.moveToWorkspace", { conversationId: 2, workspaceId: id });
+    expect(reasonOf(moved)).toBe("workspace_unavailable");
+    expect(store.peek(2).scope).toBeUndefined();
+
+    const listed = await server.call<{ workspaces: PublicWorkspace[] }>("workspace.list", {});
+    expect(listed.result!.workspaces[0]).toMatchObject({ workspace_id: id, available: false });
+  });
+
+  test("共享来源不能从对话里单独删；removeAll 也保留它", async () => {
+    const { id } = await createWorkspace("project");
+    await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: id });
+    const sourceId = store.peek(1).sources[0]!.id;
+    const removed = await server.call("source.remove", { conversationId: 1, sourceId });
+    expect(reasonOf(removed)).toBe("workspace_source");
+    await openUpload("a.csv", "a\n1\n");
+    await server.call("source.removeAll", { conversationId: 1 });
+    expect(store.peek(1).sources.map((source) => source.id)).toEqual([sourceId]);
+  });
+
+  test("remove 需要确认；仍有对话属于它时拒绝；成功后只删注册记录、不动目录", async () => {
+    const { workdir, id } = await createWorkspace("project");
+    const unconfirmed = await server.call("workspace.remove", { workspaceId: id });
+    expect(reasonOf(unconfirmed)).toBe("confirmation_required");
+
+    await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId: id });
+    const inUse = await server.call("workspace.remove", { workspaceId: id, confirmed: true });
+    expect(reasonOf(inUse)).toBe("workspace_in_use");
+    expect(await workspaces.list()).toHaveLength(1);
+
+    const lone = await createWorkspace("lone");
+    const loneSource = lone.result.workspace.source_id;
+    const removed = await server.call<{ removed_workspace_id: string; directory_deleted: boolean }>("workspace.remove", {
+      workspaceId: lone.id,
       confirmed: true,
     });
-    expect(removed.result!.removed_workspace_id).toBe(workspaceId);
-    expect(store.peek(1).workspaces).toHaveLength(0);
-  });
-
-  test("切换工作区会关闭旧的持久化来源", async () => {
-    const first = makeWorkspace("one");
-    const second = makeWorkspace("two");
-    await server.call("workspace.mount", { conversationId: 1, path: first });
-    const oldSource = store.peek(1).sources[0]!.id;
-    await server.call("workspace.mount", { conversationId: 1, path: second });
-    expect(compute.closed).toContain(oldSource);
-    expect(store.peek(1).sources).toHaveLength(1);
-    expect(store.peek(1).workspaces.filter((record) => record.mounted)).toHaveLength(1);
+    expect(removed.result).toMatchObject({ removed_workspace_id: lone.id, directory_deleted: false });
+    expect(compute.closed).toContain(loneSource);
+    expect((await workspaces.list()).map((record) => record.workspaceId)).toEqual([id]);
+    expect(existsSync(lone.workdir)).toBe(true);
+    expect(existsSync(workdir)).toBe(true);
   });
 
   test("拒绝相对路径、项目根内路径与不存在的目录", async () => {
-    const relative = await server.call("workspace.mount", { conversationId: 1, path: "relative/dir" });
+    const relative = await server.call("workspace.create", { path: "relative/dir" });
     expect(reasonOf(relative)).toBe("invalid_workdir");
-    const insideRepo = await server.call("workspace.mount", { conversationId: 1, path: join(dir, "repo") });
+    const insideRepo = await server.call("workspace.create", { path: join(dir, "repo") });
     expect(reasonOf(insideRepo)).toBe("invalid_workdir");
-    const missing = await server.call("workspace.mount", { conversationId: 1, path: join(dir, "nope") });
+    const missing = await server.call("workspace.create", { path: join(dir, "nope") });
     expect(reasonOf(missing)).toBe("invalid_workdir");
+    expect(await workspaces.list()).toHaveLength(0);
   });
 });
 
@@ -900,11 +987,9 @@ describe("产物", () => {
     mkdirSync(join(workdir, "artifacts"), { recursive: true });
     const artifact = join(workdir, "artifacts", "summary.md");
     writeFileSync(artifact, "# 结果\n");
-    const mounted = await server.call<{ workspace: { workspace_id: string } }>("workspace.mount", {
-      conversationId: 1,
-      path: workdir,
-    });
-    const workspaceId = mounted.result!.workspace.workspace_id;
+    const created = await server.call<{ workspace: { workspace_id: string } }>("workspace.create", { path: workdir });
+    const workspaceId = created.result!.workspace.workspace_id;
+    await server.call("conversation.moveToWorkspace", { conversationId: 1, workspaceId });
     const listed = await server.call<{ artifacts: { name: string; workspace_id?: string }[] }>("artifact.list", {
       conversationId: 1,
       workspaceId,
@@ -920,6 +1005,10 @@ describe("产物", () => {
 
     const outsideName = await server.call("artifact.read", { conversationId: 1, name: "data.csv" });
     expect(outsideName.error?.code).toBe(APP_ERROR);
+
+    // 不属于该工作区的对话读不到它的产物。
+    const other = await server.call("artifact.read", { conversationId: 2, name: "summary.md" });
+    expect(other.error?.code).toBe(APP_ERROR);
   });
 });
 

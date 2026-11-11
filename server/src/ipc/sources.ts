@@ -30,7 +30,6 @@ import {
   SECRET_FIELDS,
   SOURCE_ID_PATTERN,
   WORKSPACE_ID_PATTERN,
-  type ConversationHarness,
   type RemoteSourceKind,
   type SourceConfig,
   type SourceConfigKind,
@@ -39,19 +38,15 @@ import {
   type SourceDocStore,
   type SourceKind,
   type StoredSource,
-  type WorkspacePermission,
-  type WorkspaceRecord,
-  createConversationSourceStore,
-  createSourceConfigStore,
   displayNameFrom,
   randomId,
   realPath,
   suffixOf,
   validateWorkspacePath,
   within,
-  workspaceIdFor,
 } from "./source-store.ts";
 import { sqlConfigProblem, sqlConnectionString } from "./sql-connection.ts";
+import { isDirectory, workspaceIdFor, type WorkspacePermission, type WorkspaceRecord, type WorkspaceStore } from "./workspace-store.ts";
 
 /** 只下载/预览、可能很大的产物不放进 JSONL：`artifact.read` 返回服务端路径。 */
 export const MAX_ARTIFACT_TEXT_BYTES = 1024 * 1024;
@@ -76,6 +71,10 @@ export type SourcesDeps = {
   readonly state: SourceDocStore;
   /** 数据源配置；密钥只进不出。 */
   readonly configs: SourceConfigStore;
+  /** 工作区注册表：工作区是全局的，对话只在文档里记 `scope`。 */
+  readonly workspaces: WorkspaceStore;
+  /** 全部对话 id；判断某个工作区是否还有对话在用。省略时视为没有。 */
+  readonly conversationIds?: () => Promise<readonly number[]>;
   /**
    * 飞书多维表格的记录读取。凭据与网络都在 server 一侧，compute 只拿到读好的记录，
    * 因此打开 feishu 来源前必须有这个端口；省略时打开会报「飞书不可用」。
@@ -98,44 +97,6 @@ export type SourcesDeps = {
    */
   readonly onChanged?: (conversationId: number) => void;
 };
-
-export type SourceMethodsOptions = {
-  readonly compute: ComputeSourceClient;
-  readonly harness: ConversationHarness;
-  readonly context: Context;
-  readonly dataDir: string;
-  readonly credentials: CredentialStore;
-  readonly projectRoot?: string;
-  readonly now?: () => Date;
-  readonly maxUploadBytes?: number;
-  readonly uploadTtlMs?: number;
-  readonly blockedWorkspaceRoots?: readonly string[];
-  readonly onChanged?: (conversationId: number) => void;
-};
-
-/** 仓库根：`server/src/ipc` 往上三级。整合者也可以显式传 `projectRoot`。 */
-export const DEFAULT_PROJECT_ROOT = resolve(import.meta.dir, "../../..");
-
-/** 生产装配点的便利入口：把文档、配置存储与目录默认值一次接好。 */
-export function createSourceMethods(options: SourceMethodsOptions): Record<string, RpcMethod> {
-  return sourceMethods({
-    compute: options.compute,
-    state: createConversationSourceStore({ harness: options.harness, context: options.context }),
-    configs: createSourceConfigStore({
-      dataDir: options.dataDir,
-      credentials: options.credentials,
-      now: options.now,
-    }),
-    uploadsDir: join(options.dataDir, "uploads"),
-    outputsDir: join(options.dataDir, "outputs"),
-    projectRoot: options.projectRoot ?? DEFAULT_PROJECT_ROOT,
-    now: options.now,
-    maxUploadBytes: options.maxUploadBytes,
-    uploadTtlMs: options.uploadTtlMs,
-    blockedWorkspaceRoots: options.blockedWorkspaceRoots,
-    onChanged: options.onChanged,
-  });
-}
 
 // ── 参数校验 ────────────────────────────────────────────────────────────────
 
@@ -315,15 +276,43 @@ function uniqueSourceName(existing: readonly StoredSource[], name: string): stri
   }
 }
 
-function publicWorkspace(record: WorkspaceRecord): Record<string, JsonValue> {
+/** 工作区显示名：1-80 个字符，无控制字符，连续空白折叠成一个空格。 */
+function cleanWorkspaceName(raw: string): string {
+  const message = say(
+    "The working directory display name must be 1-80 characters and cannot contain control characters.",
+    "工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。",
+  );
+  if (/[\u0000-\u001f\u007f]/.test(raw)) throw invalidReason(message, "invalid_workspace_name");
+  const name = raw.trim().split(/\s+/).join(" ");
+  if (name === "" || name.length > 80) throw invalidReason(message, "invalid_workspace_name");
+  return name;
+}
+
+const MAX_WORKSPACE_INSTRUCTIONS = 8000;
+
+/** 工作区说明：可以多行，但不能含 NUL，长度有上限（它会并入每一轮的系统提示）。 */
+function cleanWorkspaceInstructions(raw: string): string {
+  if (raw.includes("\u0000") || raw.length > MAX_WORKSPACE_INSTRUCTIONS) {
+    throw invalidReason(
+      say(`Workspace instructions must be at most ${MAX_WORKSPACE_INSTRUCTIONS} characters.`, `工作区说明最多 ${MAX_WORKSPACE_INSTRUCTIONS} 个字符。`),
+      "invalid_workspace_instructions",
+    );
+  }
+  return raw.trim();
+}
+
+/** `current` 是发起请求的对话所属的工作区 id（没有或不在工作区时为 undefined）。 */
+function publicWorkspace(record: WorkspaceRecord, current: string | undefined): Record<string, JsonValue> {
   return {
     workspace_id: record.workspaceId,
     workdir: record.workdir,
     name: record.name,
     permission: record.permission,
+    instructions: record.instructions,
     source_id: record.sourceId,
-    mounted: record.mounted,
-    mounted_at: record.mountedAt,
+    available: isDirectory(record.workdir),
+    current: record.workspaceId === current,
+    last_synced_at: record.lastSyncedAt,
     updated_at: record.updatedAt,
   };
 }
@@ -331,12 +320,6 @@ function publicWorkspace(record: WorkspaceRecord): Record<string, JsonValue> {
 function requireStoredSource(doc: SourceDoc, sourceId: string): StoredSource {
   const record = doc.sources.find((item) => item.id === sourceId);
   if (record === undefined) throw appError("not_found", `data source not found: ${sourceId}`);
-  return record;
-}
-
-function requireWorkspace(doc: SourceDoc, workspaceId: string): WorkspaceRecord {
-  const record = doc.workspaces.find((item) => item.workspaceId === workspaceId);
-  if (record === undefined) throw appError("not_found", `workspace not found: ${workspaceId}`);
   return record;
 }
 
@@ -567,26 +550,128 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     }
   };
 
-  const artifactRoots = (doc: SourceDoc, workspaceId?: string): { label: string; path: string; workspaceId?: string }[] => {
+  // ── 工作区 ────────────────────────────────────────────────────────────────
+
+  const workspaceSourceName = (name: string): string => `📁 ${name}`;
+
+  /** 共享来源的描述符：库文件固定在 `<目录>/.zhixi/workspace.duckdb`，所以随时可以重建。 */
+  const workspaceDescriptor = (record: WorkspaceRecord): SourceDescriptor => ({
+    kind: "workspace_persistent",
+    db_path: join(record.workdir, ".zhixi", "workspace.duckdb"),
+    name: workspaceSourceName(record.name),
+  });
+
+  type WorkspaceSync = {
+    descriptor: SourceDescriptor;
+    tables: string[];
+    added?: { source_name: string; tables: string[] }[];
+    errors?: string[];
+    skipped?: number;
+    reused?: number;
+  };
+
+  const requireWorkspaceRecord = async (workspaceId: string): Promise<WorkspaceRecord> => {
+    const record = await deps.workspaces.get(workspaceId);
+    if (record === undefined) throw appError("not_found", `workspace not found: ${workspaceId}`);
+    return record;
+  };
+
+  const requireAvailable = (record: WorkspaceRecord): void => {
+    if (!isDirectory(record.workdir)) {
+      throw appReason(say(`The workspace directory is not available: ${record.workdir}`, `工作区目录不可用：${record.workdir}`), "workspace_unavailable");
+    }
+  };
+
+  /** 发起请求的对话所属的工作区 id；请求没带 `conversationId` 或对话不在工作区时为 undefined。 */
+  const currentWorkspaceId = async (params: MethodParams): Promise<string | undefined> => {
+    if (params.conversationId === undefined) return undefined;
+    const scope = (await state.read(conversationIdParam(params))).scope;
+    return scope?.kind === "workspace" ? scope.workspaceId : undefined;
+  };
+
+  /** 把目录里的数据文件增量导入持久化库，并在尚未打开时打开它；成功后写回注册表。 */
+  const syncWorkspace = async (record: WorkspaceRecord) => {
+    const alreadyOpen = record.sourceId !== "" && openIds.has(record.sourceId);
+    const sourceId = record.sourceId !== "" ? record.sourceId : randomId("s_");
+    const syncParams: Record<string, unknown> = {
+      workspace_id: record.workspaceId,
+      workdir: record.workdir,
+      name: workspaceSourceName(record.name),
+    };
+    // 已打开的持久化连接直接作为导入目标；否则让 compute 只建库，随后再 open。
+    if (alreadyOpen) syncParams.source_id = sourceId;
+    const synced = await computeCall<WorkspaceSync>("workspace.sync", syncParams);
+    const descriptor = synced.descriptor;
+    if (typeof descriptor !== "object" || descriptor === null || Array.isArray(descriptor)) {
+      throw appReason(say("Workspace sync returned no data source descriptor", "工作区同步没有返回数据源描述符"), "invalid_descriptor");
+    }
+    const opened = alreadyOpen
+      ? { name: workspaceSourceName(record.name), tables: synced.tables ?? [] }
+      : await openCompute(sourceId, descriptor);
+    if (!alreadyOpen) openIds.add(sourceId);
+    const next: WorkspaceRecord = { ...record, sourceId, lastSyncedAt: iso() };
+    try {
+      await deps.workspaces.put(next);
+    } catch (error) {
+      // 注册表没写成功时，别在 compute 里留下一个无人登记的连接。
+      if (!alreadyOpen) await closeCompute(sourceId);
+      throw error;
+    }
+    return { record: next, synced, tables: opened.tables };
+  };
+
+  /** 保证共享来源在 compute 里已打开，但不重新导入文件；库文件被删或打不开时重建。 */
+  const ensureWorkspaceOpen = async (record: WorkspaceRecord): Promise<{ record: WorkspaceRecord; tables: string[] }> => {
+    if (record.sourceId !== "" && openIds.has(record.sourceId)) {
+      const listed = await computeCall<{ tables: string[] }>("source.tables", { source_id: record.sourceId });
+      return { record, tables: listed.tables };
+    }
+    if (record.sourceId !== "") {
+      try {
+        const opened = await openCompute(record.sourceId, workspaceDescriptor(record));
+        openIds.add(record.sourceId);
+        return { record, tables: opened.tables };
+      } catch {
+        // 库文件被删或打不开：下面重新导入一遍。
+      }
+    }
+    const synced = await syncWorkspace(record);
+    return { record: synced.record, tables: synced.tables };
+  };
+
+  const workspaceSourceRecord = (record: WorkspaceRecord, tables: string[], existing?: StoredSource): StoredSource => ({
+    id: record.sourceId,
+    kind: "workspace_persistent",
+    name: workspaceSourceName(record.name),
+    active: true,
+    descriptor: workspaceDescriptor(record),
+    tables,
+    createdAt: existing?.createdAt ?? iso(),
+    updatedAt: iso(),
+  });
+
+  const artifactRoots = async (doc: SourceDoc, workspaceId?: string): Promise<{ label: string; path: string; workspaceId?: string }[]> => {
     const roots: { label: string; path: string; workspaceId?: string }[] = [];
-    for (const record of doc.workspaces) {
-      if (workspaceId !== undefined && record.workspaceId !== workspaceId) continue;
-      roots.push({
-        label: record.name || basename(record.workdir),
-        path: join(record.workdir, "artifacts"),
-        workspaceId: record.workspaceId,
-      });
+    if (doc.scope?.kind === "workspace" && (workspaceId === undefined || workspaceId === doc.scope.workspaceId)) {
+      const record = await deps.workspaces.get(doc.scope.workspaceId);
+      if (record !== undefined) {
+        roots.push({
+          label: record.name || basename(record.workdir),
+          path: join(record.workdir, "artifacts"),
+          workspaceId: record.workspaceId,
+        });
+      }
     }
     if (workspaceId === undefined) roots.push({ label: "exports", path: exportsDir });
     return roots;
   };
 
-  const resolveArtifact = (doc: SourceDoc, params: MethodParams): { path: string; workspaceId?: string } => {
+  const resolveArtifact = async (doc: SourceDoc, params: MethodParams): Promise<{ path: string; workspaceId?: string }> => {
     const name = optionalStringParam(params, "name");
     const rawPath = optionalStringParam(params, "path");
     if (name === undefined && rawPath === undefined) throw invalidParams("'name' or 'path' is required");
     if (name !== undefined && rawPath !== undefined) throw invalidParams("'name' and 'path' are mutually exclusive");
-    const roots = artifactRoots(doc);
+    const roots = await artifactRoots(doc);
     if (name !== undefined) {
       if (name.length > 255 || name.includes("\u0000") || /[\\/]/.test(name) || name === "." || name === "..") {
         throw invalidReason(say("Invalid artifact name", "产物名不合法"), "invalid_artifact_name");
@@ -951,14 +1036,13 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const removed = await state.update(conversationId, (draft) => {
         const index = draft.sources.findIndex((item) => item.id === sourceId);
         if (index < 0) throw appError("not_found", `data source not found: ${sourceId}`);
-        const [record] = draft.sources.splice(index, 1);
-        // 工作区来源被单独删掉后，挂载记录不能继续指向一个不存在的来源。
-        for (const workspace of draft.workspaces) {
-          if (workspace.sourceId !== sourceId) continue;
-          workspace.sourceId = "";
-          workspace.mounted = false;
-          workspace.updatedAt = iso();
+        if (draft.sources[index]!.kind === "workspace_persistent") {
+          throw invalidReason(
+            say("The workspace data belongs to the workspace and cannot be removed from one conversation.", "工作区数据属于工作区，不能从单个对话里移除。"),
+            "workspace_source",
+          );
         }
+        const [record] = draft.sources.splice(index, 1);
         return record!;
       });
       await closeCompute(removed.id);
@@ -971,20 +1055,16 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     "source.removeAll": async (params) => {
       const conversationId = conversationIdParam(params);
       const removed = await state.update(conversationId, (draft) => {
-        const records = draft.sources;
-        draft.sources = [];
-        for (const workspace of draft.workspaces) {
-          workspace.sourceId = "";
-          workspace.mounted = false;
-          workspace.updatedAt = iso();
-        }
+        // 工作区的共享来源属于工作区，不随「清空来源」一起删。
+        const records = draft.sources.filter((item) => item.kind !== "workspace_persistent");
+        draft.sources = draft.sources.filter((item) => item.kind === "workspace_persistent");
         return records;
       });
       for (const record of removed) {
         await closeCompute(record.id);
         deleteUploadCopy(record);
       }
-      return { ok: true, removed: removed.length, sources: [] };
+      return { ok: true, removed: removed.length, sources: sourceView(await state.read(conversationId)) };
     },
 
     "source.toggle": async (params) => {
@@ -1219,194 +1299,143 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     // ── 工作区 ──────────────────────────────────────────────────────────────
 
     "workspace.list": async (params) => {
-      const conversationId = conversationIdParam(params);
-      const doc = await state.read(conversationId);
-      const current = doc.workspaces.find((record) => record.mounted) ?? null;
+      const current = await currentWorkspaceId(params);
+      const records = await deps.workspaces.list();
+      const active = records.find((record) => record.workspaceId === current);
       return {
-        workspace: current === null ? null : publicWorkspace(current),
-        workspaces: doc.workspaces.map(publicWorkspace),
-        sources: sourceView(doc),
+        workspace: active === undefined ? null : publicWorkspace(active, current),
+        workspaces: records.map((record) => publicWorkspace(record, current)),
       };
     },
 
-    "workspace.mount": async (params) => {
-      const conversationId = conversationIdParam(params);
+    /** 登记一个目录并导入其中的数据文件；同一目录已登记过时原样返回，不重复导入。 */
+    "workspace.create": async (params) => {
       const permission = permissionParam(params, "read_only");
       const checked = validateWorkspacePath(stringParam(params, "path"), {
         projectRoot: deps.projectRoot,
         blockedRoots: deps.blockedWorkspaceRoots,
       });
       if (!checked.ok) throw invalidReason(checked.message, "invalid_workdir");
-      const display = optionalStringParam(params, "name")?.replace(/[\u0000-\u001f\u007f]/g, "").trim();
-      const doc = await state.read(conversationId);
-      const existing = doc.workspaces.find((record) => record.workdir === checked.path);
-      const workspaceId = existing?.workspaceId ?? workspaceIdFor(checked.path);
-      // 未提供新名字时保留已有记录的名字：重新挂载不该把用户改过的显示名改回目录名。
-      const label = (display !== undefined && display !== "" ? display : existing?.name ?? basename(checked.path)).slice(0, 200);
-      const sourceId = existing !== undefined && existing.sourceId !== "" ? existing.sourceId : randomId("s_");
-      const alreadyOpen = openIds.has(sourceId);
-
-      const syncParams: Record<string, unknown> = {
-        workspace_id: workspaceId,
+      const workspaceId = workspaceIdFor(checked.path);
+      const existing = await deps.workspaces.get(workspaceId);
+      if (existing !== undefined) {
+        return { existing: true, workspace: publicWorkspace(existing, undefined), added: [], errors: [], skipped: 0, reused: 0 };
+      }
+      const display = optionalStringParam(params, "name");
+      const instructions = optionalStringParam(params, "instructions");
+      const stamp = iso();
+      const base: WorkspaceRecord = {
+        workspaceId,
         workdir: checked.path,
-        name: `📁 ${label}`,
+        name: cleanWorkspaceName(display === undefined || display.trim() === "" ? basename(checked.path).slice(0, 80) : display),
+        permission,
+        instructions: instructions === undefined ? "" : cleanWorkspaceInstructions(instructions),
+        sourceId: "",
+        lastSyncedAt: "",
+        createdAt: stamp,
+        updatedAt: stamp,
       };
-      // 已打开的持久化连接直接作为导入目标；否则让 compute 只建库，调用方随后 open。
-      if (alreadyOpen) syncParams.source_id = sourceId;
-      const synced = await computeCall<{
-        descriptor: SourceDescriptor;
-        tables: string[];
-        added?: { source_name: string; tables: string[] }[];
-        errors?: string[];
-        skipped?: number;
-        reused?: number;
-      }>("workspace.sync", syncParams);
-      const descriptor = synced.descriptor;
-      if (typeof descriptor !== "object" || descriptor === null || Array.isArray(descriptor)) {
-        throw appReason(say("Workspace sync returned no data source descriptor", "工作区同步没有返回数据源描述符"), "invalid_descriptor");
-      }
-      const opened = alreadyOpen ? { name: `📁 ${label}`, tables: synced.tables ?? [] } : await openCompute(sourceId, descriptor);
-      if (!alreadyOpen) openIds.add(sourceId);
-
-      const stale: string[] = [];
-      const result = await state.update(conversationId, (draft) => {
-        // 旧实现一次只挂一个工作区：切换时关闭旧工作区的持久化来源。
-        for (const record of draft.workspaces) {
-          if (!record.mounted || record.workdir === checked.path) continue;
-          record.mounted = false;
-          record.updatedAt = iso();
-          if (record.sourceId !== "") {
-            stale.push(record.sourceId);
-            draft.sources = draft.sources.filter((source) => source.id !== record.sourceId);
-          }
-        }
-        const priorSource = draft.sources.find((source) => source.id === sourceId);
-        const sourceRecord: StoredSource = {
-          id: sourceId,
-          kind: "workspace_persistent",
-          name: opened.name || `📁 ${label}`,
-          active: true,
-          descriptor,
-          tables: opened.tables,
-          createdAt: priorSource?.createdAt ?? iso(),
-          updatedAt: iso(),
-        };
-        draft.sources = draft.sources.filter((source) => source.id !== sourceId);
-        draft.sources.push(sourceRecord);
-        const workspaceRecord: WorkspaceRecord = {
-          workspaceId,
-          workdir: checked.path,
-          name: label,
-          permission,
-          sourceId,
-          mounted: true,
-          mountedAt: existing?.mountedAt ?? iso(),
-          updatedAt: iso(),
-        };
-        draft.workspaces = draft.workspaces.filter((record) => record.workspaceId !== workspaceId);
-        draft.workspaces.push(workspaceRecord);
-        return { workspace: workspaceRecord, sources: sourceView(draft) };
-      }).catch(async (error: unknown) => {
-        // 文档没写成功时，别在 compute 里留下一个界面看不到的连接。
-        if (!alreadyOpen) await closeCompute(sourceId);
-        throw error;
-      });
-      for (const sourceIdToClose of stale) await closeCompute(sourceIdToClose);
+      const result = await syncWorkspace(base);
       return {
-        workspace: publicWorkspace(result.workspace),
-        sources: result.sources,
-        added: synced.added ?? [],
-        errors: synced.errors ?? [],
-        skipped: synced.skipped ?? 0,
-        reused: synced.reused ?? 0,
+        existing: false,
+        workspace: publicWorkspace(result.record, undefined),
+        added: result.synced.added ?? [],
+        errors: result.synced.errors ?? [],
+        skipped: result.synced.skipped ?? 0,
+        reused: result.synced.reused ?? 0,
       };
     },
 
-    "workspace.unmount": async (params) => {
-      const conversationId = conversationIdParam(params);
-      const requested = optionalStringParam(params, "workspaceId");
-      if (requested !== undefined && !WORKSPACE_ID_PATTERN.test(requested)) {
-        throw invalidParams("'workspaceId' must look like ws_<16 hex>");
+    "workspace.update": async (params) => {
+      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      const next: WorkspaceRecord = { ...record, updatedAt: iso() };
+      if (params.name !== undefined) next.name = cleanWorkspaceName(stringParam(params, "name"));
+      if (params.permission !== undefined) next.permission = permissionParam(params, record.permission);
+      if (params.instructions !== undefined) {
+        if (typeof params.instructions !== "string") throw invalidParams("'instructions' must be a string");
+        next.instructions = cleanWorkspaceInstructions(params.instructions);
       }
-      const doc = await state.read(conversationId);
-      const target = requested === undefined
-        ? doc.workspaces.find((record) => record.mounted)
-        : doc.workspaces.find((record) => record.workspaceId === requested);
-      if (target === undefined) throw invalidReason(say("The working directory is not mounted.", "未挂载工作目录。"), "not_mounted");
-      if (!target.mounted) throw invalidReason(say("The working directory is not mounted.", "未挂载工作目录。"), "not_mounted");
-      const removedSource = target.sourceId;
-      const result = await state.update(conversationId, (draft) => {
-        const record = requireWorkspace(draft, target.workspaceId);
-        if (record.sourceId !== "") {
-          draft.sources = draft.sources.filter((source) => source.id !== record.sourceId);
-        }
-        record.mounted = false;
-        record.sourceId = "";
-        record.updatedAt = iso();
-        return { workspace: record, sources: sourceView(draft) };
-      });
-      if (removedSource !== "") await closeCompute(removedSource);
-      return { ok: true, workspace: publicWorkspace(result.workspace), sources: result.sources };
-    },
-
-    "workspace.rename": async (params) => {
-      const conversationId = conversationIdParam(params);
-      const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
-      const raw = stringParam(params, "name");
-      if (/[\u0000-\u001f\u007f]/.test(raw)) {
-        throw invalidReason(say("The working directory display name must be 1-80 characters and cannot contain control characters.", "工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。"), "invalid_workspace_name");
-      }
-      const name = raw.trim().split(/\s+/).join(" ");
-      if (name === "" || name.length > 80) {
-        throw invalidReason(say("The working directory display name must be 1-80 characters and cannot contain control characters.", "工作目录显示名称长度必须为 1-80 个字符，且不能包含控制字符。"), "invalid_workspace_name");
-      }
-      const result = await state.update(conversationId, (draft) => {
-        const record = requireWorkspace(draft, workspaceId);
-        record.name = name;
-        record.updatedAt = iso();
-        const source = draft.sources.find((item) => item.id === record.sourceId);
-        if (source !== undefined) {
-          source.name = `📁 ${name}`;
+      await deps.workspaces.put(next);
+      // 请求方对话文档里的共享来源跟着改显示名；其他对话下次进入时刷新。
+      if (params.name !== undefined && params.conversationId !== undefined && next.sourceId !== "") {
+        await state.update(conversationIdParam(params), (draft) => {
+          const source = draft.sources.find((item) => item.id === next.sourceId);
+          if (source === undefined) return;
+          source.name = workspaceSourceName(next.name);
           // 重开时 compute 用 descriptor 的 name；保持与界面显示名一致。
-          source.descriptor = { ...source.descriptor, name: `📁 ${name}` };
-        }
-        return { workspace: record, workspaces: draft.workspaces.map(publicWorkspace) };
-      });
-      return { ok: true, workspace: publicWorkspace(result.workspace), workspaces: result.workspaces };
+          source.descriptor = { ...source.descriptor, name: workspaceSourceName(next.name) };
+        });
+      }
+      const current = await currentWorkspaceId(params);
+      return {
+        ok: true,
+        workspace: publicWorkspace(next, current),
+        workspaces: (await deps.workspaces.list()).map((item) => publicWorkspace(item, current)),
+      };
     },
 
-    "workspace.setPermission": async (params) => {
+    /** 重新导入目录里新增或变化的数据文件（刷新）。 */
+    "workspace.sync": async (params) => {
+      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      requireAvailable(record);
+      const result = await syncWorkspace(record);
+      const current = await currentWorkspaceId(params);
+      return {
+        ok: true,
+        workspace: publicWorkspace(result.record, current),
+        tables: result.tables,
+        added: result.synced.added ?? [],
+        errors: result.synced.errors ?? [],
+        skipped: result.synced.skipped ?? 0,
+        reused: result.synced.reused ?? 0,
+      };
+    },
+
+    /** 建对话之前先确认工作区可用、共享来源已打开：失败时不会留下一个空对话。 */
+    "workspace.prepare": async (params) => {
+      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      requireAvailable(record);
+      const ready = await ensureWorkspaceOpen(record);
+      return { workspace: publicWorkspace(ready.record, undefined) };
+    },
+
+    /** 把普通聊天移入工作区（单向）：写下 scope，并把工作区的共享来源挂进本对话。 */
+    "conversation.moveToWorkspace": async (params) => {
       const conversationId = conversationIdParam(params);
       const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
-      const permission = permissionParam(params, "read_only");
-      if (params.permission === undefined) throw invalidParams("'permission' is required");
-      const result = await state.update(conversationId, (draft) => {
-        const record = requireWorkspace(draft, workspaceId);
-        if (!record.mounted) throw invalidReason(say("The working directory is not mounted.", "未挂载工作目录。"), "not_mounted");
-        record.permission = permission;
-        record.updatedAt = iso();
-        return { workspace: record, workspaces: draft.workspaces.map(publicWorkspace) };
+      const doc = await state.read(conversationId);
+      if (doc.scope?.kind === "workspace" && doc.scope.workspaceId !== workspaceId) {
+        throw invalidReason(say("This conversation already belongs to another workspace.", "该对话已属于另一个工作区。"), "already_in_workspace");
+      }
+      const record = await requireWorkspaceRecord(workspaceId);
+      requireAvailable(record);
+      const ready = await ensureWorkspaceOpen(record);
+      const sources = await state.update(conversationId, (draft) => {
+        draft.scope = { kind: "workspace", workspaceId };
+        const existing = draft.sources.find((item) => item.id === ready.record.sourceId);
+        draft.sources = draft.sources.filter((item) => item.id !== ready.record.sourceId);
+        draft.sources.push(workspaceSourceRecord(ready.record, ready.tables, existing));
+        return sourceView(draft);
       });
-      return { ok: true, workspace: publicWorkspace(result.workspace), workspaces: result.workspaces };
+      return { ok: true, workspace: publicWorkspace(ready.record, workspaceId), sources };
     },
 
     "workspace.remove": async (params) => {
-      const conversationId = conversationIdParam(params);
       const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
       if (params.confirmed !== true) throw invalidReason(say("Removal must be explicitly confirmed first.", "移除前必须明确确认。"), "confirmation_required");
-      const doc = await state.read(conversationId);
-      const target = requireWorkspace(doc, workspaceId);
-      if (target.mounted) throw invalidReason(say("The working directory is still connected to a conversation; unmount it first.", "工作目录仍有会话连接，请先卸载。"), "workspace_connected");
-      const removedSource = target.sourceId;
-      await state.update(conversationId, (draft) => {
-        draft.workspaces = draft.workspaces.filter((record) => record.workspaceId !== workspaceId);
-        if (removedSource !== "") draft.sources = draft.sources.filter((source) => source.id !== removedSource);
-      });
-      if (removedSource !== "") await closeCompute(removedSource);
+      const record = await requireWorkspaceRecord(workspaceId);
+      for (const id of (await deps.conversationIds?.()) ?? []) {
+        const scope = (await state.read(id).catch(() => undefined))?.scope;
+        if (scope?.kind === "workspace" && scope.workspaceId === workspaceId) {
+          throw invalidReason(say("Conversations still belong to this workspace; delete them first.", "仍有对话属于该工作区，请先删除这些对话。"), "workspace_in_use");
+        }
+      }
+      if (record.sourceId !== "") await closeCompute(record.sourceId);
+      await deps.workspaces.remove(workspaceId);
       return {
         ok: true,
         removed_workspace_id: workspaceId,
-        // 只隐藏发现记录：物理目录与其中的产物由用户掌握，绝不代删。
+        // 只删注册记录：物理目录（含其中的产物、知识库与记忆）由用户掌握，绝不代删。
         files_deleted: 0,
         directory_deleted: false,
       };
@@ -1423,7 +1452,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const limit = params.limit === undefined ? 200 : integerParam(params, "limit");
       if (limit < 1 || limit > MAX_ARTIFACT_ENTRIES) throw invalidParams(`'limit' must be 1-${MAX_ARTIFACT_ENTRIES}`);
       const doc = await state.read(conversationId);
-      const roots = artifactRoots(doc, workspaceId);
+      const roots = await artifactRoots(doc, workspaceId);
       if (workspaceId !== undefined && roots.length === 0) {
         throw appError("not_found", `workspace not found: ${workspaceId}`);
       }
@@ -1475,7 +1504,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       const as = params.as === undefined ? "path" : params.as;
       if (as !== "path" && as !== "text") throw invalidParams("'as' must be path or text");
       const doc = await state.read(conversationId);
-      const resolved = resolveArtifact(doc, params);
+      const resolved = await resolveArtifact(doc, params);
       const info = statSync(resolved.path);
       const suffix = suffixOf(resolved.path);
       const base = {

@@ -44,6 +44,8 @@ export type TurnState = {
   hasWorkspace: boolean;
   hasUnnamedColumns: boolean;
   teamsEnabled: boolean;
+  /** 属于工作区的对话才有：工作区名称、权限、说明与指令文件渲染出的系统提示块。 */
+  workspaceSection?: string;
 };
 
 export const NO_TURN_STATE: TurnState = {
@@ -178,6 +180,8 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     command: command ?? null,
     activation: command === undefined ? { kind: "none", name: "" } : { kind: "command", name: command },
     ...current,
+    // 没有工作区块时必须清空：`...current` 缺这个键，会留下上一轮（别的范围）的旧值。
+    workspaceSection: current.workspaceSection ?? "",
     discoveryTurns: discovery.state.turns.map((turn) => [...turn]),
     discoveredTools: [...discovery.state.discovered],
     turn: previous.turn + 1,

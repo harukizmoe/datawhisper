@@ -10,17 +10,23 @@ import { assembleTools } from "./tools/assemble.ts";
 import type { TeamDelegationPort } from "./tools/app/types.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
-import { type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
+import { NO_TURN_STATE, type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
 import { SecretCredentialStore } from "./models/credentials.ts";
 import {
   createConversationSourceStore,
   createSourceConfigStore,
   turnStateFor,
+  type SourceDoc,
   type SourceDocStore,
 } from "./ipc/source-store.ts";
 import { readBitableRecords } from "./feishu/bitable.ts";
 import { feishuService } from "./feishu/service.ts";
 import { sourceMethods } from "./ipc/sources.ts";
+import { migrateLegacyWorkspaces } from "./ipc/workspace-migrate.ts";
+import { createWorkspaceStore, isDirectory, type WorkspaceStore } from "./ipc/workspace-store.ts";
+import { renderWorkspaceSection } from "./agent/workspace-section.ts";
+import { appError } from "./ipc/errors.ts";
+import { say } from "./i18n.ts";
 import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
 import { WorkExecutorRegistry } from "./jobs/work-task.ts";
 import { createWorkflows, workflowsExtension, type Workflows } from "./workflows/service.ts";
@@ -81,12 +87,32 @@ function serviceSettings(modelService: ModelService) {
 }
 
 /** 读会话的来源文档并推导本轮状态；会话不存在或还什么都没挂时就是空状态。 */
-async function readTurnState(state: SourceDocStore, conversationId: number): Promise<TurnState> {
+async function readTurnState(
+  state: SourceDocStore,
+  workspaces: WorkspaceStore,
+  dataDir: string,
+  conversationId: number,
+): Promise<TurnState> {
+  let doc: SourceDoc;
   try {
-    return turnStateFor(await state.read(conversationId));
+    doc = await state.read(conversationId);
   } catch {
-    return { hasDataSource: false, sourceCount: 0, hasWorkspace: false, hasUnnamedColumns: false, teamsEnabled: false };
+    return { ...NO_TURN_STATE };
   }
+  const base = turnStateFor(doc);
+  if (doc.scope?.kind !== "workspace") return base;
+  // 范围是工作区而目录/记录没了：明确报错，不静默退回普通聊天（那样工具集会悄悄变少）。
+  const record = await workspaces.get(doc.scope.workspaceId);
+  if (record === undefined || !isDirectory(record.workdir)) {
+    throw appError(
+      "invalid_input",
+      say(
+        `The workspace for this conversation is not available${record === undefined ? "" : `: ${record.workdir}`}. Restore the folder or start a new chat.`,
+        `本对话所属的工作区不可用${record === undefined ? "" : `：${record.workdir}`}。请恢复该文件夹，或新建对话。`,
+      ),
+    );
+  }
+  return { ...base, workspaceSection: renderWorkspaceSection(record, dataDir) };
 }
 
 export async function startService(config: Config, options: ServiceOptions = {}): Promise<Service> {
@@ -110,6 +136,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
   const workflowPort: { current?: WorkflowCatalog } = {};
   // `harness` 在下面才创建；工具只在执行期用到它（那时一定就绪）。
   let harness!: Harness;
+  // 工作区注册表是全局的文件存储，不依赖会话服务：工具装配与来源方法共用这一份。
+  const workspaceStore = createWorkspaceStore({ dataDir: config.dataDir });
   const assembled =
     options.tools === undefined
       ? assembleTools(config, compute, "local", {
@@ -119,6 +147,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
           workflowCatalog: workflowPort,
           // 来源文档同样是执行期才需要（会话服务建好之后）。
           sources: () => sourceState,
+          workspaces: workspaceStore,
         })
       : undefined;
   const tools = options.tools ?? assembled!.tools;
@@ -160,6 +189,9 @@ export async function startService(config: Config, options: ServiceOptions = {})
     compute,
     state: sourceState,
     configs: createSourceConfigStore({ dataDir: config.dataDir, credentials: sourceCredentials }),
+    workspaces: workspaceStore,
+    // `conversations` 在下面才创建；只在调用时用到，那时一定就绪。
+    conversationIds: async () => (await conversations.list()).conversations.map((item) => item.id),
     feishuRecords: async (appToken, tableId) =>
       readBitableRecords((await feishuService({ dataDir: config.dataDir }).connections()).client, { bitable: appToken, tableId }),
     uploadsDir: join(config.dataDir, "uploads"),
@@ -175,9 +207,20 @@ export async function startService(config: Config, options: ServiceOptions = {})
     context,
     // 暴露层在这一份全量工具上做过滤；`turnState` 决定数据源/工作区/团队相关的门是否打开。
     tools,
-    turnState: options.turnState ?? ((conversationId) => readTurnState(sourceState, conversationId)),
+    turnState: options.turnState ?? ((conversationId) => readTurnState(sourceState, workspaceStore, config.dataDir, conversationId)),
     workflowsAvailable: true,
   });
+  // 旧版每个对话各存一份工作区记录；先迁成全局注册表 + 对话 scope，之后才对外服务。幂等。
+  try {
+    const migrated = await migrateLegacyWorkspaces({
+      state: sourceState,
+      workspaces: workspaceStore,
+      conversationIds: (await conversations.list()).conversations.map((item) => item.id),
+    });
+    if (migrated > 0) console.error(`[workspace] migrated ${migrated} conversation(s) to the global workspace registry`);
+  } catch (error) {
+    console.error("[workspace] legacy workspace migration failed", error);
+  }
 
   // 工作流：节点跑在独立会话里；扩展装进同一个 registry，下一次调度即可见（必须在 `resume()` 之后装，
   // 否则恢复的运行看不到 task 定义）。

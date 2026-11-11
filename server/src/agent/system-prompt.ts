@@ -77,5 +77,5 @@ export function promptContextFor(turn: TurnContext, offeredTools: readonly strin
 export function renderSystemPrompt(turn: TurnContext, offeredTools: readonly ToolRegistration[] | readonly string[]): string {
   const names = (offeredTools as readonly (ToolRegistration | string)[]).map((tool) => (typeof tool === "string" ? tool : tool.name));
   const prompt = getSystemPrompt(promptContextFor(turn, names));
-  return prompt + buildTempPromptSection(turn.tempPrompt);
+  return prompt + buildTempPromptSection(turn.tempPrompt) + (turn.workspaceSection ?? "");
 }

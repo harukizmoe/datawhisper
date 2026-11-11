@@ -600,15 +600,9 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 						a.setWorkspacePermission(current.WorkspaceID, a.permissionFromLabel(perm))
 					}
 				})
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if a.src.permBusy == current.WorkspaceID {
-						ui.Spinner(c)
-					}
-					ui.Spacer(c)
-					if ui.Button(c, a.tr("data.unmount")).Tooltip(a.tr("data.unmountTip")).Clicked() {
-						a.unmountWorkspace(current.WorkspaceID)
-					}
-				})
+				if a.src.permBusy == current.WorkspaceID {
+					ui.Spinner(c)
+				}
 			})
 		}
 		if len(a.src.workspaces) > 0 {
@@ -628,10 +622,9 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, ws.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Tooltip(ws.Workdir)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spacer(c)
-					if ws.Mounted {
-						if ui.Button(c, a.tr("data.unmount")).Tooltip(a.tr("data.unmountNamedTip", "name", label)).Clicked() {
-							a.unmountWorkspace(ws.WorkspaceID)
-						}
+					// 对话一旦属于某个工作区就不能退出，所以当前这一个没有操作；其余的可以删记录。
+					if ws.Current {
+						ui.Badge(c, a.tr("data.badgeMounted"))
 					} else if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeFolderTip", "name", label)).Clicked() {
 						a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmWorkspace, ws.WorkspaceID, label
 						a.src.confirmOpen = true

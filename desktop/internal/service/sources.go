@@ -87,30 +87,31 @@ type PreviewTable struct {
 
 // Workspace 是工作区的一条记录。Permission 为 "read_only" 或 "read_write"。
 type Workspace struct {
-	WorkspaceID string `json:"workspace_id"`
-	Workdir     string `json:"workdir"`
-	Name        string `json:"name"`
-	Permission  string `json:"permission"`
-	SourceID    string `json:"source_id"`
-	Mounted     bool   `json:"mounted"`
-	MountedAt   string `json:"mounted_at"`
-	UpdatedAt   string `json:"updated_at"`
+	WorkspaceID  string `json:"workspace_id"`
+	Workdir      string `json:"workdir"`
+	Name         string `json:"name"`
+	Permission   string `json:"permission"`
+	SourceID     string `json:"source_id"`
+	Current      bool   `json:"current"`
+	Available    bool   `json:"available"`
+	Instructions string `json:"instructions"`
+	SyncedAt     string `json:"last_synced_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
-// WorkspaceView 是 workspace.list 的结果：Workspace 是当前挂载的那一个，没有挂载时为 nil。
+// WorkspaceView 是 workspace.list 的结果：Workspace 是请求对话所属的那一个，不属于任何工作区时为 nil。
 type WorkspaceView struct {
 	Workspace  *Workspace  `json:"workspace"`
 	Workspaces []Workspace `json:"workspaces"`
-	Sources    []Source    `json:"sources"`
 }
 
-// WorkspaceAdded 是 workspace.mount 时新导入的一张表。
+// WorkspaceAdded 是 workspace.create 时新导入的一张表。
 type WorkspaceAdded struct {
 	SourceName string   `json:"source_name"`
 	Tables     []string `json:"tables"`
 }
 
-// WorkspaceMount 是 workspace.mount 的结果。Errors 是同步时跳过的文件说明。
+// WorkspaceMount 汇总 workspace.create 与 conversation.moveToWorkspace 的结果。Errors 是同步时跳过的文件说明。
 type WorkspaceMount struct {
 	Workspace *Workspace       `json:"workspace"`
 	Sources   []Source         `json:"sources"`
@@ -120,14 +121,7 @@ type WorkspaceMount struct {
 	Reused    int              `json:"reused"`
 }
 
-// WorkspaceUpdate 是 workspace.unmount 的结果。
-type WorkspaceUpdate struct {
-	OK        bool      `json:"ok"`
-	Workspace Workspace `json:"workspace"`
-	Sources   []Source  `json:"sources"`
-}
-
-// WorkspaceList 是 workspace.rename 与 workspace.setPermission 的结果。
+// WorkspaceList 是 workspace.update 的结果。
 type WorkspaceList struct {
 	OK         bool        `json:"ok"`
 	Workspace  Workspace   `json:"workspace"`
@@ -368,54 +362,43 @@ func (c *Client) SetAnalysisTables(ctx context.Context, conversationID int, sour
 	return out.Tables, err
 }
 
-// Workspaces 读取当前挂载与全部工作区记录（同时带回来源列表）。
+// Workspaces 读取全部工作区记录；带 conversationID 时 Workspace 是该对话所属的那一个。
 func (c *Client) Workspaces(ctx context.Context, conversationID int) (WorkspaceView, error) {
 	var out WorkspaceView
 	err := c.callInto(ctx, "workspace.list", conversationIDParams(conversationID), &out)
 	return out, err
 }
 
-// MountWorkspace 把本机目录挂成工作区并导入其中的数据文件。readOnly 决定 agent 能否写盘。
+// MountWorkspace 登记本机目录（已登记过则复用）、导入其中的数据文件，并把当前对话移入该工作区。
+// readOnly 决定 agent 能否写盘。对话一旦属于某个工作区就不能改挂另一个，服务端会拒绝。
 func (c *Client) MountWorkspace(ctx context.Context, conversationID int, path, name string, readOnly bool) (WorkspaceMount, error) {
 	permission := "read_write"
 	if readOnly {
 		permission = "read_only"
 	}
-	params := map[string]any{"conversationId": conversationID, "path": path, "permission": permission}
+	params := map[string]any{"path": path, "permission": permission}
 	if name != "" {
 		params["name"] = name
 	}
-	var out WorkspaceMount
-	err := c.callInto(ctx, "workspace.mount", params, &out)
-	return out, err
-}
-
-// UnmountWorkspace 卸载一个工作区；workspaceID 为空时卸载当前挂载的那一个。
-func (c *Client) UnmountWorkspace(ctx context.Context, conversationID int, workspaceID string) (WorkspaceUpdate, error) {
-	params := map[string]any{"conversationId": conversationID}
-	if workspaceID != "" {
-		params["workspaceId"] = workspaceID
+	var created WorkspaceMount
+	if err := c.callInto(ctx, "workspace.create", params, &created); err != nil {
+		return WorkspaceMount{}, err
 	}
-	var out WorkspaceUpdate
-	err := c.callInto(ctx, "workspace.unmount", params, &out)
-	return out, err
-}
-
-// RenameWorkspace 改工作区的显示名。
-func (c *Client) RenameWorkspace(ctx context.Context, conversationID int, workspaceID, name string) (WorkspaceList, error) {
-	var out WorkspaceList
-	err := c.callInto(ctx, "workspace.rename", struct {
+	var moved WorkspaceMount
+	if err := c.callInto(ctx, "conversation.moveToWorkspace", struct {
 		ConversationID int    `json:"conversationId"`
 		WorkspaceID    string `json:"workspaceId"`
-		Name           string `json:"name"`
-	}{conversationID, workspaceID, name}, &out)
-	return out, err
+	}{conversationID, created.Workspace.WorkspaceID}, &moved); err != nil {
+		return WorkspaceMount{}, err
+	}
+	created.Workspace, created.Sources = moved.Workspace, moved.Sources
+	return created, nil
 }
 
-// SetWorkspacePermission 改一个已挂载工作区的权限（"read_only" 或 "read_write"）。
+// SetWorkspacePermission 改工作区的权限（"read_only" 或 "read_write"）。
 func (c *Client) SetWorkspacePermission(ctx context.Context, conversationID int, workspaceID, permission string) (WorkspaceList, error) {
 	var out WorkspaceList
-	err := c.callInto(ctx, "workspace.setPermission", struct {
+	err := c.callInto(ctx, "workspace.update", struct {
 		ConversationID int    `json:"conversationId"`
 		WorkspaceID    string `json:"workspaceId"`
 		Permission     string `json:"permission"`
@@ -423,14 +406,13 @@ func (c *Client) SetWorkspacePermission(ctx context.Context, conversationID int,
 	return out, err
 }
 
-// RemoveWorkspace 删除一条已卸载的工作区记录；目录本身不会被删。
-func (c *Client) RemoveWorkspace(ctx context.Context, conversationID int, workspaceID string) (WorkspaceRemoved, error) {
+// RemoveWorkspace 删除一条工作区记录；目录本身不会被删。仍有对话属于它时服务端拒绝。
+func (c *Client) RemoveWorkspace(ctx context.Context, workspaceID string) (WorkspaceRemoved, error) {
 	var out WorkspaceRemoved
 	err := c.callInto(ctx, "workspace.remove", struct {
-		ConversationID int    `json:"conversationId"`
-		WorkspaceID    string `json:"workspaceId"`
-		Confirmed      bool   `json:"confirmed"`
-	}{conversationID, workspaceID, true}, &out)
+		WorkspaceID string `json:"workspaceId"`
+		Confirmed   bool   `json:"confirmed"`
+	}{workspaceID, true}, &out)
 	return out, err
 }
 

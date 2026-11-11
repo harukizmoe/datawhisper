@@ -52,6 +52,8 @@ export type ComputeToolContext = {
   readonly colorScheme?: string;
   readonly chartIds?: readonly string[];
   readonly chartDir?: string;
+  /** 工作区对话所属的目录；compute 据此把导出写进 `<目录>/artifacts/`，并把目录加进 SQL 读文件白名单。 */
+  readonly workspaceRoot?: string;
 };
 
 /**

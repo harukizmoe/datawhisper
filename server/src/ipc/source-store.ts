@@ -14,7 +14,7 @@
  */
 
 import { say } from "../i18n.ts";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -51,15 +51,15 @@ export type StoredSource = {
   updatedAt: string;
 };
 
-export type WorkspacePermission = "read_only" | "read_write";
+/** 对话的范围：普通聊天，或属于某个工作区（见 `workspace-store.ts`）。创建后只能从聊天移入工作区。 */
+export type ConversationScope = { kind: "chat" } | { kind: "workspace"; workspaceId: string };
 
-/** 会话文档里的一条工作区记录。`mounted` 为 false 表示只保留发现记录。 */
-export type WorkspaceRecord = {
+/** 迁移前每个会话各存一份的工作区记录；`migrateLegacyWorkspaces` 读完即删。 */
+export type LegacyWorkspaceRecord = {
   workspaceId: string;
   workdir: string;
   name: string;
-  permission: WorkspacePermission;
-  /** 对应的 `workspace_persistent` 来源；未挂载时为空。 */
+  permission: string;
   sourceId: string;
   mounted: boolean;
   mountedAt: string;
@@ -68,7 +68,10 @@ export type WorkspaceRecord = {
 
 export type SourceDoc = {
   sources: StoredSource[];
-  workspaces: WorkspaceRecord[];
+  /** 缺省等同于普通聊天。 */
+  scope?: ConversationScope;
+  /** 只会出现在迁移前写下的文档里。 */
+  workspaces?: LegacyWorkspaceRecord[];
 };
 
 /**
@@ -82,7 +85,7 @@ export function turnStateFor(doc: SourceDoc, options: { teamsEnabled?: boolean; 
   return {
     hasDataSource: active > 0,
     sourceCount: active,
-    hasWorkspace: doc.workspaces.some((workspace) => workspace.mounted),
+    hasWorkspace: doc.scope?.kind === "workspace",
     hasUnnamedColumns: options.hasUnnamedColumns ?? false,
     teamsEnabled: options.teamsEnabled ?? false,
   };
@@ -103,7 +106,7 @@ export const SOURCE_DOC = defineDoc<SourceDoc>({
   scope: "conversation",
   history: "latest",
   fork: "current",
-  initial: () => ({ sources: [], workspaces: [] }),
+  initial: () => ({ sources: [] }),
   checkpointWhen: () => true,
 });
 
@@ -123,7 +126,7 @@ export function createConversationSourceStore(options: {
       const conversation = await harness.conversation(id, context);
       if (conversation === undefined) throw appError("not_found", `conversation not found: ${conversationId}`);
       const value = await harness.snapshot(SOURCE_DOC, id, context);
-      if (value === undefined) return { sources: [], workspaces: [] };
+      if (value === undefined) return { sources: [] };
       return structuredClone(value) as SourceDoc;
     },
     async update<R>(conversationId: number, mutate: (draft: SourceDoc) => R | Promise<R>): Promise<R> {
@@ -133,7 +136,6 @@ export function createConversationSourceStore(options: {
       return await conversation.commit(async (tx) => {
         const draft = (await tx.doc(SOURCE_DOC, id)) as SourceDoc;
         draft.sources ??= [];
-        draft.workspaces ??= [];
         // 返回给调用方的值必须在提交内脱开事务对象：提交结束后再读 draft 里的字段会抛
         // 「Cannot use a settled overlay」，调用方往往是在下一个 await 之后才读（例如拿着记录去调 compute）。
         return detach(await mutate(draft));
@@ -173,7 +175,7 @@ export function createMemorySourceStore(knownConversations: Iterable<number>): M
     if (!known.has(conversationId)) throw appError("not_found", `conversation not found: ${conversationId}`);
     let doc = docs.get(conversationId);
     if (doc === undefined) {
-      doc = { sources: [], workspaces: [] };
+      doc = { sources: [] };
       docs.set(conversationId, doc);
     }
     return doc;
@@ -255,11 +257,6 @@ export const WORKSPACE_ID_PATTERN = /^ws_[a-f0-9]{16}$/;
 
 export function randomId(prefix: string, bytes = 4): string {
   return `${prefix}${randomBytes(bytes).toString("hex")}`;
-}
-
-/** 由绝对路径派生稳定的工作区 id：同一目录重复挂载得到同一个 id。 */
-export function workspaceIdFor(workdir: string): string {
-  return `ws_${createHash("sha256").update(workdir).digest("hex").slice(0, 16)}`;
 }
 
 function credentialId(configId: string): string {

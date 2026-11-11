@@ -1100,40 +1100,16 @@ func (a *app) mountWorkspace() {
 	}()
 }
 
-// unmountWorkspace 卸载一个工作区。
-func (a *app) unmountWorkspace(id string) {
-	client, conv := a.client, a.src.conv
-	if client == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		_, err := client.UnmountWorkspace(ctx, conv, id)
-		a.post(func() {
-			if client != a.client {
-				return
-			}
-			if err != nil {
-				a.src.notice, a.src.noticeErr = a.tr("data.unmountFailed", "error", a.sourceErr(err)), true
-				return
-			}
-			a.src.notice, a.src.noticeErr = a.tr("data.unmounted"), false
-			a.loadSources()
-		})
-	}()
-}
-
-// removeWorkspace 删除一条已卸载的工作区记录（目录本身不动）。
+// removeWorkspace 删除一条工作区记录（目录本身不动）；仍有对话属于它时服务端拒绝，原因直接显示出来。
 func (a *app) removeWorkspace(id string) {
-	client, conv := a.client, a.src.conv
+	client := a.client
 	if client == nil {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		_, err := client.RemoveWorkspace(ctx, conv, id)
+		_, err := client.RemoveWorkspace(ctx, id)
 		a.post(func() {
 			if client != a.client {
 				return

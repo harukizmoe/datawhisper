@@ -475,12 +475,11 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			view := map[string]any{
 				"workspace":  f.current,
 				"workspaces": append([]service.Workspace(nil), f.work...),
-				"sources":    snapshotLocked(),
 			}
 			f.mu.Unlock()
 			respond(req.ID, view)
 
-		case "workspace.mount":
+		case "workspace.create":
 			f.record(req.Method, req.Params)
 			f.mu.Lock()
 			workErr := f.workErr
@@ -501,9 +500,8 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 				Name:        name,
 				Permission:  permission,
 				SourceID:    "s_00000004",
-				Mounted:     true,
+				Available:   true,
 			}
-			f.current = &ws
 			kept := make([]service.Workspace, 0, len(f.work)+1)
 			for _, existing := range f.work {
 				if existing.WorkspaceID != ws.WorkspaceID {
@@ -511,25 +509,33 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 				}
 			}
 			f.work = append(kept, ws)
-			f.sources = append(f.sources, service.Source{ID: ws.SourceID, Name: "📁 " + name, Kind: "workspace_persistent", Active: true, Open: true, Tables: []string{"sales"}})
-			list := snapshotLocked()
 			f.mu.Unlock()
-			respond(req.ID, map[string]any{"workspace": ws, "sources": list, "added": []any{}, "errors": []any{}, "skipped": 0, "reused": 0})
+			respond(req.ID, map[string]any{"existing": false, "workspace": ws, "added": []any{}, "errors": []any{}, "skipped": 0, "reused": 0})
 
-		case "workspace.unmount":
+		case "conversation.moveToWorkspace":
 			f.record(req.Method, req.Params)
+			id, _ := params["workspaceId"].(string)
 			f.mu.Lock()
-			ws := f.current
-			f.current = nil
-			list := snapshotLocked()
-			f.mu.Unlock()
-			if ws == nil {
-				fail(req.ID, map[string]any{"code": -32602, "message": "未挂载工作目录。", "data": map[string]any{"kind": "invalid_input", "reason": "not_mounted"}})
+			var moved *service.Workspace
+			for i := range f.work {
+				if f.work[i].WorkspaceID == id {
+					f.work[i].Current = true
+					copied := f.work[i]
+					moved = &copied
+				}
+			}
+			if moved == nil {
+				f.mu.Unlock()
+				fail(req.ID, map[string]any{"code": -32000, "message": "workspace not found: " + id, "data": map[string]any{"kind": "not_found"}})
 				continue
 			}
-			respond(req.ID, map[string]any{"ok": true, "workspace": ws, "sources": list})
+			f.current = moved
+			f.sources = append(f.sources, service.Source{ID: moved.SourceID, Name: "📁 " + moved.Name, Kind: "workspace_persistent", Active: true, Open: true, Tables: []string{"sales"}})
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "workspace": moved, "sources": list})
 
-		case "workspace.setPermission":
+		case "workspace.update":
 			f.record(req.Method, req.Params)
 			id, _ := params["workspaceId"].(string)
 			permission, _ := params["permission"].(string)
@@ -831,9 +837,12 @@ func TestDataPanelMountsWorkspaceWithPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the mounted folder", func() bool { return a.src.current != nil })
-	mount := f.call("workspace.mount")
-	if mount == nil || mount["path"] != dir || mount["permission"] != "read_write" {
-		t.Errorf("workspace.mount params: %v", mount)
+	create := f.call("workspace.create")
+	if create == nil || create["path"] != dir || create["permission"] != "read_write" {
+		t.Errorf("workspace.create params: %v", create)
+	}
+	if move := f.call("conversation.moveToWorkspace"); move == nil || move["workspaceId"] != "ws_0000000000000001" {
+		t.Errorf("conversation.moveToWorkspace params: %v", move)
 	}
 	expectTexts(t, tt, []string{dir, "mounted", "Known folders"}, nil)
 }

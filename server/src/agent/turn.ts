@@ -25,6 +25,8 @@ export type TurnContext = {
   skillCatalog: string;
   /** 本会话临时指令（旧实现的 temp_prompt），按 build_temp_prompt_section 包装后附在末尾。 */
   tempPrompt: string;
+  /** 属于工作区的对话才有：工作区块（名称、权限、说明、指令文件），附在系统提示末尾。 */
+  workspaceSection: string;
   /** 最近三轮的发现结果，越新越靠后（旧实现 `data/session.py` 的 3 轮 TTL）。 */
   discoveryTurns: string[][];
   /** 由 `discoveryTurns` 展平得到的当前有效发现集合，最常用的形式。 */
@@ -44,6 +46,7 @@ export const EMPTY_TURN_CONTEXT: TurnContext = {
   teamsEnabled: false,
   skillCatalog: "",
   tempPrompt: "",
+  workspaceSection: "",
   discoveryTurns: [],
   discoveredTools: [],
   turn: 0,

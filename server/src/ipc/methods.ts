@@ -187,7 +187,18 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
 
     "conversation.list": () => conversations.list(),
 
-    "conversation.create": (params) => conversations.create(params),
+    /** `workspaceId` 给出时对话一创建就属于该工作区；先确认工作区可用，失败时不留下空对话。 */
+    async "conversation.create"(params) {
+      const workspaceId = optionalStringParam(params, "workspaceId");
+      if (workspaceId === undefined) return conversations.create(params);
+      const prepare = deps.sourceMethods?.["workspace.prepare"];
+      const move = deps.sourceMethods?.["conversation.moveToWorkspace"];
+      if (prepare === undefined || move === undefined) throw invalidParams("workspaces are not available");
+      await prepare({ workspaceId });
+      const created = await conversations.create(params);
+      await move({ conversationId: created.id, workspaceId });
+      return created;
+    },
 
     async "conversation.submit"(params) {
       const id = idParam(params);

@@ -3,11 +3,13 @@ import type { ToolRegistration } from "@earendil-works/pi-durable";
 import type { ComputeClient } from "../compute/client.ts";
 import type { Config } from "../config.ts";
 import { createAppTools } from "../tools/app/index.ts";
-import { NodeWorkspaceFs } from "../tools/app/workspace/fs.ts";
+import { NodeWorkspaceFs, type WorkspaceFs } from "../tools/app/workspace/fs.ts";
 import { createComputeTools } from "../tools/compute/index.ts";
 import { withConversationSources } from "../tools/compute/inject.ts";
 import { withChartPersistence } from "../tools/compute/persist.ts";
-import type { SourceDocStore } from "../ipc/source-store.ts";
+import type { SourceDoc, SourceDocStore } from "../ipc/source-store.ts";
+import { isDirectory, type WorkspaceRecord, type WorkspaceStore } from "../ipc/workspace-store.ts";
+import { say } from "../i18n.ts";
 import { createToolResultStore, type ToolResultStore } from "../tools/guard/spill.ts";
 import { createConversationDocs } from "../tools/app/docs.ts";
 import type { AppDocHosts, TeamDelegationPort } from "../tools/app/types.ts";
@@ -46,11 +48,50 @@ export type AssembleOptions = {
    * 省略时 B 类工具不带数据上下文，只会得到 compute 原文的「no data source」。
    */
   readonly sources?: () => SourceDocStore;
+  /** 工作区注册表：对话的 scope 指向其中一条记录。省略时所有对话都按普通聊天处理。 */
+  readonly workspaces?: WorkspaceStore;
 };
 
 export function assembleTools(config: Config, compute: ComputeClient, sessionId: string, options: AssembleOptions): ToolAssembly {
   const toolResults = createToolResultStore({ dirs: [join(config.dataDir, "tool_results")] });
   const workspace = new NodeWorkspaceFs({ dataRoot: config.dataDir, resourceRoot: config.dataDir });
+  /** 工作区对话所属的工作区记录；普通聊天为 undefined。记录或目录没了就抛错，不静默退回普通聊天。 */
+  const workspaceOf = async (doc: SourceDoc): Promise<WorkspaceRecord | undefined> => {
+    if (doc.scope?.kind !== "workspace") return undefined;
+    const record = await options.workspaces?.get(doc.scope.workspaceId);
+    if (record === undefined || !isDirectory(record.workdir)) {
+      throw new Error(
+        say(
+          `The workspace for this conversation is not available${record === undefined ? "" : `: ${record.workdir}`}.`,
+          `本对话所属的工作区不可用${record === undefined ? "" : `：${record.workdir}`}。`,
+        ),
+      );
+    }
+    return record;
+  };
+  /** 每个（目录, 权限）一个文件系统实例：编辑前必须先读的跟踪状态随之保持。 */
+  const workspaceFsCache = new Map<string, WorkspaceFs>();
+  /** 文件类工具按调用的会话选文件系统：工作区对话得到挂载了该目录的实例，普通聊天得到无用户目录的那份。 */
+  const workspaceFor = async (api: ToolExecutionApi<never>): Promise<WorkspaceFs> => {
+    if (options.sources === undefined) return workspace;
+    const doc = await options.sources().read(api.conversationId as unknown as number).catch(() => undefined);
+    const record = doc === undefined ? undefined : await workspaceOf(doc);
+    if (record === undefined) return workspace;
+    const key = `${record.workdir}\0${record.permission}`;
+    let instance = workspaceFsCache.get(key);
+    if (instance === undefined) {
+      instance = new NodeWorkspaceFs({
+        dataRoot: config.dataDir,
+        resourceRoot: config.dataDir,
+        userRoot: record.workdir,
+        userPermission: record.permission,
+        metaDir: join(record.workdir, ".zhixi"),
+        cacheDir: join(record.workdir, ".baa_cache"),
+      });
+      workspaceFsCache.set(key, instance);
+    }
+    return instance;
+  };
   // 任务板/团队/动态计划是会话级文档：按调用时的会话现取，一套工具对象服务所有会话。
   const docsFor = (api: ToolExecutionApi<never>): AppDocHosts => {
     const conversationId = api.conversationId as unknown as ConversationId;
@@ -76,6 +117,7 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
         };
   const appTools = createAppTools({
     workspace,
+    workspaceFor,
     sessionId,
     ...(options.workflowCatalog === undefined ? {} : { workflows: options.workflowCatalog }),
     docs: docsFor,
@@ -96,11 +138,18 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
           const doc = await readSources().read(conversationId).catch(() => undefined);
           if (doc === undefined) return undefined;
           const active = doc.sources.filter((source) => source.active);
-          if (active.length === 0) return undefined;
+          const scope = await workspaceOf(doc);
+          if (active.length === 0 && scope === undefined) return undefined;
           // 主来源取第一个参与分析的来源；表清单按来源聚合，供 SQL 校验与提示使用。
           const tables: Record<string, string[]> = {};
           for (const source of active) tables[source.id] = [...(source.tables ?? [])];
-          return { sources: active.map((source) => source.id), primary: active[0]!.id, tables };
+          return {
+            sources: active.map((source) => source.id),
+            ...(active.length === 0 ? {} : { primary: active[0]!.id }),
+            tables,
+            // 工作区对话：compute 据此把导出写进 `<目录>/artifacts/`、把目录加进 SQL 读文件白名单。
+            ...(scope === undefined ? {} : { workspaceId: scope.workspaceId, workspaceRoot: scope.workdir }),
+          };
         });
   // 图表 HTML 只在单次调用内存在于 worker 里，必须由这里落盘（界面的 web view 读文件）。
   const persisted = withChartPersistence(scopedComputeTools, join(config.dataDir, "outputs", "charts"));

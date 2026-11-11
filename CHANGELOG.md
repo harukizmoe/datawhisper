@@ -2,7 +2,13 @@
 
 ## 未发布
 
-- 调整：Python 计算进程不再保存工作区挂载状态。删除 `data/system_workspace.py`、`data/workspace_metadata.py` 与 `data/workspace.py` 里的 `WorkspaceManager`（会话绑定、引用计数、权限合成、发现列表，共约 800 行）：它在 compute 进程里从未被挂载过，查询恒为空，而这些职责 server 的 `source.*` 与工作区文档已经有了。工具调用若需要工作区，由请求 `context.workspace_root` 给出根目录，SQL 读取白名单、导出目录据此现算；只给 `workspace_id` 不给根目录时 SQL 读取仍失败关闭。注意：server 目前不会带这两个字段，所以挂载工作目录后，工具的导出仍写到默认的 `outputs/exports`，SQL 白名单也不含工作目录。
+- 新增：工作区成为全局概念，对话可以属于某个工作区（参考 ChatGPT 桌面版的「项目」）。设计见 `docs/refactor/workspace-modes.md`。server 侧（S1）：
+  - 注册表：`<数据目录>/workspaces.json` 保存全部工作区（目录、名称、权限、说明、共享来源 id）；`workspace.list/create/update/sync/prepare/remove` 不再属于某个对话。同一目录只登记一次；一个工作区只有一份持久化来源，属于它的对话共用。`workspace.remove` 要求确认，仍有对话属于它时拒绝；只删记录，不动目录。
+  - 对话范围：对话文档新增 `scope`（`chat` 或 `workspace:<id>`）。`conversation.create` 可带 `workspaceId`，先确认目录可用再建对话，失败不留空对话；`conversation.moveToWorkspace` 把普通聊天移入工作区。对话一旦属于工作区就不能退出或改挂另一个。
+  - 工作区对话每一轮的系统提示末尾带 `[WORKSPACE]` 块（名称、目录、权限、应用里写的说明、目录里的 `ZHIXI.md` 指令）；文件类工具按对话选文件系统（挂载该目录，只读权限拦截写入）；调用 compute 时带 `workspace_id` 与 `workspace_root`，所以导出写进 `<目录>/artifacts/`、SQL 读文件白名单包含工作目录。目录消失时工作区对话的提交、`workspace.sync/prepare` 与建对话都明确报错（`workspace_unavailable`），不悄悄退回普通聊天。
+  - 迁移：启动时把旧版每个对话各存一份的工作区记录合并进全局注册表（同一目录的多份来源合并为第一份），对话获得 `scope`；幂等。
+  - 删除：`workspace.mount/unmount/rename/setPermission`（每对话挂载）。桌面端「挂载」改为 `workspace.create` + `conversation.moveToWorkspace`，去掉「卸载」按钮；列表里不属于当前对话的工作区可以「移除」。选范围的新建对话入口、侧栏分组与文件树面板见 S2/S3。
+- 调整：Python 计算进程不再保存工作区挂载状态。删除 `data/system_workspace.py`、`data/workspace_metadata.py` 与 `data/workspace.py` 里的 `WorkspaceManager`（会话绑定、引用计数、权限合成、发现列表，共约 800 行）：它在 compute 进程里从未被挂载过，查询恒为空，而这些职责 server 的 `source.*` 与工作区文档已经有了。工具调用若需要工作区，由请求 `context.workspace_root` 给出根目录，SQL 读取白名单、导出目录据此现算；只给 `workspace_id` 不给根目录时 SQL 读取仍失败关闭。server 在工作区对话里会带这两个字段（见上一条）。
 - 移除：TimesFM-3 时序预测（`run_analysis` 的 `Time_Series_TimesFM3` 模板、`timesfm` 技能、`Function/Analyze/Time_Series_TimesFM3/` 里的 HTTP 适配服务、`infrastructure/forecast_client.py` 与 `config/` 下三个预测/本地服务配置）。它依赖用户另外部署的模型服务，客户端依赖的 `data/forecast_config.py` 早已删除，实际无法使用。时序预测仍可用 ARIMA、SARIMA、VAR、Prophet、GRU。
 - 修复：飞书多维表格数据源在桌面端打不开——Python 进程读飞书时用的是自己的 `feishu-bot.json` 和系统钥匙串，而应用把飞书应用凭据存在 server 一侧，两边互不相通。现在打开来源时由 server 用自己的飞书凭据读好记录（翻页、单元格展平与上限沿用旧实现，新增 `readBitableRecords`），随 `source.open` 的 descriptor 交给 compute，compute 不再联网、不再持有凭据。同时删除 Python 里随之无人使用的 `data/feishu_bitable_service.py`、`feishu_bot_service.py`、`feishu_bot_store.py` 与 `infrastructure/credential_store.py`（约 990 行）。注意：`load_feishu_bitable` 这个模型工具在 server 侧仍没有执行体（数据源面板里添加飞书表格不受影响）。
 - 新增（参考 Tern 的会话界面）：一轮末尾的元数据行加输出速度（`100 tok/s`，输出 token ÷ 回复耗时）；输入框上方的任务行「任务 1/3 · 当前任务 ›」，点开列出 agent 任务板（新增 `tasks.list`，任务工具完成后重新读取）；工具卡片里 SQL 是带语法高亮的代码块，`query_data` 的文本表渲染成表格，分析/概况类的 Markdown 输出按回答正文的主题渲染（预览取开头几行，纯文本仍取末尾几行）；输入区失焦且没有草稿时折叠成一行（上一条提问加会话花费），点一下展开并聚焦；消息列铺满整个对话面板，输入区是贴底悬浮的磨砂玻璃卡片（MyGo 着色器读取并模糊背后已绘制的内容，无 GPU 加速时退回近乎不透明的纯色），滚到它下面的文字模糊后透出来，消息列最后一行按上一帧量到的输入区高度留白，滚到底不会被盖住；对话右侧的导航轨兼作滚动条：占满对话列高度，列表自带的滚动条关掉，滚动时轨道上出现滑块、停下约 1.2 秒后消失。

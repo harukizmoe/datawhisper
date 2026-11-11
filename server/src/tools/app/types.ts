@@ -44,6 +44,11 @@ export type AppToolDeps = {
   /** 工作区文件系统。必填：文件类工具与 workspace_status 都依赖它。 */
   readonly workspace: WorkspaceFs;
   /**
+   * 按调用所在的会话选文件系统：属于工作区的对话得到挂载了该目录的实例，普通聊天得到基础实例。
+   * 省略时所有会话共用 `workspace`。
+   */
+  readonly workspaceFor?: (api: ToolExecutionApi<AppToolDetails>) => Promise<WorkspaceFs>;
+  /**
    * 任务板/团队/动态计划文档的宿主。
    *
    * 文档是**会话级**的（每个会话一份任务板/团队表），所以这里按调用传入的执行上下文现取，

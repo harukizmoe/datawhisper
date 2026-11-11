@@ -6,7 +6,9 @@
  */
 
 import type { JsonValue } from "@earendil-works/chord";
-import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps } from "../types.ts";
+import type { ToolExecutionApi } from "@earendil-works/pi-durable";
+import { AppToolError, errorResult, makeAppTool, okResult, renderValue, type AppTool, type AppToolDeps, type AppToolDetails } from "../types.ts";
+import type { WorkspaceFs } from "./fs.ts";
 
 const WORKSPACE_DESCRIPTIONS = {
   status:
@@ -52,15 +54,18 @@ function asNumber(value: JsonValue | undefined, fallback: number): number {
 }
 
 export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
-  const fs = deps.workspace;
+  /** 工作区对话得到挂载了其目录的文件系统；普通聊天（或宿主没配解析器）得到基础实例。 */
+  const fsFor = (api: ToolExecutionApi<AppToolDetails>): Promise<WorkspaceFs> =>
+    deps.workspaceFor === undefined ? Promise.resolve(deps.workspace) : deps.workspaceFor(api);
   return [
     makeAppTool({
       name: "workspace_status",
       description: WORKSPACE_DESCRIPTIONS.status,
       parameters: { type: "object", properties: {} },
       replay: "safe",
-      async execute() {
+      async execute(_args, api) {
         try {
+          const fs = await fsFor(api);
           const status = await fs.status();
           return okResult("workspace_status", renderValue(status as unknown as JsonValue), {
             tool: "workspace_status",
@@ -88,8 +93,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["pattern"],
       },
       replay: "safe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.glob(
             args.pattern ?? "**/*",
             args.path ?? "",
@@ -119,8 +125,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["pattern"],
       },
       replay: "safe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.grep(
             args.pattern ?? "",
             args.path ?? ".",
@@ -150,8 +157,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["file_path"],
       },
       replay: "safe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.readFile(
             args.file_path ?? "",
             asNumber(args.offset, 0),
@@ -176,8 +184,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["file_path", "content"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.writeFile(args.file_path ?? "", args.content ?? "");
           return okResult("workspace_write_file", renderValue(result as unknown as JsonValue), {
             tool: "workspace_write_file",
@@ -197,8 +206,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["file_path", "old_string", "new_string"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.editFile(args.file_path ?? "", args.old_string ?? "", args.new_string ?? "");
           return okResult("workspace_edit_file", renderValue(result as unknown as JsonValue), {
             tool: "workspace_edit_file",
@@ -221,8 +231,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["file_path", "confirm"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.deleteFile(args.file_path ?? "", args.confirm === true);
           return okResult("workspace_delete_file", renderValue(result as unknown as JsonValue), {
             tool: "workspace_delete_file",
@@ -246,8 +257,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["source_path", "destination_path"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.moveFile(
             args.source_path ?? "",
             args.destination_path ?? "",
@@ -278,8 +290,9 @@ export function createWorkspaceTools(deps: AppToolDeps): AppTool[] {
         required: ["command"],
       },
       replay: "unsafe",
-      async execute(args) {
+      async execute(args, api) {
         try {
+          const fs = await fsFor(api);
           const result = await fs.bash(args.command ?? "", asNumber(args.timeout, 30), args.confirm === true);
           const text = JSON.stringify(result);
           return okResult("workspace_bash", text, {

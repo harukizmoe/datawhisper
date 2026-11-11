@@ -38,6 +38,7 @@ export function toRpcContext(context: ComputeToolContext): Record<string, unknow
   if (context.colorScheme !== undefined) rpc.color_scheme = context.colorScheme;
   if (context.chartIds !== undefined) rpc.chart_ids = [...context.chartIds];
   if (context.chartDir !== undefined) rpc.chart_dir = context.chartDir;
+  if (context.workspaceRoot !== undefined) rpc.workspace_root = context.workspaceRoot;
   return rpc;
 }
 
