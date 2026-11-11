@@ -44,7 +44,9 @@ type sourceFake struct {
 	sessions []service.Session
 	scopes   map[int]string
 	// tree 是 workspace.tree 的内容：键是相对工作区根的目录路径。
-	tree    map[string][]service.TreeEntry
+	tree map[string][]service.TreeEntry
+	// pending 是 workspace.pending 的结果。
+	pending []service.PendingFile
 	arts    []service.Artifact
 	artText map[string]string
 	configs []service.SourceConfig
@@ -522,6 +524,45 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			entries := append([]service.TreeEntry{}, f.tree[treeParams.Path]...)
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"path": treeParams.Path, "entries": entries, "truncated": false, "total": len(entries)})
+
+		case "workspace.pending":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			pending := append([]service.PendingFile{}, f.pending...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"files": pending, "truncated": false})
+
+		case "workspace.importFiles":
+			f.record(req.Method, req.Params)
+			var importParams struct {
+				WorkspaceID string   `json:"workspaceId"`
+				Paths       []string `json:"paths"`
+			}
+			_ = json.Unmarshal(req.Params, &importParams)
+			f.mu.Lock()
+			kept := make([]service.PendingFile, 0, len(f.pending))
+			for _, file := range f.pending {
+				imported := false
+				for _, path := range importParams.Paths {
+					imported = imported || file.Path == path
+				}
+				if !imported {
+					kept = append(kept, file)
+				}
+			}
+			f.pending = kept
+			for parent := range f.tree {
+				for i := range f.tree[parent] {
+					for _, path := range importParams.Paths {
+						if f.tree[parent][i].Path == path {
+							f.tree[parent][i].ImportState = "imported"
+						}
+					}
+				}
+			}
+			workspace := f.current
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "workspace": workspace, "added": []any{}, "errors": []any{}, "skipped": 0, "reused": 0})
 
 		case "workspace.create":
 			f.record(req.Method, req.Params)
@@ -1748,4 +1789,78 @@ func TestModelChosenOnTheNewChatPageIsUsedToCreateTheConversation(t *testing.T) 
 	if a.cv.modelsErr != "" || a.cv.draftModel != nil {
 		t.Errorf("stale model state after the conversation was created: err=%q draft=%v", a.cv.modelsErr, a.cv.draftModel)
 	}
+}
+
+func TestFileTreeShowsImportStateAndImportsAFile(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}
+	f.mu.Lock()
+	f.tree = map[string][]service.TreeEntry{
+		"": {{Name: "reports", Path: "reports", Kind: "dir", Pending: 2}, {Name: "notes.md", Path: "notes.md", Kind: "file", Size: 12}},
+		"reports": {
+			{Name: "q1.csv", Path: "reports/q1.csv", Kind: "file", Size: 40, Data: true, ImportState: "new"},
+			{Name: "q2.csv", Path: "reports/q2.csv", Kind: "file", Size: 40, Data: true, ImportState: "changed"},
+			{Name: "q3.csv", Path: "reports/q3.csv", Kind: "file", Size: 40, Data: true, ImportState: "imported"},
+		},
+	}
+	f.pending = []service.PendingFile{{Path: "reports/q1.csv", State: "new"}, {Path: "reports/q2.csv", State: "changed"}}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+	if err := tt.Click("reports"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the subfolder", func() bool { return a.ft.dirs["reports"] != nil && a.ft.dirs["reports"].loaded })
+	// 待导入（?）、变了（!）、已导入（表格图标）三种状态都画出来。
+	expectTexts(t, tt, []string{"q1.csv", "q2.csv", "q3.csv", "?", "!"}, nil)
+
+	if err := tt.RightClick("q1.csv"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Import"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the import call", func() bool { return f.call("workspace.importFiles") != nil })
+	imported := f.call("workspace.importFiles")
+	if imported["workspaceId"] != "ws_0000000000000001" {
+		t.Errorf("workspace.importFiles params: %v", imported)
+	}
+	paths, _ := imported["paths"].([]any)
+	if len(paths) != 1 || paths[0] != "reports/q1.csv" {
+		t.Errorf("workspace.importFiles paths: %v", imported["paths"])
+	}
+}
+
+func TestChangesTabListsPendingAndImportsAll(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}
+	seedTree(f)
+	f.mu.Lock()
+	f.pending = []service.PendingFile{{Path: "reports/q1.csv", State: "new"}, {Path: "reports/q2.csv", State: "changed"}}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+	if err := tt.Click("Changes"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the pending list", func() bool { return len(a.ft.pending) == 2 })
+	expectTexts(t, tt, []string{"2 file(s) to import", "reports/q1.csv", "reports/q2.csv", "Import all"}, nil)
+
+	if err := tt.Click("Import all"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the import call", func() bool { return f.call("workspace.importFiles") != nil })
+	paths, _ := f.call("workspace.importFiles")["paths"].([]any)
+	if len(paths) != 2 {
+		t.Errorf("workspace.importFiles paths: %v", paths)
+	}
+	q.pump(t, tt, "the emptied list", func() bool { return len(a.ft.pending) == 0 })
+	expectTexts(t, tt, []string{"Nothing to import: every data file is up to date."}, nil)
 }

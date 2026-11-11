@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { listDirectory, TREE_LIMIT } from "../src/ipc/workspace-tree.ts";
+import { listDirectory, listPendingFiles, TREE_LIMIT, workspaceTreeMethods } from "../src/ipc/workspace-tree.ts";
 
 const dirs: string[] = [];
 function workdir(): string {
@@ -77,5 +77,86 @@ describe("listDirectory", () => {
     expect(listing.entries).toHaveLength(TREE_LIMIT);
     expect(listing.truncated).toBe(true);
     expect(listing.total).toBe(TREE_LIMIT + 5);
+  });
+});
+
+describe("import state", () => {
+  /** 写一条 compute 会写的 registry 记录：大小与修改时间取自文件本身。 */
+  function record(root: string, rel: string) {
+    const full = join(root, rel);
+    const stats = statSync(full);
+    const registryFile = join(root, ".zhixi", "registry.json");
+    mkdirSync(join(root, ".zhixi"), { recursive: true });
+    const registry = existsSync(registryFile) ? JSON.parse(readFileSync(registryFile, "utf8")) : {};
+    registry[rel] = { sha256: "x", size: stats.size, mtime_ns: Math.round(stats.mtimeMs * 1e6), tables: ["t"] };
+    writeFileSync(registryFile, JSON.stringify(registry));
+  }
+
+  test("没导入 / 已导入 / 导入后变了三种状态，目录带上子树里的待导入数", () => {
+    const root = workdir();
+    mkdirSync(join(root, "reports", "q1"), { recursive: true });
+    writeFileSync(join(root, "ready.csv"), "a,b\n1,2\n");
+    writeFileSync(join(root, "fresh.csv"), "a\n1\n");
+    writeFileSync(join(root, "reports", "q1", "old.xlsx"), "x");
+    record(root, "ready.csv");
+    record(root, "reports/q1/old.xlsx");
+
+    let listing = listDirectory(root, "");
+    expect(listing.entries.find((e) => e.name === "ready.csv")).toMatchObject({ importState: "imported" });
+    expect(listing.entries.find((e) => e.name === "fresh.csv")).toMatchObject({ importState: "new" });
+    // reports 里只有已导入的文件，不该有圆点。
+    expect(listing.entries.find((e) => e.name === "reports/q1")).toMatchObject({ pending: 0 });
+    expect(listing.entries.find((e) => e.name === "fresh.csv")!.pending).toBe(0);
+
+    // 改动一个已导入文件：它变成 changed，祖先目录各 +1。
+    const later = new Date(Date.now() + 5000);
+    utimesSync(join(root, "reports", "q1", "old.xlsx"), later, later);
+    listing = listDirectory(root, "");
+    expect(listing.entries.find((e) => e.name === "reports/q1")).toMatchObject({ pending: 1 });
+    const nested = listDirectory(root, "reports/q1");
+    expect(nested.entries[0]).toMatchObject({ importState: "changed" });
+
+    // 目录行自己不带导入状态，文件行的 pending 恒为 0。
+    expect(listing.entries.find((e) => e.name === "reports/q1")!.importState).toBe("none");
+    expect(listDirectory(root, "reports/q1").entries[0]!.pending).toBe(0);
+  });
+
+  test("非数据文件没有导入状态；registry 损坏时按「没导入」处理", () => {
+    const root = workdir();
+    writeFileSync(join(root, "notes.md"), "hi");
+    writeFileSync(join(root, "data.csv"), "a\n1\n");
+    mkdirSync(join(root, ".zhixi"));
+    writeFileSync(join(root, ".zhixi", "registry.json"), "{not json");
+    const entries = listDirectory(root, "").entries;
+    expect(entries.find((e) => e.name === "notes.md")).toMatchObject({ importState: "none", data: false });
+    expect(entries.find((e) => e.name === "data.csv")).toMatchObject({ importState: "new", data: true });
+  });
+});
+
+describe("listPendingFiles", () => {
+  test("只列没导入或已变化的数据文件，按路径排序；注册表里的条目按大小与时间判断", () => {
+    const root = workdir();
+    mkdirSync(join(root, "reports"));
+    writeFileSync(join(root, "b.csv"), "b\n1\n");
+    writeFileSync(join(root, "a.csv"), "a\n1\n");
+    writeFileSync(join(root, "reports", "c.xlsx"), "c");
+    writeFileSync(join(root, "notes.md"), "x");
+    const stats = statSync(join(root, "a.csv"));
+    mkdirSync(join(root, ".zhixi"));
+    writeFileSync(
+      join(root, ".zhixi", "registry.json"),
+      JSON.stringify({ "a.csv": { sha256: "x", size: stats.size, mtime_ns: Math.round(stats.mtimeMs * 1e6) } }),
+    );
+    const { files, truncated } = listPendingFiles(root);
+    expect(truncated).toBe(false);
+    expect(files.map((f) => [f.path, f.state])).toEqual([
+      ["b.csv", "new"],
+      ["reports/c.xlsx", "new"],
+    ]);
+  });
+
+  test("两个 RPC 都注册了", () => {
+    const methods = workspaceTreeMethods({ workspaces: { list: async () => [], get: async () => undefined, put: async () => {}, remove: async () => {} } });
+    expect(Object.keys(methods).sort()).toEqual(["workspace.pending", "workspace.tree"]);
   });
 });

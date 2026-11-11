@@ -107,7 +107,7 @@
 交互：
 
 - 点目录：展开或折叠，首次展开才向 server 取这一层。
-- 点数据文件：预览前若干行（已导入的走 `source.previewTable`）；点文本文件：预览文本。
+- 点数据文件：预览前若干行（已导入的走 `source.previewTable`）；点文本文件：预览文本。（待做）
 - 右键菜单（窗口内弹出菜单）：「Import」「Reference in chat」（把相对路径插入输入框）。面板不提供删除、重命名等写操作，改用户文件只由 agent 的 `workspace_*` 工具完成，并受对话的权限模式约束。
 
 实现要点：
@@ -117,7 +117,7 @@
 - 新增 `workspace.importFiles({ workspaceId, paths[] })`：导入指定文件（现有 `workspace.sync` 是整目录同步，改成这个的特例）。
 - 导入状态来自 `registry.json` 的 sha256 与当前文件对比，不在列目录时算哈希（大文件会卡）：先比 size 与 mtime，不一致才标 `!`，确认哈希放到导入时。
 - 图标用 Lucide 子集（`desktop/internal/icons`）：文件夹、文件、文本、表格、数据库、图片、代码；按扩展名选，不按目录名做特殊图标。
-- 一律用 MyGo 官方组件；行数很多时用虚拟列表组件。
+- 一律用 MyGo 官方组件：树用 `ui.Outline`（`OutlineState[string]`，只建可见行、自带展开箭头、缩进与键盘导航），页签用 `ui.Segmented`，行内右键用元素自己的 `PopoverMenu`。
 
 ## 权限模式
 
@@ -157,7 +157,7 @@
 |---|---|---|
 | S1 server | 注册表、`workspace.*` 全局化、`conversation.create/moveToWorkspace`、scope、迁移、上下文补发、说明并入提示 | `bun test` 覆盖：创建、移入、迁移去重、目录消失报错、compute 上下文含根目录；工作区对话导出落 `artifacts/`；两种范围都能 `source.open` SQL |
 | S2 desktop | 新建对话的范围选择、侧栏分组、范围标签、New workspace 对话框 | 已完成：范围选择在输入框底栏的芯片菜单里（不占首页版面）；`ui.NewTester` 覆盖选择器、创建后带 scope、按工作区分组、对话框创建；实机启动确认入口渲染 |
-| S3 文件树 | `workspace.tree`、`workspace.importFiles`、桌面端文件树面板与「Changes」页签 | 懒加载展开、折叠单链目录、导入状态徽标与实机一致；大目录不卡界面 |
+| S3 文件树 | `workspace.tree`、`workspace.pending`、`workspace.importFiles`、桌面端文件树面板与「Changes」页签 | 已完成（点文件预览除外）：懒加载展开、折叠单链目录、导入状态徽标（`?` / `!` / 表格图标）、目录待导入圆点、Changes 一键导入，扫描上限 2000 个文件 |
 | S4 | 共享来源、设置页、刷新 | 两个对话共享同一工作区来源；刷新只重导变化的文件 |
 | S5 | 飞书机器人可选默认工作区；工作流可选工作区 | 另行评估 |
 

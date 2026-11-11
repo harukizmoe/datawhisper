@@ -34,6 +34,7 @@ from ._utils import (
 from .excel import _excel_engine, _parse_sheets_parallel
 from compute.i18n import say
 from .base import DataSource
+from data.workspace import file_signature
 from data.workspace_write_lease import (
     acquire_synchronous_workspace_write_lease,
     acquire_workspace_write_lease,
@@ -135,6 +136,7 @@ def parse_workspace_csv_job(
                 registry = runtime.load_registry()
                 registry[file_key] = {
                     "sha256": file_hash,
+                    **file_signature(Path(file_path)),
                     "tables": [table_name],
                     "source_type": "csv",
                     "file_path": file_path,
@@ -232,6 +234,7 @@ def parse_workspace_excel_job(
                 registry = runtime.load_registry()
                 registry[file_key] = {
                     "sha256": file_hash,
+                    **file_signature(Path(file_path)),
                     "tables": registered,
                     "source_type": Path(file_path).suffix.lower().lstrip("."),
                     "file_path": file_path,

@@ -245,6 +245,12 @@ def workspace_sync(ctx: MethodContext, registry: SourceRegistry, params: dict) -
     """
     workspace_id = str_param(params, "workspace_id")
     source_id = str_param(params, "source_id", required=False)
+    paths = params.get("paths")
+    if paths is not None:
+        if not isinstance(paths, list) or not all(isinstance(item, str) for item in paths):
+            raise RpcError("'paths' must be an array of strings", INVALID_PARAMS)
+        if len(paths) > 200:
+            raise RpcError("'paths' accepts at most 200 files", INVALID_PARAMS)
     ok, message, workdir = validate_workdir(str_param(params, "workdir"))
     if not ok:
         raise RpcError(message, INVALID_PARAMS, data={"kind": "invalid_workdir"})
@@ -263,7 +269,7 @@ def workspace_sync(ctx: MethodContext, registry: SourceRegistry, params: dict) -
             # 每个数据库一个写锁：用已打开 source 的那个。
             runtime.db_lock = source._db_lock
             try:
-                imported = import_workdir_files(runtime, source, run_job, ctx.check)
+                imported = import_workdir_files(runtime, source, run_job, ctx.check, paths=paths)
             finally:
                 lease.invalidate()
             tables = source.list_tables()
@@ -273,7 +279,7 @@ def workspace_sync(ctx: MethodContext, registry: SourceRegistry, params: dict) -
         except Exception as exc:
             raise open_failed(descriptor, exc) from exc
         try:
-            imported = import_workdir_files(runtime, source, run_job, ctx.check)
+            imported = import_workdir_files(runtime, source, run_job, ctx.check, paths=paths)
             tables = source.list_tables()
         finally:
             source.close()
