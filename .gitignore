@@ -75,6 +75,6 @@ desktop.ini
 .claude
 .agents/
 .uploads/
-memory/
+/memory/
 Test/
 .pnpm-store/

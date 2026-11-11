@@ -29,6 +29,7 @@ pyecharts>=2.0.0
 # 统计与时间序列
 scipy>=1.7.0
 statsmodels>=0.15.0
+pmdarima>=2.0.4
 
 # SQL 解析与远端数据源
 sqlglot>=23.0.0
