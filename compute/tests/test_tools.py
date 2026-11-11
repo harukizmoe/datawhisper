@@ -243,7 +243,12 @@ class BaselineParityTest(ToolsTestBase):
         for index, (tool, args, expected) in enumerate(calls):
             result = self.client.result(f"tool.{tool}", {"context": context, "args": args})
             label = f"{recording['scenario']} call {index} {tool}"
-            self.assertEqual(self.normalize(result["text"]), expected["text"], label)
+            actual = self.normalize(result["text"])
+            if recording["scenario"] in FIT_DEPENDENT_SCENARIOS:
+                actual, wanted = _round_decimals(actual), _round_decimals(expected["text"])
+            else:
+                wanted = expected["text"]
+            self.assertEqual(actual, wanted, label)
             if "refs" in expected:
                 self.assertEqual(self.normalize(result["refs"]), expected["refs"], label)
             for produced in result["files"]:
@@ -256,6 +261,17 @@ class BaselineParityTest(ToolsTestBase):
             if tool == "generate_dashboard":
                 self.assertEqual(len(result["charts"]), len(args["widgets"]))
             compared[tool] += 1
+
+
+# 拟合出来的模型（auto_arima）：最后一两位小数随 pmdarima / statsmodels / numpy 的版本浮动，录制时的版本与 CI 不同。
+# 这些场景只比较到两位小数，其余数字、文字与结构仍须逐字一致。
+FIT_DEPENDENT_SCENARIOS = {"analysis_arima"}
+
+
+def _round_decimals(text: str) -> str:
+    import re
+
+    return re.sub(r"-?\d+\.\d{3,}", lambda m: f"{float(m.group()):.2f}", text)
 
 
 def _daily_rows(count: int) -> list[dict]:
