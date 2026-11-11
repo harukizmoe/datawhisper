@@ -49,4 +49,4 @@ tokenizers>=0.15.0
 # 杂项
 PyYAML>=6.0.3
 requests>=2.31.0
-openai>=3.35.1
+

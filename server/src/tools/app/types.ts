@@ -64,7 +64,7 @@ export type AppToolDeps = {
   readonly knownToolNames?: ReadonlySet<string>;
   /** draw.io 画布存储；省略时 diagram 工具返回存储不可用。 */
   readonly canvas?: CanvasStore;
-  /** 本仓库自带的 draw.io 形状库目录（`data/shape_libs`）。 */
+  /** 本仓库自带的 draw.io 形状库目录（`server/assets/shape_libs`）。 */
   readonly shapeLibsDir?: string;
   /** 外溢工具结果的读取源（`tr_<id>`）。 */
   readonly artifacts?: ToolResultArtifactSource;
