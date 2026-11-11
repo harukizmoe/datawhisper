@@ -29,6 +29,7 @@ import { createPermissionBroker, type PermissionBroker } from "./agent/permissio
 import { createPermissionGate } from "./agent/permission-gate.ts";
 import { DEFAULT_PERMISSION_MODE } from "./agent/permission-mode.ts";
 import { permissionMethods } from "./ipc/permissions.ts";
+import { workspaceTreeMethods } from "./ipc/workspace-tree.ts";
 import { appError } from "./ipc/errors.ts";
 import { say } from "./i18n.ts";
 import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
@@ -268,7 +269,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     context,
     jobs,
     workflows,
-    sourceMethods: { ...sourceApis, ...permissionApi },
+    sourceMethods: { ...sourceApis, ...permissionApi, ...workspaceTreeMethods({ workspaces: workspaceStore }) },
     permissions,
     teamMethods: teams,
     workflowMethods: workflowApi,

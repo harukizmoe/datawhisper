@@ -93,6 +93,8 @@ type app struct {
 	// ws 是工作区索引（侧栏分组与新对话选择器），wsDlg 是「New workspace」对话框（workspaces.go）。
 	ws    workspaceIndex
 	wsDlg workspaceDialog
+	// ft 是当前工作区的文件树（filetree.go）。
+	ft fileTree
 	// newChatScope 是下一条新对话要归属的工作区 id；空串是普通聊天。
 	newChatScope string
 	// openOnReady 在服务就绪后打开这个会话（-open 启动参数）；0 表示停在新对话上。

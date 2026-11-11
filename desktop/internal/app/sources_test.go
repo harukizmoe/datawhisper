@@ -43,9 +43,11 @@ type sourceFake struct {
 	// sessions 是 conversation.list 返回的会话；scopes 把对话映射到工作区。
 	sessions []service.Session
 	scopes   map[int]string
-	arts     []service.Artifact
-	artText  map[string]string
-	configs  []service.SourceConfig
+	// tree 是 workspace.tree 的内容：键是相对工作区根的目录路径。
+	tree    map[string][]service.TreeEntry
+	arts    []service.Artifact
+	artText map[string]string
+	configs []service.SourceConfig
 
 	// 上传：uploadDir 是 staging 目录，maxBytes 是 begin 声明的上限。
 	uploadDir string
@@ -509,6 +511,17 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			}
 			f.mu.Unlock()
 			respond(req.ID, view)
+
+		case "workspace.tree":
+			f.record(req.Method, req.Params)
+			var treeParams struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(req.Params, &treeParams)
+			f.mu.Lock()
+			entries := append([]service.TreeEntry{}, f.tree[treeParams.Path]...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"path": treeParams.Path, "entries": entries, "truncated": false, "total": len(entries)})
 
 		case "workspace.create":
 			f.record(req.Method, req.Params)
@@ -1565,5 +1578,82 @@ func TestDismissedPermissionDoesNotComeBackFromALateSnapshot(t *testing.T) {
 	q.pump(t, tt, "the late snapshot", func() bool { return a.perm.scope.Mode == service.ModeManual })
 	if len(a.perm.requests) != 0 {
 		t.Errorf("a dismissed request came back: %v", a.perm.requests)
+	}
+}
+
+func TestSidebarHasANewWorkspaceEntry(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	expectTexts(t, tt, []string{"New chat", "New workspace"}, nil)
+	if err := tt.Click("New workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
+}
+
+// seedTree 给假服务放一棵小树：根下一个目录 reports（里面一个 q1.csv）、一个文件 notes.md。
+func seedTree(f *sourceFake) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tree = map[string][]service.TreeEntry{
+		"": {
+			{Name: "reports", Path: "reports", Kind: "dir"},
+			{Name: "notes.md", Path: "notes.md", Kind: "file", Size: 12},
+		},
+		"reports": {{Name: "q1.csv", Path: "reports/q1.csv", Kind: "file", Size: 40, Data: true}},
+	}
+}
+
+func TestFileTreeRightClickOpensAChatInTheSubfolder(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}
+	seedTree(f)
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+	expectTexts(t, tt, []string{"Files", "reports", "notes.md", "Right-click a folder to start a chat in it."}, nil)
+
+	// 点开目录才取它这一层。
+	if err := tt.Click("reports"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the subfolder", func() bool { return a.ft.dirs["reports"] != nil && a.ft.dirs["reports"].loaded })
+	expectTexts(t, tt, []string{"q1.csv"}, nil)
+
+	// 右键目录：新建对话。登记成工作区后切到空白新对话，归属已选好。
+	if err := tt.RightClick("reports"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("New chat here"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the new workspace chat", func() bool { return f.call("workspace.create") != nil && a.conv == 0 && a.newScope() != "" })
+	if create := f.call("workspace.create"); create["path"] != "/work/sales/reports" {
+		t.Errorf("workspace.create params: %v", create)
+	}
+}
+
+func TestFileTreeReferencePutsThePathInTheInput(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}
+	seedTree(f)
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+	a.input = "summarize"
+	if err := tt.RightClick("notes.md"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Reference in chat"); err != nil {
+		t.Fatal(err)
+	}
+	if a.input != "summarize notes.md" {
+		t.Errorf("input: %q", a.input)
 	}
 }

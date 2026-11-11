@@ -786,3 +786,18 @@ func providerAction(t *testing.T, tt *ui.Tester, provider, item string) {
 	}
 	tt.Frame()
 }
+
+func TestChatModelListFollowsTheSettingsPage(t *testing.T) {
+	f := newModelFake(t)
+	a, q, tt := openSettings(t, f, 1400, 1000)
+	if len(a.cv.models) != 0 {
+		t.Fatalf("models before adding a provider: %v", a.cv.models)
+	}
+	// 在设置里加了提供商之后，设置页重载目录；聊天的模型下拉框用的是同一份。
+	f.setAvailable([]service.AvailableModel{{Provider: "custom-stub", ID: "stub-chat", Name: "stub-chat"}})
+	a.loadSettings()
+	q.pump(t, tt, "the chat model list", func() bool { return len(a.cv.models) == 1 })
+	if got := a.modelOptions(); !hasString(got, "custom-stub/stub-chat") {
+		t.Errorf("model options: %v", got)
+	}
+}

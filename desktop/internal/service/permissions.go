@@ -159,3 +159,30 @@ func (c *Client) SetPermissionMode(ctx context.Context, conversationID int, mode
 	}{conversationID, mode}, &out)
 	return out, err
 }
+
+// TreeEntry 是 workspace.tree 返回的一项：目录或文件。折叠过单子目录链的目录，Name 是 `a/b/c`，Path 指向最里层。
+type TreeEntry struct {
+	Name    string  `json:"name"`
+	Path    string  `json:"path"`
+	Kind    string  `json:"kind"`
+	Size    int64   `json:"size"`
+	MtimeMs float64 `json:"mtimeMs"`
+	Ignored bool    `json:"ignored"`
+	Empty   bool    `json:"empty"`
+	Data    bool    `json:"data"`
+}
+
+// TreeListing 是工作区里一个目录的一层内容；一层超过上限时 Truncated 为真，Total 是实际项数。
+type TreeListing struct {
+	Path      string      `json:"path"`
+	Entries   []TreeEntry `json:"entries"`
+	Truncated bool        `json:"truncated"`
+	Total     int         `json:"total"`
+}
+
+// WorkspaceTree 读工作区里 path（相对工作区根，空串是根）这一层的子项。
+func (c *Client) WorkspaceTree(ctx context.Context, workspaceID, path string) (TreeListing, error) {
+	var out TreeListing
+	err := c.callInto(ctx, "workspace.tree", map[string]any{"workspaceId": workspaceID, "path": path}, &out)
+	return out, err
+}

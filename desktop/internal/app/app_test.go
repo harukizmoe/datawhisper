@@ -372,6 +372,11 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 			})
 		case "usage.summary":
 			respond(req.ID, map[string]any{"models": map[string]any{}, "tools": map[string]any{}})
+		// 工作区索引：没有任何工作区。侧栏读它来分组，缺了会在侧栏里多出一行错误文字。
+		case "workspace.list":
+			respond(req.ID, map[string]any{"workspace": nil, "workspaces": []any{}})
+		case "conversation.scopes":
+			respond(req.ID, map[string]any{"scopes": []any{}})
 		// 任务板：一项完成、一项进行中、一项待办。
 		case "tasks.list":
 			respond(req.ID, map[string]any{"tasks": []any{

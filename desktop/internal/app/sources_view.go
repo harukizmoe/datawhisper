@@ -555,24 +555,27 @@ func configLabel(cfg service.SourceConfig) string {
 // workspaceTab 是「工作区」页签：挂载表单、当前挂载与已知目录。
 func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(8).Children(func() {
-		ui.Text(c, a.tr("data.workspaceTitle")).Bold().FontSize(a.fs(textSection))
-		ui.Text(c, a.tr("data.workspaceHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-		ui.Field(c, a.tr("data.fieldFolder"), func() {
-			ui.TextInput(c, &a.src.mountPath).Label(a.tr("data.folderToMount")).Placeholder("/home/me/data")
-		})
-		ui.Field(c, a.tr("data.fieldName"), func() {
-			ui.TextInput(c, &a.src.mountName).Label(a.tr("data.folderName")).Placeholder(a.tr("data.optional"))
-		})
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			mount := ui.PrimaryButton(c, a.tr("data.mount"))
-			if a.src.mountBusy {
-				mount.Disabled(true)
-				ui.Spinner(c)
-			}
-			if mount.Clicked() {
-				a.mountWorkspace()
-			}
-		})
+		// 已经属于某个工作区时，下面是它的卡片与文件树；挂载新文件夹走侧栏的「New workspace」或树里的右键，这里不再放表单。
+		if a.src.current == nil {
+			ui.Text(c, a.tr("data.workspaceTitle")).Bold().FontSize(a.fs(textSection))
+			ui.Text(c, a.tr("data.workspaceHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Field(c, a.tr("data.fieldFolder"), func() {
+				ui.TextInput(c, &a.src.mountPath).Label(a.tr("data.folderToMount")).Placeholder("/home/me/data")
+			})
+			ui.Field(c, a.tr("data.fieldName"), func() {
+				ui.TextInput(c, &a.src.mountName).Label(a.tr("data.folderName")).Placeholder(a.tr("data.optional"))
+			})
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				mount := ui.PrimaryButton(c, a.tr("data.mount"))
+				if a.src.mountBusy {
+					mount.Disabled(true)
+					ui.Spinner(c)
+				}
+				if mount.Clicked() {
+					a.mountWorkspace()
+				}
+			})
+		}
 		if a.src.mountErr != "" {
 			ui.Text(c, a.src.mountErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
 		}
@@ -589,6 +592,7 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 				// 权限模式在输入区底栏切换：这里只说明它管什么。
 				ui.Text(c, a.tr("ws.modeHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			})
+			a.fileTreeView(c, t, current)
 		} else if len(a.src.workspaces) > 0 {
 			// 普通聊天可以移入一个已有的工作区（移入后不能退出，服务端只允许单向）。
 			ui.Text(c, a.tr("ws.moveHere")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)

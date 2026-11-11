@@ -109,6 +109,8 @@ func (a *app) loadSettings() {
 				a.st.availableErr = settingsErrorText(availableErr)
 			} else {
 				a.st.available, a.st.availableErr = available, ""
+				// 聊天里的模型下拉框用同一份目录：在设置里加了提供商、改了启用状态或默认模型后，不必重启就能选到。
+				a.cv.models, a.cv.modelsErr = available, ""
 			}
 			if viewErr != nil {
 				a.st.err = settingsErrorText(viewErr)

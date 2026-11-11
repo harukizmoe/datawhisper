@@ -77,9 +77,12 @@ func (a *app) sidebar(c *ui.Context) {
 			ui.Icon(c, icons.Sparkles).TextColor(t.Accent)
 			ui.Text(c, "DataWhisper").Bold().FontSize(a.fs(textSection)).SingleLine()
 		})
-		// 侧栏只有 248 宽，放不下两个带文字的按钮：这里只留「New chat」；新建工作区在首页的范围选择器与数据面板里。
+		// 两个按钮上下各占一行：侧栏只有 248 宽，并排放会把两边的文字都截断。
 		if iconTextButton(c, icons.Plus, a.tr("sidebar.newChat")).Clicked() {
 			a.newChat()
+		}
+		if iconTextButton(c, icons.FolderOpen, a.tr("ws.new")).Tooltip(a.tr("ws.newTip")).Clicked() {
+			a.openWorkspaceDialog("")
 		}
 		if a.ws.err != "" {
 			ui.Text(c, a.ws.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
