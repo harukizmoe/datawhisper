@@ -22,7 +22,7 @@ import {
 import { readBitableRecords } from "./feishu/bitable.ts";
 import { feishuService } from "./feishu/service.ts";
 import { sourceMethods } from "./ipc/sources.ts";
-import { migrateLegacyWorkspaces } from "./ipc/workspace-migrate.ts";
+import { migrateLegacyWorkspaces, stripLegacyNames } from "./ipc/workspace-migrate.ts";
 import { createWorkspaceStore, isDirectory, type WorkspaceStore } from "./ipc/workspace-store.ts";
 import { renderWorkspaceSection } from "./agent/workspace-section.ts";
 import { createPermissionBroker, type PermissionBroker } from "./agent/permission-broker.ts";
@@ -234,6 +234,12 @@ export async function startService(config: Config, options: ServiceOptions = {})
       conversationIds: (await conversations.list()).conversations.map((item) => item.id),
     });
     if (migrated > 0) console.error(`[workspace] migrated ${migrated} conversation(s) to the global workspace registry`);
+    const renamed = await stripLegacyNames({
+      state: sourceState,
+      workspaces: workspaceStore,
+      conversationIds: (await conversations.list()).conversations.map((item) => item.id),
+    });
+    if (renamed > 0) console.error(`[workspace] dropped the folder emoji from ${renamed} name(s)`);
   } catch (error) {
     console.error("[workspace] legacy workspace migration failed", error);
   }
