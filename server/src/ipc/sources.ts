@@ -23,6 +23,7 @@ import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { BitableRead } from "../feishu/bitable.ts";
 import { ComputeError, type SourceDescriptor } from "../compute/client.ts";
 import { APP_ERROR, INVALID_PARAMS, RpcError, appError, invalidParams } from "./errors.ts";
+import { workspaceIdParam } from "./params.ts";
 import type { MethodParams, RpcMethod } from "./rpc.ts";
 import {
   ARTIFACT_CONTENT_TYPES,
@@ -1532,7 +1533,7 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     },
 
     "workspace.update": async (params) => {
-      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      const record = await requireWorkspaceRecord(workspaceIdParam(params));
       const next: WorkspaceRecord = { ...record, updatedAt: iso() };
       if (params.name !== undefined) next.name = cleanWorkspaceName(stringParam(params, "name"));
       if (params.instructions !== undefined) {
@@ -1560,7 +1561,7 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
 
     /** 重新导入目录里新增或变化的数据文件（刷新）。 */
     "workspace.sync": async (params) => {
-      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      const record = await requireWorkspaceRecord(workspaceIdParam(params));
       requireAvailable(record);
       const result = await syncWorkspace(record);
       const current = await currentWorkspaceId(params);
@@ -1578,7 +1579,7 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     /** 建对话之前先确认工作区可用、共享来源已打开：失败时不会留下一个空对话。 */
     /** 只导入指定文件（界面里的「Import」）；路径是相对工作区根的文件名。 */
     "workspace.importFiles": async (params) => {
-      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      const record = await requireWorkspaceRecord(workspaceIdParam(params));
       requireAvailable(record);
       const raw = params.paths;
       if (!Array.isArray(raw) || raw.length === 0) throw invalidParams("'paths' must be a non-empty array");
@@ -1605,7 +1606,7 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     },
 
     "workspace.prepare": async (params) => {
-      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      const record = await requireWorkspaceRecord(workspaceIdParam(params));
       requireAvailable(record);
       const ready = await ensureWorkspaceOpen(record);
       return { workspace: publicWorkspace(ready.record, undefined) };
@@ -1614,7 +1615,7 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     /** 把普通聊天移入工作区（单向）：写下 scope，并把工作区的共享来源挂进本对话。 */
     "conversation.moveToWorkspace": async (params) => {
       const conversationId = conversationIdParam(params);
-      const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
+      const workspaceId = workspaceIdParam(params);
       const doc = await state.read(conversationId);
       if (doc.scope?.kind === "workspace" && doc.scope.workspaceId !== workspaceId) {
         throw invalidReason(say("This conversation already belongs to another workspace.", "该对话已属于另一个工作区。"), "already_in_workspace");
@@ -1633,7 +1634,7 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     },
 
     "workspace.remove": async (params) => {
-      const workspaceId = patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>");
+      const workspaceId = workspaceIdParam(params);
       if (params.confirmed !== true) throw invalidReason(say("Removal must be explicitly confirmed first.", "移除前必须明确确认。"), "confirmation_required");
       const record = await requireWorkspaceRecord(workspaceId);
       for (const id of (await deps.conversationIds?.()) ?? []) {
