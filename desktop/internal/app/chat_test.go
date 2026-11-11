@@ -243,11 +243,13 @@ func TestModelSwitchSendsParameters(t *testing.T) {
 }
 
 // TestComposerFitsNarrowWindow 断言窄窗口下发送按钮仍在窗口内、有完整宽度，输入框也能收缩。
+// 高度用 700：更矮时侧栏的会话列表会被上下固定项挤到 0 高（旧默认字号下也只有 1 像素），
+// 那不是这个用例要测的宽度问题。
 func TestComposerFitsNarrowWindow(t *testing.T) {
 	fs := newFakeService(t)
 	q := newQueue()
 	a := &app{post: q.post}
-	tt := ui.NewTester(a.view, 700, 640)
+	tt := ui.NewTester(a.view, 700, 700)
 	openRichChat(t, fs, q, a, tt)
 
 	rect, ok := tt.Find("Send")
@@ -258,7 +260,7 @@ func TestComposerFitsNarrowWindow(t *testing.T) {
 	if rect.W < 30 {
 		t.Errorf("the Send button is clipped: %v", rect)
 	}
-	if rect.X < 0 || rect.X+rect.W > 700 || rect.Y+rect.H > 640 {
+	if rect.X < 0 || rect.X+rect.W > 700 || rect.Y+rect.H > 700 {
 		t.Errorf("the Send button is outside the window: %v", rect)
 	}
 	if input, ok := tt.Find("Message"); !ok || input.W < 80 {

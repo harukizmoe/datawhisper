@@ -64,10 +64,45 @@ func (a *app) kindLabel(k remoteKind) string {
 	return k.Label
 }
 
+// defaultChatSplit 是数据面板第一次展开时对话占聊天区的百分比（ui.SplitPercent 的第一个分栏），
+// 面板拿剩下的 22%。对话是主体，面板只在右侧占一窄条。
+const defaultChatSplit float32 = 78
+
+// minPanelWidth 是数据面板内容能排开的最小宽度（DIP）。窗口不够宽时对话让出宽度，不把面板压到
+// 按钮都挤出窗口。
+const minPanelWidth float32 = 440
+
+// chatAreaWidth 是对话与数据面板分栏可用的宽度：窗口内容宽度减去侧栏；Islands 下再减去窗口
+// 内边距与侧栏到主区的间隙。
+func (a *app) chatAreaWidth() float32 {
+	width := a.contentWidth() - 248
+	if a.islands() {
+		width -= 3 * islandGap
+	}
+	return width
+}
+
+// splitForLayout 返回这一帧交给 SplitPercent 的对话百分比：默认按比值分，但数据面板不小于
+// minPanelWidth；窗口太窄时对话让出宽度。用户的比值仍留在 a.src.split。
+func (a *app) splitForLayout() float32 {
+	split := a.src.split
+	if split <= 0 {
+		split = defaultChatSplit
+	}
+	room := a.chatAreaWidth()
+	if room <= minPanelWidth+1 {
+		return split
+	}
+	if room*(100-split)/100 < minPanelWidth {
+		split = (room - minPanelWidth) * 100 / room
+	}
+	return split
+}
+
 // sourcesState 是数据面板的数据与编辑状态。只有 UI 线程会改它：构建视图时，以及在 post 上排队的函数里。
 type sourcesState struct {
 	open  bool    // 面板是否展开
-	split float32 // 面板占聊天区宽度的百分比（ui.SplitPercent）
+	split float32 // 对话占聊天区宽度的百分比（ui.SplitPercent 的第一个分栏），面板拿剩下的部分
 
 	gen     int // 丢弃旧加载的结果
 	conv    int // 这份数据属于哪个会话
@@ -187,7 +222,7 @@ func (a *app) toggleSources() {
 	a.src.open = !a.src.open
 	if a.src.open {
 		if a.src.split == 0 {
-			a.src.split = 38
+			a.src.split = defaultChatSplit
 		}
 		a.loadSources()
 	}

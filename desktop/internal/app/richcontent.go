@@ -167,27 +167,27 @@ func diagramFile(name string) bool {
 }
 
 // chatChartWidth 是消息流里图表可用的宽度：窗口内容宽度减去侧边栏与消息列表内边距，
-// 数据面板展开时再按分割比例扣掉它，最后受消息行 760 DIP 的上限约束。它只用来定高度，
+// 数据面板展开时只算对话那一份，最后受消息行 760 DIP 的上限约束。它只用来定高度，
 // web view 本身横向拉伸。
 func (a *app) chatChartWidth() float32 {
 	width := a.contentWidth() - 240
 	if a.src.open {
 		split := a.src.split
 		if split <= 0 {
-			split = 38
+			split = defaultChatSplit
 		}
-		width = width * (100 - split) / 100
+		width = width * split / 100
 	}
 	return clampF(width-48-16, 280, 760)
 }
 
-// panelWidth 是数据面板里的可用宽度：按分割比例算，扣掉面板内边距。
+// panelWidth 是数据面板里的可用宽度：聊天区减去对话那一份，扣掉面板内边距。
 func (a *app) panelWidth() float32 {
 	split := a.src.split
 	if split <= 0 {
-		split = 38
+		split = defaultChatSplit
 	}
-	width := (a.contentWidth() - 240) * split / 100
+	width := (a.contentWidth() - 240) * (100 - split) / 100
 	return clampF(width-32, 240, 720)
 }
 
