@@ -42,6 +42,10 @@ type chatView struct {
 	thinkingChoice string
 	// modelsTouched：用户已经改了模型、服务端还没确认。这段时间不把下拉框拨回旧值，避免闪回。
 	modelsTouched bool
+	// draftModel 与 draftLevel 是新对话页（还没有会话）上选的模型与思考强度：会话在发出第一条消息时才创建，
+	// 所以先记在这里，创建时随 conversation.create 一起带上。
+	draftModel *service.ModelRef
+	draftLevel string
 
 	// 斜杠命令目录（command.list）。
 	commands []service.Command
@@ -124,6 +128,7 @@ func (v *chatView) resetConversation() {
 	v.renaming, v.renameText, v.renameErr, v.renameBusy = false, "", "", false
 	v.modelChoice, v.thinkingChoice = "", ""
 	v.modelsTouched = false
+	v.modelsErr, v.draftModel, v.draftLevel = "", nil, ""
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
 	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0
 	v.composerSeen, v.wantFocus, v.blurSince, v.menuOpen = false, false, time.Time{}, false
@@ -583,9 +588,15 @@ func (a *app) chooseThinking(label string) {
 
 // setModel 把模型与思考强度写到会话；下一次模型请求开始生效。
 func (a *app) setModel(ref service.ModelRef, level string) {
-	if a.client == nil || a.conv == 0 {
-		a.cv.modelsErr = a.tr("chat.modelNeedChat")
-		a.cv.modelsTouched = false
+	if a.client == nil {
+		return
+	}
+	if a.conv == 0 {
+		// 新对话页：会话还没创建，记下选择，发第一条消息时随创建一起生效。
+		a.cv.draftModel, a.cv.draftLevel = &ref, level
+		a.cv.modelsTouched, a.cv.modelsErr = true, ""
+		a.cv.modelChoice = ref.Provider + "/" + ref.ModelID
+		a.cv.thinkingChoice = thinkingLabel(level)
 		return
 	}
 	client, conv := a.client, a.conv

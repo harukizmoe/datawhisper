@@ -1717,3 +1717,35 @@ func TestFileTreeReferencePutsThePathInTheInput(t *testing.T) {
 		t.Errorf("input: %q", a.input)
 	}
 }
+
+// 新对话页上选模型：会话还没创建，选择要随 conversation.create 一起带上，而不是报「先打开会话」。
+func TestModelChosenOnTheNewChatPageIsUsedToCreateTheConversation(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	a.newChat()
+	q.run()
+	tt.Frame()
+	a.cv.models, a.cv.modelsErr = []service.AvailableModel{{Provider: "custom-magpie", ID: "auto/deepseek", Name: "deepseek", ThinkingLevels: []string{"low", "high"}}}, ""
+
+	a.chooseModel("custom-magpie/auto/deepseek")
+	a.chooseThinking("high")
+	if a.cv.modelsErr != "" {
+		t.Fatalf("choosing a model on the new chat page failed: %s", a.cv.modelsErr)
+	}
+	if a.cv.modelChoice != "custom-magpie/auto/deepseek" || a.cv.thinkingChoice != "high" {
+		t.Errorf("controls: %q %q", a.cv.modelChoice, a.cv.thinkingChoice)
+	}
+
+	a.input = "hello"
+	a.send()
+	q.pump(t, tt, "the created conversation", func() bool { return f.call("conversation.create") != nil })
+	call := f.call("conversation.create")
+	model, _ := call["model"].(map[string]any)
+	if model["provider"] != "custom-magpie" || model["modelId"] != "auto/deepseek" || call["thinkingLevel"] != "high" {
+		t.Errorf("conversation.create params: %v", call)
+	}
+	q.pump(t, tt, "the new conversation", func() bool { return a.conv == 3 })
+	if a.cv.modelsErr != "" || a.cv.draftModel != nil {
+		t.Errorf("stale model state after the conversation was created: err=%q draft=%v", a.cv.modelsErr, a.cv.draftModel)
+	}
+}

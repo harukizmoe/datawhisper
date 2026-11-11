@@ -326,13 +326,14 @@ func (a *app) send() {
 	a.input, a.sending, a.sendErr, a.needModel = "", true, "", false
 	a.cv.followPaused = false // 发出新消息后回到底部看回复
 	client, conv, scope := a.client, a.conv, a.newChatScope
+	draftModel, draftLevel := a.cv.draftModel, a.cv.draftLevel
 	command, whenBusy := slashCommandName(text, a.cv.commands), a.whenBusy()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if conv == 0 {
 			// 新对话按首页选择的归属创建：工作区对话一创建就属于它（权限模式从 Manual 开始）。
-			id, err := client.CreateConversation(ctx, service.CreateConversationRequest{WorkspaceID: scope})
+			id, err := client.CreateConversation(ctx, service.CreateConversationRequest{WorkspaceID: scope, Model: draftModel, ThinkingLevel: draftLevel})
 			if err != nil {
 				a.post(func() { a.sendFailed(p, "Could not start the conversation: ", err) })
 				return
