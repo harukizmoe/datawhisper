@@ -11,7 +11,7 @@ import { errorResult, makeAppTool, okResult, type AppTool, type AppToolDeps } fr
 
 const MAX_READ_BYTES = 768_000;
 
-function ipv4Private(address: string): boolean {
+export function ipv4Private(address: string): boolean {
   const parts = address.split(".").map((part) => Number(part));
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
   const [a, b] = parts as [number, number, number, number];
@@ -26,7 +26,7 @@ function ipv4Private(address: string): boolean {
   );
 }
 
-function ipv6Private(address: string): boolean {
+export function ipv6Private(address: string): boolean {
   const lowered = address.toLowerCase();
   if (lowered === "::" || lowered === "::1") return true;
   if (lowered.startsWith("::ffff:")) return ipv4Private(lowered.slice("::ffff:".length));
@@ -48,7 +48,7 @@ function rejectPrivateHost(host: string): void {
   }
 }
 
-function validateUrl(url: string): URL {
+export function validateUrl(url: string): URL {
   const raw = String(url ?? "").trim();
   if (!raw) throw new Error("url is required");
   let parsed: URL;

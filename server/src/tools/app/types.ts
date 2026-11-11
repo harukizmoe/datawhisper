@@ -86,8 +86,38 @@ export type AppToolDeps = {
    * 的默认数据目录取单例），测试可注入临时目录的实例。
    */
   readonly feishu?: FeishuService;
+  /**
+   * 把抓来的网表 / 飞书记录登记成会话里的数据来源。迟绑定：端口由 `sourceMethods` 在装配时填进来
+   * （它掌握会话文档、compute 与上传目录），工具只负责取字节与说话。
+   */
+  readonly ingest?: IngestPort;
   /** 工作流目录的迟绑定端口：工具先于会话服务装配，目录在服务就绪后再填 `current`。 */
   readonly workflows?: { current?: WorkflowCatalog };
+};
+
+/** 一次「把字节抓成表」的请求：网址、内容类型与正文；`sourceName` 是界面里的显示名。 */
+export type FetchTablesRequest = {
+  readonly url: string;
+  readonly contentType: string;
+  readonly body: Uint8Array;
+  readonly sourceName?: string;
+};
+
+/** 飞书多维表格的读取结果（server 侧用 OpenAPI 读好再交过来，凭据不经过工具）。 */
+export type BitableReadLike = {
+  readonly app_token: string;
+  readonly table_id: string;
+  readonly records: readonly Record<string, unknown>[];
+  readonly [key: string]: unknown;
+};
+
+/** 登记结果：每张表一条来源，名字是界面里看到的那个。 */
+export type IngestedTable = { readonly name: string; readonly tables: readonly string[] };
+
+export type IngestPort = {
+  /** `text` 是给模型看的结果正文（含表名、行数、截断标记）；`added` 是登记进会话的来源。 */
+  fetchTables(conversationId: number, request: FetchTablesRequest): Promise<{ added: IngestedTable[]; text: string }>;
+  loadBitable(conversationId: number, read: BitableReadLike, sourceName?: string): Promise<{ added: IngestedTable[]; text: string }>;
 };
 
 /** 一次成员委托的请求；由工具层填好团队成员与提示，执行层只负责跑子会话。 */

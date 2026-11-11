@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+import pandas as pd
 import time
 import unittest
 from pathlib import Path
@@ -420,6 +422,17 @@ class WorkerBehaviourTest(ToolsTestBase):
         rows = self.client.result("tool.query_data", {"context": self.context("web1"), "args": {
             "sql": f'SELECT COUNT(*) AS n FROM "{table}"'}})
         self.assertNotIn("SQL Error", rows["text"])
+        # 落盘：每张表一个 CSV，server 之后按普通文件来源登记，重启也不会丢。
+        with tempfile.TemporaryDirectory() as dump_dir:
+            dumped = self.client.result("tool.fetch_table_parse", {
+                "context": self.context(base), "source_id": "web3", "content_type": "text/html",
+                "body_base64": body, "dump_dir": dump_dir,
+                "args": {"url": "https://example.com/stores.html", "source_name": "stores_dump"}})
+            files = dumped["files"]
+            self.assertTrue(files)
+            self.assertTrue(all(os.path.exists(path) for path in files))
+            frame = pd.read_csv(files[0])
+            self.assertGreater(len(frame), 0)
         empty = self.client.result("tool.fetch_table_parse", {
             "context": self.context(), "source_id": "web2", "content_type": "text/html",
             "body_base64": base64.b64encode(b"<html><p>none</p></html>").decode(), "args": {"url": "https://x.test/"}})

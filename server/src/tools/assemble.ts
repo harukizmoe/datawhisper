@@ -12,7 +12,7 @@ import { isDirectory, type WorkspaceRecord, type WorkspaceStore } from "../ipc/w
 import { say } from "../i18n.ts";
 import { createToolResultStore, type ToolResultStore } from "../tools/guard/spill.ts";
 import { createConversationDocs } from "../tools/app/docs.ts";
-import type { AppDocHosts, TeamDelegationPort } from "../tools/app/types.ts";
+import type { AppDocHosts, IngestPort, TeamDelegationPort } from "../tools/app/types.ts";
 import type { WorkflowCatalog } from "../workflows/catalog.ts";
 import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, Harness, ToolExecutionApi } from "@earendil-works/pi-durable";
@@ -50,6 +50,8 @@ export type AssembleOptions = {
   readonly sources?: () => SourceDocStore;
   /** 工作区注册表：对话的 scope 指向其中一条记录。省略时所有对话都按普通聊天处理。 */
   readonly workspaces?: WorkspaceStore;
+  /** 抓取/飞书工具的来源登记端口；由 `sourceMethods` 在装配后填 `ingest`（迟绑定）。 */
+  readonly ingest?: { ingest?: IngestPort };
 };
 
 export function assembleTools(config: Config, compute: ComputeClient, sessionId: string, options: AssembleOptions): ToolAssembly {
@@ -129,6 +131,22 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
     memoryDirs: { userDir: join(config.dataDir, "memory") },
     skillDirs: { builtinDir: join(config.computeCwd, "skills") },
     fetch: globalThis.fetch,
+    ...(options.ingest === undefined
+      ? {}
+      : {
+          ingest: {
+            fetchTables: (conversationId, request) => {
+              const port = options.ingest!.ingest;
+              if (port === undefined) throw new Error("Table ingestion is not wired yet.");
+              return port.fetchTables(conversationId, request);
+            },
+            loadBitable: (conversationId, read, sourceName) => {
+              const port = options.ingest!.ingest;
+              if (port === undefined) throw new Error("Table ingestion is not wired yet.");
+              return port.loadBitable(conversationId, read, sourceName);
+            },
+          },
+        }),
   });
   const computeTools = createComputeTools({ compute });
   const readSources = options.sources;
