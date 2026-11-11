@@ -13,7 +13,7 @@ from ..i18n import say
 log = logging.getLogger(__name__)
 
 _TIME_SERIES_PREFIX = "Time_Series_"
-_JOB_ANALYSIS_IDS = {"Torch_MLP", "Torch_RNN", "Time_Series_TimesFM3"}
+_JOB_ANALYSIS_IDS = {"Torch_MLP", "Torch_RNN"}
 _ANALYSIS_JOB_ROW_THRESHOLD = 1000
 _CHART_JOB_ROW_THRESHOLD = 50_000
 _PROFILE_JOB_ROW_THRESHOLD = 50_000
@@ -754,9 +754,6 @@ class DataToolsMixin:
     ):
         """把大型时序分析作为可取消的 JobRunner 任务运行。"""
         analysis_options = deepcopy(analysis_options)
-        if analysis_name == "Time_Series_TimesFM3":
-            analysis_options = dict(analysis_options or {})
-            analysis_options.setdefault("language", getattr(self, "_ui_lang", "zh"))
         if not self.data_source:
             return "No data source connected."
 
@@ -784,9 +781,7 @@ class DataToolsMixin:
             )
 
         result_holder = {}
-        preparation_message = (self._tt("正在准备预测服务", "Preparing forecast service")
-                               if analysis_name == "Time_Series_TimesFM3" else
-                               self._tt("正在准备深度学习训练", "Preparing model training")
+        preparation_message = (self._tt("正在准备深度学习训练", "Preparing model training")
                                if analysis_name in _JOB_ANALYSIS_IDS else self._tt("正在准备时序分析", "Preparing time-series analysis"))
 
         def _worker(ctx):
@@ -854,7 +849,7 @@ class DataToolsMixin:
         try:
             _out_tbls = entry.get("output_tables", [])
             self._write_analysis_df(result_df, "analysis_result")
-            if not breakdown_df.empty or analysis_name == "Time_Series_TimesFM3":
+            if not breakdown_df.empty:
                 self._write_analysis_df(breakdown_df, "analysis_breakdown")
             # 总是写入第三张表，避免 LLM 的 SQL 查询因缺表而失败。
             # 结果为空时写入一个空但带结构的 DataFrame。

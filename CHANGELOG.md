@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 移除：TimesFM-3 时序预测（`run_analysis` 的 `Time_Series_TimesFM3` 模板、`timesfm` 技能、`Function/Analyze/Time_Series_TimesFM3/` 里的 HTTP 适配服务、`infrastructure/forecast_client.py` 与 `config/` 下三个预测/本地服务配置）。它依赖用户另外部署的模型服务，客户端依赖的 `data/forecast_config.py` 早已删除，实际无法使用。时序预测仍可用 ARIMA、SARIMA、VAR、Prophet、GRU。
 - 修复：飞书多维表格数据源在桌面端打不开——Python 进程读飞书时用的是自己的 `feishu-bot.json` 和系统钥匙串，而应用把飞书应用凭据存在 server 一侧，两边互不相通。现在打开来源时由 server 用自己的飞书凭据读好记录（翻页、单元格展平与上限沿用旧实现，新增 `readBitableRecords`），随 `source.open` 的 descriptor 交给 compute，compute 不再联网、不再持有凭据。同时删除 Python 里随之无人使用的 `data/feishu_bitable_service.py`、`feishu_bot_service.py`、`feishu_bot_store.py` 与 `infrastructure/credential_store.py`（约 990 行）。注意：`load_feishu_bitable` 这个模型工具在 server 侧仍没有执行体（数据源面板里添加飞书表格不受影响）。
 - 新增（参考 Tern 的会话界面）：一轮末尾的元数据行加输出速度（`100 tok/s`，输出 token ÷ 回复耗时）；输入框上方的任务行「任务 1/3 · 当前任务 ›」，点开列出 agent 任务板（新增 `tasks.list`，任务工具完成后重新读取）；工具卡片里 SQL 是带语法高亮的代码块，`query_data` 的文本表渲染成表格，分析/概况类的 Markdown 输出按回答正文的主题渲染（预览取开头几行，纯文本仍取末尾几行）；输入区失焦且没有草稿时折叠成一行（上一条提问加会话花费），点一下展开并聚焦；消息列铺满整个对话面板，输入区是贴底悬浮的磨砂玻璃卡片（MyGo 着色器读取并模糊背后已绘制的内容，无 GPU 加速时退回近乎不透明的纯色），滚到它下面的文字模糊后透出来，消息列最后一行按上一帧量到的输入区高度留白，滚到底不会被盖住；对话右侧的导航轨兼作滚动条：占满对话列高度，列表自带的滚动条关掉，滚动时轨道上出现滑块、停下约 1.2 秒后消失。
 - 修复：数据源选完表后卡片仍写「还没选数据表」——`source.setAnalysisTables` 只改了分析表选择，没有同步来源视图里的表清单；重命名数据源后预览标题仍是旧名——预览用了 compute 报告的打开时名称，现在以会话里存的名称为准。

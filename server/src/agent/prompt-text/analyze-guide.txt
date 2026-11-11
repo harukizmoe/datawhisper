@@ -16,8 +16,6 @@
     必填参数: target_column │ 可选参数: groupby_column (mlp_cls / mlp_reg), n_deciles (训练 epoch, default 60)
   Torch_RNN                      — 使用可选 PyTorch 训练 GRU 或 LSTM 时间序列预测模型，自动选择可用 CUDA 或 CPU，支持多步滚动预测与 MC Dropout 置信区间估计。groupby_column 为时间
     必填参数: target_column │ 可选参数: groupby_column (时间列名，默认自动探测；传 lstm 切换 LSTM 单元), n_deciles (预测步数, default 12)
-  Time_Series_TimesFM3           — 通过已配置的本地预测服务进行单/多商品预测；默认不下载模型。analysis_options 指定 time_column、series_column、horizon。
-    必填参数: target_column, analysis_options.time_column │ 可选参数: analysis_options.series_column, analysis_options.target_columns, analysis_options.horizon, analysis_options.frequency, analysis_options.backtest_steps, analysis_options.make_positive
   Univariate_Screening           — 对每个候选自变量分别与目标变量做简单 OLS 回归，输出系数、标准误、t 统计量、p 值、R²，并按显著性（默认 p<0.05）分类汇总。适用于多元建模前的变量预筛选。
     必填参数: target_column │ 可选参数: groupby_column (significance threshold, default '0.05')
   Time_Series_ARIMA              — 使用 ARIMA 模型对单变量时间序列进行建模与预测。pmdarima auto_arima stepwise 在全量数据上搜索最优阶数，输出预测值、置信区间与残差诊断。通过 groupby_colu

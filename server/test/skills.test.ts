@@ -104,7 +104,7 @@ describe("repo skills", () => {
   const loaded = loader.loadAll();
 
   test("loads the same skills, in the same order, with the same fields", () => {
-    expect(golden.repo.count).toBe(30);
+    expect(golden.repo.count).toBe(29);
     expect(loaded.size).toBe(golden.repo.count);
     expect([...loaded.keys()]).toEqual(golden.repo.names);
     expect(pyDiagnostics(loader, REPO_ROOT)).toEqual(golden.repo.diagnostics);

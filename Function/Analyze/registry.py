@@ -27,7 +27,6 @@ _REGISTRY_MAP: Dict[str, str] = {
     "Sklearn_Model":         "Sklearn_Model",
     "Torch_MLP":             "Torch_MLP",
     "Torch_RNN":             "Torch_RNN",
-    "Time_Series_TimesFM3":   "Time_Series_TimesFM3",
     "Univariate_Screening":  "Univariate_Screening",
     "Time_Series_ARIMA":     "Time_Series_ARIMA",
     "Time_Series_SARIMA":    "Time_Series_SARIMA",

@@ -1,6 +1,6 @@
 {
  "repo": {
-  "count": 30,
+  "count": 29,
   "names": [
    "ab-test-analysis",
    "arima",
@@ -25,7 +25,6 @@
    "screening",
    "sql",
    "swot-analysis",
-   "timesfm",
    "tree",
    "trimming",
    "value-proposition",
@@ -876,41 +875,6 @@
     "prompt_head": "# SWOT 分析\n\n使用 `display_diagram` 的 **content-fill 模式** 生成标准 2"
    },
    {
-    "name": "timesfm",
-    "display_name": "",
-    "description": "通过本地 API 或 Docker 服务调用 TimesFM-3，进行单变量与多变量时序预测（forecast sales time series）",
-    "icon": "🧩",
-    "allowed_tools": [
-     "get_schema",
-     "query_data",
-     "run_analysis",
-     "generate_chart"
-    ],
-    "tags": [
-     "mode-ml",
-     "forecasting",
-     "modeling"
-    ],
-    "source": "builtin",
-    "path": "skills/timesfm/SKILL.md",
-    "resources": [],
-    "public": {
-     "name": "timesfm",
-     "display_name": "timesfm",
-     "description": "通过本地 API 或 Docker 服务调用 TimesFM-3，进行单变量与多变量时序预测（forecast sales time series）",
-     "icon": "🧩",
-     "source": "builtin",
-     "tags": [
-      "mode-ml",
-      "forecasting",
-      "modeling"
-     ]
-    },
-    "prompt_sha256": "fcb961f99b8837c4c0f8f0c9c49b5f68525d329c62f0aa7067678bbd0b440c35",
-    "prompt_chars": 800,
-    "prompt_head": "# TimesFM-3 预测\n\n使用已在设置 → 本地服务中启用的服务。不得安装模型、下载权重或自动转向收费云服务。服务"
-   },
-   {
     "name": "tree",
     "display_name": "",
     "description": "使用决策树识别影响目标变量的关键规则（decision tree 决策树）",
@@ -1359,16 +1323,6 @@
     "sha256": "f3a2e883775a6f8aad14a2bac4153ce4ec36ba4d533ff487341689b10f7bdd2e"
    },
    {
-    "name": "timesfm",
-    "request": "",
-    "sha256": "fcb961f99b8837c4c0f8f0c9c49b5f68525d329c62f0aa7067678bbd0b440c35"
-   },
-   {
-    "name": "timesfm",
-    "request": "按地区拆分销量",
-    "sha256": "893864b7f2affc0a1a4b6bdef1ea2663baf72739b852c66cfe68c9552b8a56f8"
-   },
-   {
     "name": "tree",
     "request": "",
     "sha256": "9093c8a8ac89e748e914cf6a01bac2624e927feef39ce4ad5bd2d663cdf219b8"
@@ -1638,15 +1592,6 @@
      "display_diagram",
      "edit_diagram",
      "get_diagram"
-    ]
-   },
-   {
-    "name": "timesfm",
-    "requested_tools": [
-     "generate_chart",
-     "get_schema",
-     "query_data",
-     "run_analysis"
     ]
    },
    {
