@@ -133,7 +133,14 @@ const INGEST_HINT_RE = pyRegex(
     String.raw`table|dataset|csv|json|pdf)`,
   true,
 )
-const CHART_INTENT_RE = pyRegex(String.raw`(chart|plot|visuali[sz]|dashboard|图表|可视化|画图|绘图|看板)`, true)
+// 中文里「柱状图 / 折线图 / 饼图」这类具体图名不带「图表」二字，原实现漏掉了它们，
+// 结果 query_data 之后不把画图工具交给模型。英文的 bar/line/pie chart 已由 chart 覆盖。
+const CHART_INTENT_RE = pyRegex(
+  String.raw`(chart|plot|visuali[sz]|dashboard|histogram|heatmap|treemap|sankey|图表|可视化|画图|绘图|看板|` +
+    String.raw`柱状图|条形图|折线图|曲线图|饼图|环形图|散点图|气泡图|面积图|` +
+    String.raw`雷达图|热力图|箱线图|直方图|桑基图|瀑布图|甘特图)`,
+  true,
+)
 const NON_BUSINESS_KNOWLEDGE_RE = pyRegex(
   String.raw`^\s*(?:你是谁|你叫什么|介绍(?:一下)?你自己|who\s+are\s+you|what(?:'s| is)\s+your\s+name|` +
     String.raw`你好|您好|hello|hi|谢谢|thanks?|help|帮助)\s*[？?!！。.]*\s*$`,
