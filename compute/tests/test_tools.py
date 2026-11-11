@@ -10,6 +10,7 @@ import csv
 import itertools
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -244,11 +245,13 @@ class BaselineParityTest(ToolsTestBase):
             result = self.client.result(f"tool.{tool}", {"context": context, "args": args})
             label = f"{recording['scenario']} call {index} {tool}"
             actual = self.normalize(result["text"])
+            wanted = expected["text"]
             if recording["scenario"] in FIT_DEPENDENT_SCENARIOS:
-                actual, wanted = _round_decimals(actual), _round_decimals(expected["text"])
+                # 数字允许最后一位的 1 个单位；其余文字与结构仍逐字一致，差异大时才给出完整 diff。
+                if not _matches_with_numeric_tolerance(actual, wanted):
+                    self.assertEqual(actual, wanted, label)
             else:
-                wanted = expected["text"]
-            self.assertEqual(actual, wanted, label)
+                self.assertEqual(actual, wanted, label)
             if "refs" in expected:
                 self.assertEqual(self.normalize(result["refs"]), expected["refs"], label)
             for produced in result["files"]:
@@ -263,15 +266,21 @@ class BaselineParityTest(ToolsTestBase):
             compared[tool] += 1
 
 
-# 拟合出来的模型（auto_arima）：最后一两位小数随 pmdarima / statsmodels / numpy 的版本浮动，录制时的版本与 CI 不同。
-# 这些场景只比较到两位小数，其余数字、文字与结构仍须逐字一致。
+# 拟合出来的模型（auto_arima）：末位小数随 pmdarima / statsmodels / numpy 的版本和 BLAS 归约顺序浮动，
+# 录制环境与 CI 不同；已经格式化到两位小数的值也会在舍入边界翻转（1052.69 对 1052.70）。
+# 这些场景的数字按最后一位的 1 个单位（±0.011）比较，文字、结构与数字个数仍须逐字一致。
 FIT_DEPENDENT_SCENARIOS = {"analysis_arima"}
+NUMERIC_TOLERANCE = 0.011
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 
 
-def _round_decimals(text: str) -> str:
-    import re
-
-    return re.sub(r"-?\d+\.\d{3,}", lambda m: f"{float(m.group()):.2f}", text)
+def _matches_with_numeric_tolerance(actual: str, wanted: str) -> bool:
+    if _NUMBER.split(actual) != _NUMBER.split(wanted):
+        return False
+    left, right = _NUMBER.findall(actual), _NUMBER.findall(wanted)
+    if len(left) != len(right):
+        return False
+    return all(abs(float(a) - float(w)) <= NUMERIC_TOLERANCE for a, w in zip(left, right))
 
 
 def _daily_rows(count: int) -> list[dict]:
