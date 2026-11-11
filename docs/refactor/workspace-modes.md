@@ -157,6 +157,7 @@
 |---|---|---|
 | S1 server | 注册表、`workspace.*` 全局化、`conversation.create/moveToWorkspace`、scope、迁移、上下文补发、说明并入提示 | `bun test` 覆盖：创建、移入、迁移去重、目录消失报错、compute 上下文含根目录；工作区对话导出落 `artifacts/`；两种范围都能 `source.open` SQL |
 | S2 desktop | 新建对话的范围选择、侧栏分组、范围标签、New workspace 对话框 | 已完成：范围选择在输入框底栏的芯片菜单里（不占首页版面）；`ui.NewTester` 覆盖选择器、创建后带 scope、按工作区分组、对话框创建；实机启动确认入口渲染 |
+| S3 设置 | `workspace.update`、`workspace.sync`、`workspace.remove` 的界面：侧栏右键与数据面板齿轮打开，改名/说明、刷新共享来源、二次确认移除 | 已完成 |
 | S3 文件树 | `workspace.tree`、`workspace.pending`、`workspace.importFiles`、`workspace.readFile`、桌面端文件树面板与「Changes」页签 | 已完成：懒加载展开、折叠单链目录、导入状态徽标（`?` / `!` / 表格图标）、目录待导入圆点、Changes 一键导入、点文件预览（已导入的数据文件看表，其它读开头 256 KiB 文本）。树用 `ui.Outline`，扫描上限 2000 个文件 |
 | S4 | 共享来源、设置页、刷新 | 两个对话共享同一工作区来源；刷新只重导变化的文件 |
 | S5 | 飞书机器人可选默认工作区；工作流可选工作区 | 另行评估 |

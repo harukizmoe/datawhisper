@@ -113,6 +113,30 @@ func (c *Client) CreateWorkspace(ctx context.Context, path, name, instructions s
 	return out, err
 }
 
+// UpdateWorkspace 改工作区的名字或说明；为 nil 的字段不动。conversationID 非 0 时顺带把本对话里共享来源的显示名改掉。
+func (c *Client) UpdateWorkspace(ctx context.Context, conversationID int, workspaceID string, name, instructions *string) (WorkspaceList, error) {
+	params := map[string]any{"workspaceId": workspaceID}
+	if conversationID > 0 {
+		params["conversationId"] = conversationID
+	}
+	if name != nil {
+		params["name"] = *name
+	}
+	if instructions != nil {
+		params["instructions"] = *instructions
+	}
+	var out WorkspaceList
+	err := c.callInto(ctx, "workspace.update", params, &out)
+	return out, err
+}
+
+// SyncWorkspace 重新导入工作区目录里新增或变化的数据文件。
+func (c *Client) SyncWorkspace(ctx context.Context, workspaceID string) (WorkspaceMount, error) {
+	var out WorkspaceMount
+	err := c.callInto(ctx, "workspace.sync", map[string]any{"workspaceId": workspaceID}, &out)
+	return out, err
+}
+
 // MoveToWorkspace 把普通聊天移入工作区；对话已经在工作区里时服务端拒绝。
 func (c *Client) MoveToWorkspace(ctx context.Context, conversationID int, workspaceID string) ([]Source, error) {
 	var out struct {

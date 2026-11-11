@@ -903,6 +903,7 @@ func formatDuration(ms int64) string {
 // chatModals 画聊天页的弹窗（标题重命名）。
 func (a *app) chatModals(c *ui.Context) {
 	a.workspaceDialogView(c)
+	a.workspaceSettingsView(c)
 	if !a.cv.renaming {
 		return
 	}

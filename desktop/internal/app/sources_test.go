@@ -528,6 +528,54 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"path": treeParams.Path, "entries": entries, "truncated": false, "total": len(entries)})
 
+		case "workspace.update":
+			f.record(req.Method, req.Params)
+			var updateParams struct {
+				WorkspaceID  string `json:"workspaceId"`
+				Name         string `json:"name"`
+				Instructions string `json:"instructions"`
+			}
+			_ = json.Unmarshal(req.Params, &updateParams)
+			f.mu.Lock()
+			updated := service.Workspace{}
+			for i := range f.work {
+				if f.work[i].WorkspaceID == updateParams.WorkspaceID {
+					f.work[i].Name = updateParams.Name
+					f.work[i].Instructions = updateParams.Instructions
+					updated = f.work[i]
+				}
+			}
+			if f.current != nil && f.current.WorkspaceID == updateParams.WorkspaceID {
+				f.current.Name, f.current.Instructions = updateParams.Name, updateParams.Instructions
+				updated = *f.current
+			}
+			list := append([]service.Workspace{}, f.work...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "workspace": updated, "workspaces": list})
+
+		case "workspace.sync":
+			f.record(req.Method, req.Params)
+			var syncParams struct {
+				WorkspaceID string `json:"workspaceId"`
+			}
+			_ = json.Unmarshal(req.Params, &syncParams)
+			f.mu.Lock()
+			current := f.current
+			f.mu.Unlock()
+			if current == nil {
+				fail(req.ID, map[string]any{"code": -32000, "message": "no workspace", "data": map[string]any{"kind": "not_found"}})
+				continue
+			}
+			respond(req.ID, map[string]any{
+				"ok":        true,
+				"workspace": current,
+				"tables":    []string{"q3"},
+				"added":     []any{map[string]any{"source_name": current.Name, "tables": []string{"q4"}}},
+				"errors":    []string{},
+				"skipped":   1,
+				"reused":    2,
+			})
+
 		case "workspace.readFile":
 			f.record(req.Method, req.Params)
 			var readParams struct {
@@ -1806,6 +1854,63 @@ func TestModelChosenOnTheNewChatPageIsUsedToCreateTheConversation(t *testing.T) 
 	q.pump(t, tt, "the new conversation", func() bool { return a.conv == 3 })
 	if a.cv.modelsErr != "" || a.cv.draftModel != nil {
 		t.Errorf("stale model state after the conversation was created: err=%q draft=%v", a.cv.modelsErr, a.cv.draftModel)
+	}
+}
+
+// 工作区设置：改名保存、刷新共享来源、移除（二次确认后从列表里消失，目录不动）。
+func TestWorkspaceSettingsRenameRefreshAndRemove(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true, SyncedAt: "2026-11-01T09:00:00Z"}
+	f.work = []service.Workspace{*f.current}
+	seedTree(f)
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+
+	if err := tt.Click("Workspace settings"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.wsSet.open || a.wsSet.name != "sales" {
+		t.Fatalf("settings dialog: open=%v name=%q", a.wsSet.open, a.wsSet.name)
+	}
+	a.wsSet.name = "sales-2026"
+	a.wsSet.instructions = "Answer in Chinese."
+	q.run()
+	tt.Frame()
+	if err := tt.Click("Save"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the update call", func() bool { return f.call("workspace.update") != nil })
+	params := f.call("workspace.update")
+	if params["name"] != "sales-2026" || params["instructions"] != "Answer in Chinese." {
+		t.Errorf("workspace.update params: %v", params)
+	}
+	q.pump(t, tt, "the saved name", func() bool { return len(a.ws.list) == 1 && a.ws.list[0].Name == "sales-2026" })
+
+	if err := tt.Click("Refresh files"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the sync call", func() bool { return f.call("workspace.sync") != nil })
+	q.pump(t, tt, "the sync notice", func() bool { return a.wsSet.notice != "" })
+	expectTexts(t, tt, []string{"Imported 1 table(s), skipped 1."}, nil)
+
+	if err := tt.Click("Remove workspace"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.wsSet.confirmOpen {
+		t.Fatal("removing a workspace did not ask for confirmation")
+	}
+	a.removeWorkspaceFromSettings()
+	q.pump(t, tt, "the removed workspace", func() bool { return len(a.ws.list) == 0 })
+	if a.wsSet.open {
+		t.Error("the settings dialog stayed open after the workspace was removed")
+	}
+	if a.ft.workspaceID != "" {
+		t.Errorf("the file tree still points at the removed workspace: %q", a.ft.workspaceID)
 	}
 }
 
