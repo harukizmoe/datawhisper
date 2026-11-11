@@ -149,6 +149,10 @@ func (a *app) sourceCard(c *ui.Context, t *ui.Theme, src service.Source) {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, src.Name).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(src.Name)
 			ui.Badge(c, src.Kind)
+			// 连接配置是全应用共享的：别的会话里也能看到它，默认不启用。
+			if src.ConfigID != "" {
+				ui.Badge(c, a.tr("data.shared")).Tooltip(a.tr("data.sharedTip"))
+			}
 		})
 		state := a.tr("data.stateClosed")
 		if src.Open {
