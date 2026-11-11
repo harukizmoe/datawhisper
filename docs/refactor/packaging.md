@@ -89,8 +89,13 @@ PyInstaller 不能交叉编译，所以 Windows 包必须在 Windows 上出；ma
 - `.github/workflows/ci.yml`：`server`（`bun install --frozen-lockfile`、`tsc --noEmit`、`timeout 900 bun test --timeout 60000`）、
   `compute`（Python 3.11 + `requirements.txt`，`timeout 1800 python -m unittest compute.tests.test_{rpc,tools,ui_methods}`）、
   `desktop`（`gofmt -l`、`go vet`、`xvfb-run go test -race`）。
-- `.github/workflows/package.yml`：`ubuntu-latest` / `windows-latest` / `macos-latest` 三个 runner 各出本平台包，
-  上传 `desktop/build/<os>-<arch>/` 的安装包；macOS 有 secret 才签名，否则 `-skip-notarize`。
+- `.github/workflows/build-release.yml`：发布用。目前只出 **Linux x64**（`ubuntu-latest`）：建 `.venv` 装
+  `compute/requirements.txt` 与 PyInstaller，`bun install`，然后跑 `scripts/build/build-app.sh`；打包后校验
+  安装包里同时有 `bin/datawhisper-server`、`bin/datawhisper-compute` 与 `static/vendor/*`，并让两个可执行文件
+  各起一次（服务打印 `ready` 行，compute 回一条 `ping`），最后算 `SHA256SUMS` 并建 GitHub Release。
+  推 `v*` 标签直接发布；手动 dispatch 先出 draft。版本取自标签或输入，必须与 `desktop/mygo.json` 的
+  `version` 一致，否则失败（避免包名与标签对不上）。
+- Windows / macOS 的安装包还没接进 `build-release.yml`：那一步要在对应系统上验证，见「已知限制」。
 - 两个工作流都不访问模型 API，也不需要 API key；compute 的测试只读 `baseline/` 里的录制品。
 
 ## 已知限制

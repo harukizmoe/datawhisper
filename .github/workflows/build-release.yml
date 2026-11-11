@@ -1,12 +1,19 @@
 name: Build desktop release
 
+# 发布 Linux 安装包：Go+MyGo 桌面外壳、Bun 服务、PyInstaller 打包的 compute 三件套，
+# 由 scripts/build/build-app.sh 串起来（与本地手工打包完全同一条路径）。
+#
+# 触发：
+#   - 推 v* 标签：用标签名当版本，与 desktop/mygo.json 的 version 必须一致，直接建 Release。
+#   - 手动 dispatch：填 version（可选），产物先挂成 draft，确认后再手动发布。
+
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Package version without v prefix, for example 1.0.0"
+        description: "Package version without v prefix, for example 0.1.0 (default: desktop/mygo.json)"
         required: false
-        default: "1.4.0"
+        default: ""
   push:
     tags:
       - "v*"
@@ -20,202 +27,110 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
+  BUN_VERSION: "1.4.4"
+  PYINSTALLER_VERSION: "6.22.3"
 
 jobs:
-  test:
-    name: Test (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            name: Windows x64
-          - os: macos-15
-            name: macOS Apple Silicon
-          - os: macos-15-intel
-            name: macOS Intel x64
+  build-linux:
+    name: Build Linux packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements/*.txt
-      - name: Install dependencies
-        shell: bash
+          cache-dependency-path: compute/requirements.txt
+      - name: Install packaging tools
+        # mygo 用 purego 在运行期加载 GTK/WebKitGTK（不参与编译），但 deb 的依赖声明与冒烟测试要用到它们。
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.lock.txt ]; then
-            python -m pip install -r requirements.lock.txt
-          else
-            python -m pip install -r requirements.txt
-          fi
-          python -m pip install -r requirements/build.txt
-          python -m pip install -r requirements/test.txt
-      - name: Compile runtime sources
-        shell: bash
-        run: python -m compileall -q agent api data app.py
-      - name: Test application features
-        shell: bash
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libwebkit2gtk-4.1-0 xvfb dbus-x11 fakeroot dpkg-dev
+      - name: Install server dependencies
+        working-directory: server
+        run: bun install --frozen-lockfile
+      - name: Create the compute virtualenv
+        # build-app.sh 与 bundle-compute.sh 默认用仓库根的 .venv；PyInstaller 只是打包期工具，不入 requirements。
         run: |
-          python scripts/generate_tool_inventory.py --check
-          python -m unittest discover -s tests -v
-          python -m pytest Function/Charts_generation/tests -q
-
-  build-windows:
-    name: Build Windows installer
-    needs: test
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.7.0
-          run_install: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-      - name: Build frontend bundle
-        shell: bash
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r compute/requirements.txt
+          .venv/bin/python -m pip install "pyinstaller==${{ env.PYINSTALLER_VERSION }}"
+      - name: Resolve the version
         run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements/*.txt
-      - name: Resolve package version
-        shell: pwsh
-        run: |
-          $version = "${{ github.event.inputs.version || '' }}"
-          if (-not $version) {
-            $version = "${{ github.ref_name }}" -replace '^v', ''
-          }
-          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
-            throw "Invalid package version: $version"
-          }
-          "PACKAGE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Install dependencies
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          # Install CPU-only torch to avoid CUDA wheels (~2 GB).
-          # The +cpu index is only needed on Windows; on macOS torch is CPU-only by default.
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          if (Test-Path -LiteralPath requirements.lock.txt) {
-            python -m pip install -r requirements.lock.txt
-          } else {
-            python -m pip install -r requirements.txt
-          }
-          python -m pip install -r requirements/build.txt
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-      - name: Build audited Windows installer
-        shell: pwsh
-        run: pwsh -File packaging/build_windows.ps1 -Version $env:PACKAGE_VERSION
-      - name: Upload Windows package and reports
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-x64-package
-          if-no-files-found: error
-          retention-days: 7
-          path: |
-            build/w/installer/BusinessAnalyticsAgent-Windows-x64.exe
-            build/w/reports/*.json
-
-  build-macos:
-    name: Build macOS DMG (${{ matrix.name }})
-    needs: test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            name: Apple Silicon
-            uname: arm64
-            artifact: macos-arm64-package
-          - os: macos-15-intel
-            name: Intel x64
-            uname: x86_64
-            artifact: macos-x64-package
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.7.0
-          run_install: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-      - name: Build frontend bundle
-        shell: bash
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements/*.txt
-      - name: Install macOS ODBC runtime
-        shell: bash
-        run: |
-          actual_arch="$(uname -m)"
-          test "$actual_arch" = "${{ matrix.uname }}"
-          brew install unixodbc
-          test -f "$(brew --prefix unixodbc)/lib/libodbc.2.dylib"
-      - name: Resolve package version
-        shell: bash
-        run: |
+          packaged="$(python -c 'import json;print(json.load(open("desktop/mygo.json"))["version"])')"
           version="${{ github.event.inputs.version || '' }}"
           if [ -z "$version" ]; then
             version="${GITHUB_REF_NAME#v}"
           fi
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+          if [ -z "$version" ] || [ "$version" = "main" ]; then
+            version="$packaged"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
             echo "Invalid package version: $version" >&2
             exit 2
           fi
-          echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
-      - name: Install dependencies
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          # macOS torch wheels are CPU-only by default; no special index needed.
-          if [ -f requirements.lock.txt ]; then
-            python -m pip install -r requirements.lock.txt
-          else
-            python -m pip install -r requirements.txt
+          if [ "$version" != "$packaged" ]; then
+            echo "Version $version does not match desktop/mygo.json ($packaged); bump it in the same commit as the tag." >&2
+            exit 2
           fi
-          python -m pip install -r requirements/build.txt
-          python -c "import pyodbc; print('pyodbc:', pyodbc.version)"
-      - name: Build audited macOS DMG
-        shell: bash
-        run: bash packaging/build_macos.sh --version "$PACKAGE_VERSION"
-      - name: Upload macOS package and reports
+          echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+            echo "DRAFT_FLAG=" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+            echo "DRAFT_FLAG=--draft" >> "$GITHUB_ENV"
+          fi
+      - name: Build the app and its installers
+        run: scripts/build/build-app.sh
+      - name: Verify the bundle
+        # 安装包里必须同时有服务与 compute 两个可执行文件，图表库也要在；服务与 compute 各自能起来。
+        run: |
+          set -euo pipefail
+          res=desktop/resources/linux-amd64
+          for f in "$res/bin/datawhisper-server" "$res/bin/datawhisper-compute" \
+                   "$res/static/vendor/plotly.min.js" "$res/static/vendor/echarts.min.js"; do
+            test -s "$f" || { echo "missing from the bundle: $f" >&2; exit 2; }
+          done
+          test -n "$(find desktop/build -maxdepth 2 -name '*.deb' -print -quit)" || {
+            echo "no .deb was produced" >&2
+            exit 2
+          }
+          tmp="$(mktemp -d)"
+          # 服务：stdout 第一行是 ready 记录，读到 EOF 就优雅退出。
+          head -1 < <(DW_DATA_DIR="$tmp" "$res/bin/datawhisper-server" < /dev/null) | tee /dev/stderr | grep -q '"type":"ready"'
+          # compute：发一条 ping 走完整的 JSON-RPC 通路。
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' \
+            | timeout 60 "$res/bin/datawhisper-compute" | grep -q '"id":1'
+      - name: Checksums
+        run: |
+          cd desktop/build/linux-amd64
+          sha256sum ./*.deb ./*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload Linux packages
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
+          name: linux-x64-package
           if-no-files-found: error
           retention-days: 7
           path: |
-            build/macos-package/dmg/BusinessAnalyticsAgent-macOS-*.dmg
-            build/macos-package/reports/*.json
+            desktop/build/linux-amd64/*.deb
+            desktop/build/linux-amd64/*.tar.gz
+            desktop/build/linux-amd64/SHA256SUMS
 
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos]
+    needs: [build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -224,90 +139,57 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: release-artifacts
-      - name: Resolve release tag
-        shell: bash
+      - name: Resolve the release tag
         run: |
-          # dispatch 输入 "1.0.0" → 拼 "v1.0.0";tag push 直接用 ref_name
           version="${{ github.event.inputs.version || '' }}"
-          if [ -n "$version" ]; then
-            tag="v${version#v}"
-            draft_flag="--draft"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$version" ] || [ "$version" = "main" ]; then
+            version="$(python3 -c 'import json;print(json.load(open("desktop/mygo.json"))["version"])')"
+          fi
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "DRAFT_FLAG=" >> "$GITHUB_ENV"
           else
-            tag="${GITHUB_REF_NAME}"
-            draft_flag=""
+            echo "DRAFT_FLAG=--draft" >> "$GITHUB_ENV"
           fi
-          if [ -z "$tag" ] || [ "$tag" = "main" ]; then
-            echo "Cannot resolve release tag (tag='$tag')" >&2
-            exit 2
-          fi
-          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
-          echo "DRAFT_FLAG=$draft_flag" >> "$GITHUB_ENV"
-      - name: Verify release artifact boundary
-        shell: bash
+      - name: Collect assets
         run: |
+          set -euo pipefail
           find release-artifacts -type f | sort
-          forbidden="$(find release-artifacts -type f \( \
-            -path '*/staging/*' -o \
-            -path '*/pyinstaller-dist/*' -o \
-            -path '*/pyinstaller-work/*' -o \
-            -path '*/dmg-root/*' -o \
-            -path '*/MCP/*' -o \
-            -path '*/uploads/*' -o \
-            -path '*/outputs/*' -o \
-            -name '*.log' -o \
-            -name '*.p12' -o \
-            -name '*.pfx' -o \
-            -name '*.mobileprovision' \
-          \) -print)"
-          if [ -n "$forbidden" ]; then
-            echo "$forbidden" >&2
-            exit 2
-          fi
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          rm -rf release-upload
           mkdir -p release-upload
           while IFS= read -r file; do
-            base="$(basename "$file")"
-            case "$base" in
-              *.exe|*.dmg)
-                dest="release-upload/$base"
-                ;;
-              *)
-                continue
-                ;;
-            esac
-            if [ -e "$dest" ]; then
-              echo "Duplicate release asset name after normalization: $(basename "$dest")" >&2
-              echo "Source: $file" >&2
-              exit 2
-            fi
-            cp "$file" "$dest"
-          done < <(find release-artifacts -type f \( -name '*.exe' -o -name '*.dmg' \) | sort)
-
-          mapfile -t files < <(find release-upload -type f \( -name '*.exe' -o -name '*.dmg' \) | sort)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "No release files found." >&2
-            exit 2
-          fi
-          notes="Unsigned Business Analytics Agent desktop test packages. Do not treat these artifacts as signed or notarized releases."
+            cp "$file" "release-upload/$(basename "$file")"
+          done < <(find release-artifacts -type f \( -name '*.deb' -o -name '*.tar.gz' -o -name 'SHA256SUMS' \) | sort)
+          test -n "$(ls -A release-upload)" || { echo "no release assets" >&2; exit 2; }
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          {
+            echo "本机单用户桌面数据分析应用。安装包含桌面外壳、agent 服务与计算进程，不依赖外网服务。"
+            echo
+            echo "更新说明见仓库的 CHANGELOG.md。"
+            echo
+            echo '```'
+            cat release-upload/SHA256SUMS
+            echo '```'
+          } > "$notes"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" \
-              --title "$RELEASE_TAG" \
-              --notes "$notes"
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$notes"
             while IFS= read -r asset; do
               case "$asset" in
-                *.exe|*.dmg) ;;
+                *.deb|*.tar.gz|SHA256SUMS) ;;
                 *) gh release delete-asset "$RELEASE_TAG" "$asset" -y ;;
               esac
             done < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
-            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+            gh release upload "$RELEASE_TAG" release-upload/* --clobber
           else
-            gh release create "$RELEASE_TAG" "${files[@]}" $DRAFT_FLAG \
+            gh release create "$RELEASE_TAG" release-upload/* $DRAFT_FLAG \
               --title "$RELEASE_TAG" \
               --target ${{ github.sha }} \
-              --notes "$notes"
+              --notes-file "$notes"
           fi

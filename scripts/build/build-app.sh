@@ -15,7 +15,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MYGO=(go run github.com/egoist/mygo/cmd/mygo@v0.7.4)
+# mygo 的版本由 desktop/go.mod 固定（v0.7.4）。在 desktop 模块里 `go run` 取它，比 `@v0.7.4` 少一次
+# 模块代理往返：离线、代理抖动时也能打包。
+MYGO_DIR="$ROOT/desktop"
+MYGO=(go run github.com/egoist/mygo/cmd/mygo)
 
 PLATFORM=""
 MYGO_ARGS=()
@@ -81,7 +84,7 @@ if [[ -n "${DW_SIGN_IDENTITY:-}" ]]; then
 fi
 BUILD_ARGS+=("${MYGO_ARGS[@]}")
 
-cd "$ROOT"
+cd "$MYGO_DIR"
 "${MYGO[@]}" "${BUILD_ARGS[@]}"
 
 echo "==> artifacts"
