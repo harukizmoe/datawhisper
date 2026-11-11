@@ -115,3 +115,17 @@ describe('temp prompt', () => {
     test(`section ${label}`, () => expect(buildTempPromptSection(c.input)).toBe(c.section))
   }
 })
+
+describe('chart intent covers concrete chart names', () => {
+  // 中文里说「画个柱状图」时消息里没有「图表」二字：这些具体图名也必须算画图意图，
+  // 否则 query_data 之后画图工具不会被交给模型。
+  test.each(['柱状图', '折线图', '饼图', '散点图', '热力图', '直方图', '用柱状图看月度销售'])('zh: %s', (message) => {
+    expect(messageNeedsChartRules(message)).toBe(true)
+  })
+  test.each(['bar chart', 'pie chart', 'line chart', 'a histogram of revenue'])('en: %s', (message) => {
+    expect(messageNeedsChartRules(message)).toBe(true)
+  })
+  test('plain data questions stay false', () => {
+    expect(messageNeedsChartRules('哪些地区增长最快')).toBe(false)
+  })
+})

@@ -3767,7 +3767,7 @@
    "hooks": false,
    "browser": false,
    "ingest": false,
-   "chart": false,
+   "chart": true,
    "diagram": false,
    "diagramWithCanvas": true,
    "knowledge": false
@@ -3779,7 +3779,7 @@
    "hooks": false,
    "browser": false,
    "ingest": false,
-   "chart": false,
+   "chart": true,
    "diagram": false,
    "diagramWithCanvas": true,
    "knowledge": false
@@ -3791,7 +3791,7 @@
    "hooks": false,
    "browser": false,
    "ingest": false,
-   "chart": false,
+   "chart": true,
    "diagram": false,
    "diagramWithCanvas": true,
    "knowledge": false
