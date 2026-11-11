@@ -364,7 +364,12 @@ func (c *Client) SetAnalysisTables(ctx context.Context, conversationID int, sour
 // Workspaces 读取全部工作区记录；带 conversationID 时 Workspace 是该对话所属的那一个。
 func (c *Client) Workspaces(ctx context.Context, conversationID int) (WorkspaceView, error) {
 	var out WorkspaceView
-	err := c.callInto(ctx, "workspace.list", conversationIDParams(conversationID), &out)
+	// 还没有对话（首页）时不带 conversationId：服务端把它当作「不看当前对话」，传 0 会被当成非法参数。
+	var params map[string]any
+	if conversationID > 0 {
+		params = conversationIDParams(conversationID)
+	}
+	err := c.callInto(ctx, "workspace.list", params, &out)
 	return out, err
 }
 

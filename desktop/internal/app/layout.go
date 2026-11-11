@@ -77,14 +77,13 @@ func (a *app) sidebar(c *ui.Context) {
 			ui.Icon(c, icons.Sparkles).TextColor(t.Accent)
 			ui.Text(c, "DataWhisper").Bold().FontSize(a.fs(textSection)).SingleLine()
 		})
-		ui.Row(c).Gap(6).Children(func() {
-			if iconTextButton(c, icons.Plus, a.tr("sidebar.newChat")).Grow(1).Clicked() {
-				a.newChat()
-			}
-			if iconTextButton(c, icons.FolderOpen, a.tr("ws.new")).Tooltip(a.tr("ws.newTip")).Shrink(0).Clicked() {
-				a.openWorkspaceDialog("")
-			}
-		})
+		// 侧栏只有 248 宽，放不下两个带文字的按钮：这里只留「New chat」；新建工作区在首页的范围选择器与数据面板里。
+		if iconTextButton(c, icons.Plus, a.tr("sidebar.newChat")).Clicked() {
+			a.newChat()
+		}
+		if a.ws.err != "" {
+			ui.Text(c, a.ws.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
+		}
 		ui.SearchField(c, &a.sideSearch).Label(a.tr("sidebar.search")).Placeholder(a.tr("sidebar.search"))
 		a.maybeSearch(c)
 		groups := a.sessionGroups(c.Now())

@@ -493,6 +493,15 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 
 		case "workspace.list":
 			f.record(req.Method, req.Params)
+			// 与真实服务一致：带了 conversationId 就必须是正整数（首页没有对话，客户端得省略它）。
+			var listParams struct {
+				ConversationID *int `json:"conversationId"`
+			}
+			_ = json.Unmarshal(req.Params, &listParams)
+			if listParams.ConversationID != nil && *listParams.ConversationID < 1 {
+				fail(req.ID, map[string]any{"code": -32602, "message": "'conversationId' must be a positive integer"})
+				continue
+			}
 			f.mu.Lock()
 			view := map[string]any{
 				"workspace":  f.current,
@@ -1435,7 +1444,7 @@ func TestNewChatGoesIntoTheChosenWorkspace(t *testing.T) {
 	a.setNewScope("ws_0000000000000001")
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"New chat in"}, nil)
+	expectTexts(t, tt, []string{"sales"}, nil)
 
 	a.input = "hello"
 	a.send()
@@ -1449,9 +1458,14 @@ func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
 	f := newSourceFake(t)
 	dir := t.TempDir()
 	a, q, tt := openChat(t, f)
+	a.newChat() // 「New workspace…」在输入框底栏范围芯片的菜单里
 	q.run()
 	tt.Frame()
-	if err := tt.Click("New workspace"); err != nil {
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("New workspace…"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
@@ -1473,4 +1487,19 @@ func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
 	if a.newScope() != "ws_0000000000000001" {
 		t.Errorf("the new workspace became the next chat's scope: %q", a.newScope())
 	}
+}
+
+func TestHomeScreenGroupsWorkspaceChatsWithoutAnOpenConversation(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, 1400, 1000)
+	// 刚启动：还没有打开任何对话（conv == 0），侧栏分组和范围选择器照样要有数据。
+	a.onService(f.ready(61))
+	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 && len(a.ws.list) == 1 })
+	if a.ws.err != "" {
+		t.Errorf("workspace index error: %s", a.ws.err)
+	}
+	expectTexts(t, tt, []string{"📁 sales", "in the workspace", "plain chat"}, nil)
 }

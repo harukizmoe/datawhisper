@@ -113,17 +113,6 @@ func (c *Client) CreateWorkspace(ctx context.Context, path, name, instructions s
 	return out, err
 }
 
-// UpdateWorkspace 改工作区的名称或说明；只传要改的字段，说明传空串表示清空。
-func (c *Client) UpdateWorkspace(ctx context.Context, workspaceID, name, instructions string) (WorkspaceList, error) {
-	params := map[string]any{"workspaceId": workspaceID, "instructions": instructions}
-	if name != "" {
-		params["name"] = name
-	}
-	var out WorkspaceList
-	err := c.callInto(ctx, "workspace.update", params, &out)
-	return out, err
-}
-
 // MoveToWorkspace 把普通聊天移入工作区；对话已经在工作区里时服务端拒绝。
 func (c *Client) MoveToWorkspace(ctx context.Context, conversationID int, workspaceID string) ([]Source, error) {
 	var out struct {

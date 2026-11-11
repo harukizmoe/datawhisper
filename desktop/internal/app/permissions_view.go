@@ -41,7 +41,7 @@ func (a *app) permissionCard(c *ui.Context, request service.PermissionRequest) {
 	t := c.Theme()
 	tok := a.tokens().Tok
 	busy := a.perm.busy[request.RequestID]
-	ui.Column(c).MaxWidth(600).Padding(14, 16).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(t.Warning.Alpha(0.6)).Gap(8).Children(func() {
+	ui.Column(c).Padding(14, 16).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(t.Warning.Alpha(0.6)).Gap(8).Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icons.Info).TextColor(t.Warning)
 			ui.Text(c, a.tr("perm.title")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)

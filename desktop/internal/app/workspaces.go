@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"datawhisper/desktop/internal/icons"
 	"datawhisper/desktop/internal/service"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -20,7 +19,6 @@ type workspaceIndex struct {
 	list   []service.Workspace
 	scopes map[int]string
 	err    string
-	loaded bool
 }
 
 // workspaceDialog 是「New workspace」对话框的状态。
@@ -88,7 +86,7 @@ func (a *app) loadWorkspaces() {
 				a.ws.err = a.sourceErr(scopesErr)
 				return
 			}
-			a.ws.list, a.ws.loaded, a.ws.err = list.Workspaces, true, ""
+			a.ws.list, a.ws.err = list.Workspaces, ""
 			a.ws.scopes = make(map[int]string, len(scopes))
 			for _, entry := range scopes {
 				a.ws.scopes[entry.ConversationID] = entry.WorkspaceID
@@ -165,35 +163,6 @@ func (a *app) createWorkspace() {
 	}()
 }
 
-// renameWorkspace 改工作区名称；空名称由服务端拒绝。
-func (a *app) renameWorkspace(workspaceID, name string) {
-	client := a.client
-	if client == nil || name == "" {
-		return
-	}
-	record := a.workspaceByID(workspaceID)
-	if record == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_, err := client.UpdateWorkspace(ctx, workspaceID, name, record.Instructions)
-		a.post(func() {
-			if client != a.client {
-				return
-			}
-			if err != nil {
-				a.ws.err = a.sourceErr(err)
-				return
-			}
-			a.ws.err = ""
-			a.loadWorkspaces()
-			a.loadSources()
-		})
-	}()
-}
-
 // moveCurrentToWorkspace 把当前普通聊天移入工作区，并刷新侧栏与权限状态。
 func (a *app) moveCurrentToWorkspace(workspaceID string) {
 	client, conv := a.client, a.conv
@@ -260,54 +229,38 @@ func (a *app) workspaceGroups(now time.Time) []sessionGroup {
 	return out
 }
 
-// scopeOptions 是新对话选择器里的选项：第一个是普通聊天，其余是工作区。
-func (a *app) scopeOptions() []string {
-	options := []string{a.tr("ws.scopeChat")}
-	for i := range a.ws.list {
-		options = append(options, "📁 "+a.ws.list[i].Name)
+// scopeChip 是输入框底栏里的范围芯片：还没有对话时选下一条对话属于普通聊天还是某个工作区；已有的普通
+// 聊天里把它移入工作区（单向）。已经属于工作区的对话不画它——工作区名在标题栏，模式芯片管权限。
+func (a *app) scopeChip(c *ui.Context) {
+	label := a.tr("ws.scopeChat")
+	current := a.newScope()
+	if a.conv == 0 && current != "" {
+		label = a.workspaceName(current)
 	}
-	return options
-}
-
-// scopeChoice 把选择器的标签翻回工作区 id（第一个选项是普通聊天）。
-func (a *app) scopeChoice(label string) string {
-	options := a.scopeOptions()
-	for i, option := range options {
-		if option != label {
-			continue
+	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
+		if a.conv == 0 {
+			if m.Item(a.tr("ws.scopeChat")).Radio(current == "").Chosen() {
+				a.setNewScope("")
+			}
+			for i := range a.ws.list {
+				if m.Item(a.ws.list[i].Name).Radio(a.ws.list[i].WorkspaceID == current).Chosen() {
+					a.setNewScope(a.ws.list[i].WorkspaceID)
+				}
+			}
+			m.Separator()
+			if m.Item(a.tr("ws.newItem")).Chosen() {
+				a.openWorkspaceDialog("")
+			}
+			return
 		}
-		if i == 0 {
-			return ""
-		}
-		return a.ws.list[i-1].WorkspaceID
-	}
-	return ""
-}
-
-// scopeLabel 是当前选择在工作区列表里的标签。
-func (a *app) scopeLabel() string {
-	if workspaceID := a.newScope(); workspaceID != "" {
-		if record := a.workspaceByID(workspaceID); record != nil {
-			return "📁 " + record.Name
-		}
-	}
-	return a.tr("ws.scopeChat")
-}
-
-// scopePicker 是新对话首页上的范围选择：普通聊天，或某个工作区。
-func (a *app) scopePicker(c *ui.Context) {
-	options := a.scopeOptions()
-	choice := a.scopeLabel()
-	row := ui.Row(c).Gap(6).AlignItems(ui.Center)
-	row.Children(func() {
-		ui.Text(c, a.tr("ws.newIn")).FontSize(a.fs(textCaption)).TextColor(c.Theme().TextMuted)
-		if ui.Select(c, &choice, options).MaxWidth(260).MinWidth(0).FontSize(a.fs(textCaption)).Changed() {
-			a.setNewScope(a.scopeChoice(choice))
-		}
-		if iconTextButton(c, icons.Plus, a.tr("ws.new")).Tooltip(a.tr("ws.newTip")).Clicked() {
-			a.openWorkspaceDialog("")
-		}
-	})
+		m.Submenu(a.tr("ws.moveMenu"), func(sub *ui.Menu) {
+			for i := range a.ws.list {
+				if sub.Item(a.ws.list[i].Name).Disabled(!a.ws.list[i].Available).Chosen() {
+					a.moveCurrentToWorkspace(a.ws.list[i].WorkspaceID)
+				}
+			}
+		}).Disabled(len(a.ws.list) == 0)
+	}).FontSize(a.fs(textCaption)).Shrink(0).Tooltip(a.tr("ws.chipTip"))
 }
 
 // workspaceDialogView 画「New workspace」对话框。

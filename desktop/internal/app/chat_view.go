@@ -130,10 +130,6 @@ func (a *app) homeView(c *ui.Context) {
 				})
 				return
 			}
-			// 新对话在这里选范围：普通聊天，或某个工作区（沿用上次的选择）。
-			if a.conv == 0 {
-				a.scopePicker(c)
-			}
 			ui.Icon(c, icons.Sparkles).FontSize(a.fs(textHero)).TextColor(t.Accent)
 			ui.Text(c, a.tr("chat.homeTitle")).Bold().FontSize(a.fs(textHero))
 			ui.Text(c, a.tr("chat.homeHint")).TextColor(t.TextMuted)
@@ -168,7 +164,10 @@ func (a *app) chatHeader(c *ui.Context) {
 		ui.Text(c, title).Bold().FontSize(a.fs(textSection)).SingleLine().Grow(1).MinWidth(0).Tooltip(title)
 		// 范围标签：属于工作区的对话在标题旁边显示工作区名。
 		if workspaceID := a.perm.scope.WorkspaceID; workspaceID != "" {
-			ui.Text(c, "📁 "+a.workspaceName(workspaceID)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0).SingleLine()
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Shrink(0).Tooltip(a.workspaceName(workspaceID)).Children(func() {
+				ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
+				ui.Text(c, a.workspaceName(workspaceID)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine()
+			})
 		}
 		ui.Toolbar(c, func() {
 			if a.conv != 0 && iconTextButton(c, icons.Pencil, a.tr("chat.rename")).Tooltip(a.tr("chat.renameTip")).Clicked() {
@@ -751,6 +750,8 @@ func (a *app) composer(c *ui.Context) {
 					}
 					if a.perm.scope.Scope == "workspace" && a.perm.scope.Mode != "" {
 						a.modeChip(c)
+					} else if a.conv == 0 || a.ws.scopes[a.conv] == "" {
+						a.scopeChip(c)
 					}
 					if busy {
 						ui.Segmented(c, &a.cv.busyMode, a.tr("chat.queue"), a.tr("chat.steer")).Shrink(0).Label(a.tr("chat.enterMode")).FontSize(a.fs(textCaption))
