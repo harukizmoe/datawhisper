@@ -351,7 +351,11 @@ def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: 
     if source is None:
         return _ingest_result(no_tables_text())
     schema = _add_source(registry, sources, source_id, source)
-    return _ingest_result(extracted_source_text(source_id, source, tables, meta, schema), source_id)
+    result = _ingest_result(extracted_source_text(source_id, source, tables, meta, schema), source_id)
+    dump_dir = params.get("dump_dir")
+    if isinstance(dump_dir, str) and dump_dir.strip():
+        result["files"] = _dump_source_tables(source, dump_dir)
+    return result
 
 
 def run_load_feishu_bitable(rpc: MethodContext, registry: SourceRegistry, params: dict) -> dict:
@@ -373,7 +377,11 @@ def run_load_feishu_bitable(rpc: MethodContext, registry: SourceRegistry, params
         )
     source, source_name = bitable_source(read_result, args.get("source_name"))
     schema = _add_source(registry, sources, source_id, source)
-    return _ingest_result(bitable_loaded_text(source_id, source_name, schema, read_result), source_id)
+    result = _ingest_result(bitable_loaded_text(source_id, source_name, schema, read_result), source_id)
+    dump_dir = params.get("dump_dir")
+    if isinstance(dump_dir, str) and dump_dir.strip():
+        result["files"] = _dump_source_tables(source, dump_dir)
+    return result
 
 
 def _add_source(registry: SourceRegistry, sources: list[str], source_id: str, source) -> str:
@@ -386,6 +394,27 @@ def _add_source(registry: SourceRegistry, sources: list[str], source_id: str, so
             _close(source)
             raise
         return combined_schema([*lease.sources, source])
+
+
+def _dump_source_tables(source, dump_dir: str) -> list[str]:
+    """把 source 里的每张表写成 CSV，返回文件路径。
+
+    抓来的网表与飞书表原先只活在内存里：进程重启就没了，界面上也看不到文件。落成 CSV 之后
+    server 可以把它们当成普通文件来源登记，重启后照样能打开。
+    """
+    from pathlib import Path
+    import re
+
+    base = Path(dump_dir)
+    base.mkdir(parents=True, exist_ok=True)
+    files: list[str] = []
+    for index, table in enumerate(source.list_tables() or []):
+        frame, _text = source.execute_query(f'SELECT * FROM "{table}"')
+        safe = re.sub(r"[^0-9A-Za-z_.\-\u4e00-\u9fff]+", "_", str(table)).strip("_") or f"table_{index + 1}"
+        path = base / f"{safe}.csv"
+        frame.to_csv(path, index=False)
+        files.append(str(path))
+    return files
 
 
 def _ingest_result(text: str, source_id: str | None = None) -> dict:

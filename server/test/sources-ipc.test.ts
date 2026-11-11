@@ -76,6 +76,16 @@ function fakeCompute(): FakeCompute {
       if (connection.includes("leaky-pa55")) throw new ComputeError("认证失败：密码 leaky-pa55 不对", -32000, { kind: "open_failed" });
       return { name: "fake", tables: 3, server: "PostgreSQL 16.0" };
     },
+    "tool.fetch_table_parse": (params) => {
+      const dir = String(params.dump_dir);
+      mkdirSync(dir, { recursive: true });
+      const files = ["stores", "stocks"].map((table) => {
+        const file = join(dir, `${table}.csv`);
+        writeFileSync(file, "name,value\nalpha,1\n");
+        return file;
+      });
+      return { text: "parsed 2 tables", files };
+    },
     "workspace.sync": (params) => ({
       descriptor: {
         kind: "workspace_persistent",
@@ -127,6 +137,8 @@ let workspaces: WorkspaceStore;
 let changed: number[];
 /** 假飞书读取：记下被读的 `appToken/tableId`；`feishuError` 非空时模拟飞书拒绝。 */
 let feishuReads: string[];
+/** `sourceMethods` 装配时填进来的抓取/飞书端口（工具用它登记来源）。 */
+let ingestPort: { ingest?: import("../src/tools/app/types.ts").IngestPort };
 let feishuError: string | undefined;
 
 beforeEach(async () => {
@@ -144,6 +156,7 @@ beforeEach(async () => {
   feishuReads = [];
   feishuError = undefined;
   compute = fakeCompute();
+  ingestPort = {};
   server = memoryServer(sourceMethods({
     compute: compute.client,
     state: store,
@@ -168,7 +181,7 @@ beforeEach(async () => {
     maxUploadBytes: 64,
     uploadTtlMs: 60_000,
     onChanged: (conversationId) => changed.push(conversationId),
-  }), (error) => error instanceof RpcError
+  }, ingestPort), (error) => error instanceof RpcError
     ? { code: error.code, message: error.message, data: error.data }
     : undefined);
 });
@@ -1103,5 +1116,26 @@ describe("工作目录校验文案跟随界面语言", () => {
     } finally {
       setLanguage("en");
     }
+  });
+});
+
+describe("抓取工具登记来源", () => {
+  test("解析结果落盘后逐张登记成 csv 来源，临时内存来源被关掉", async () => {
+    const port = ingestPort.ingest;
+    expect(port).toBeDefined();
+    const result = await port!.fetchTables(1, {
+      url: "https://example.com/stores.html",
+      contentType: "text/html",
+      body: new TextEncoder().encode("<html></html>"),
+      sourceName: "stores_web",
+    });
+    expect(result.added.map((item) => item.tables)).toEqual([["t1"], ["t1"]]);
+    const doc = store.peek(1);
+    expect(doc.sources.map((source) => [source.kind, source.active])).toEqual([["csv", true], ["csv", true]]);
+    expect(doc.sources.every((source) => source.uploadPath !== undefined && existsSync(source.uploadPath))).toBe(true);
+    // 解析用的内存 source 以 `s_` 开头、不在文档里：登记后应当被关掉。
+    const scratch = compute.closed.filter((id) => !doc.sources.some((source) => source.id === id));
+    expect(scratch).toHaveLength(1);
+    expect(result.text).toContain("Attached to this conversation");
   });
 });

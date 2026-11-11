@@ -15,6 +15,7 @@ import { createInteractionTools } from "./interaction.ts";
 import { createArtifactTool } from "./artifacts.ts";
 import { createMemoryTools } from "./memory.ts";
 import { createWebTools } from "./web.ts";
+import { createIngestTools } from "./ingest.ts";
 import { createDiagramTools } from "./diagram/tools.ts";
 import { createFeishuTools } from "../../feishu/tools.ts";
 import { defaultFeishuService } from "../../feishu/service.ts";
@@ -52,6 +53,9 @@ export const APP_TOOL_NAMES = [
   "propose_dashboard_outline",
   "ask_user",
   "browse_webpage",
+  "fetch_table",
+  "browser_extract_tables",
+  "load_feishu_bitable",
   "read_tool_result",
   "search_mcp_tools",
   "plan_complete",
@@ -94,6 +98,7 @@ export function createAppTools(deps: AppToolDeps): AppTool[] {
     ...createArtifactTool(effective),
     ...createMemoryTools(effective),
     ...createWebTools(effective),
+    ...createIngestTools(effective),
     ...(effective.canvas === undefined ? [] : createDiagramTools(effective)),
     ...createFeishuTools({ connections: () => feishu.connections() }),
     ...createWorkflowTools(effective),

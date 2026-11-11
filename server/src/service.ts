@@ -140,6 +140,8 @@ export async function startService(config: Config, options: ServiceOptions = {})
   // 生产工具集：A 类纯 TS + B 类 compute 外壳。测试可以用 `options.tools` 覆盖（桩工具）。
   // 团队委托端口：工具集先装配、委托服务后建（它需要会话服务），这里留一个迟绑定转发器。
   const delegationPort: { current?: TeamDelegationPort } = {};
+  // 抓取/飞书工具要在来源方法建好之后才能登记来源：先给一个空壳，`sourceMethods` 会填 `ingest`。
+  const ingestPort: { ingest?: import("./tools/app/types.ts").IngestPort } = {};
   const workflowPort: { current?: WorkflowCatalog } = {};
   // `harness` 在下面才创建；工具只在执行期用到它（那时一定就绪）。
   let harness!: Harness;
@@ -155,6 +157,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
           // 来源文档同样是执行期才需要（会话服务建好之后）。
           sources: () => sourceState,
           workspaces: workspaceStore,
+          ingest: ingestPort,
         })
       : undefined;
   const tools = options.tools ?? assembled!.tools;
@@ -207,7 +210,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     uploadsDir: join(config.dataDir, "uploads"),
     outputsDir: join(config.dataDir, "outputs"),
     projectRoot: config.projectRoot,
-  });
+  }, ingestPort);
   const permissionApi = permissionMethods({
     broker: permissions,
     state: sourceState,
