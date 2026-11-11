@@ -15,6 +15,7 @@
  */
 
 import { say } from "../i18n.ts";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Context, JsonValue } from "@earendil-works/chord";
@@ -527,6 +528,45 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
 
   const sourceView = (doc: SourceDoc): Record<string, JsonValue>[] => doc.sources.map((record) => publicSource(record, openIds));
 
+  /**
+   * 连接配置是全应用共享的：同一份配置在所有会话里用同一个来源 id。会话文档里没有它的记录时，
+   * 面板仍然列出来（未启用），启用后才登记进该会话的文档。
+   */
+  const sharedSourceId = (configId: string): string => `s_${createHash("sha256").update(configId).digest("hex").slice(0, 8)}`;
+
+  const sharedRecordFor = (config: SourceConfig): StoredSource => ({
+    id: sharedSourceId(config.id),
+    kind: config.kind as SourceKind,
+    name: config.name,
+    active: false,
+    descriptor: { kind: config.kind, ...config.fields },
+    configId: config.id,
+    tables: [],
+    createdAt: config.updatedAt,
+    updatedAt: iso(),
+  });
+
+  /** 会话里已经登记的记录 + 还没启用的共享连接（按配置顺序）。 */
+  const mergedView = async (doc: SourceDoc): Promise<Record<string, JsonValue>[]> => {
+    const known = new Set(doc.sources.map((record) => record.configId).filter((id): id is string => id !== undefined));
+    const pending = (await deps.configs.list()).filter((config) => !known.has(config.id)).map(sharedRecordFor);
+    return [...doc.sources, ...pending].map((record) => publicSource(record, openIds));
+  };
+
+  /** 在文档里找到记录；找不到但它是共享连接的虚拟条目时，按配置补登记一条（未启用）。 */
+  const ensureRecordFor = async (conversationId: number, sourceId: string): Promise<StoredSource> => {
+    const configs = await deps.configs.list();
+    return state.update(conversationId, (draft) => {
+      const existing = draft.sources.find((item) => item.id === sourceId);
+      if (existing !== undefined) return existing;
+      const config = configs.find((item) => sharedSourceId(item.id) === sourceId);
+      if (config === undefined) throw appError("not_found", `data source not found: ${sourceId}`);
+      const record = sharedRecordFor(config);
+      draft.sources.push(record);
+      return record;
+    });
+  };
+
   const sweepUploads = (): void => {
     const at = now().getTime();
     for (const [id, ticket] of uploads) {
@@ -919,22 +959,48 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
   const openRemoteSource = async (conversationId: number, params: MethodParams): Promise<Record<string, JsonValue>> => {
     const kind = remoteKindParam(params);
     const prepared = await prepareRemote(kind, params);
-    const sourceId = randomId("s_");
-    const opened = await openCompute(sourceId, prepared.descriptor);
-    // 与上传一致：compute 里已经打开了，要登记，否则界面刚连上就显示「已关闭」，用到时还会被重复打开。
+    const before = new Set((await deps.configs.list()).map((config) => config.id));
+    // 先落配置：连接信息要跨会话、跨重启保留；共享来源的 id 由配置 id 派生。
+    const saved = await deps.configs.save({
+      id: prepared.configId,
+      kind,
+      name: prepared.name,
+      fields: prepared.fields,
+      secret: prepared.secret,
+    });
+    const created = !before.has(saved.id);
+    const sourceId = sharedSourceId(saved.id);
+    // compute 里按来源 id 只打开一次；别的会话已经打开时直接沿用。
+    let opened: { name: string; tables: string[] };
+    try {
+      opened = openIds.has(sourceId) ? { name: saved.name, tables: [] } : await openCompute(sourceId, prepared.descriptor);
+    } catch (error) {
+      // 连不上时不能留下空配置：下次打开同一个连接会以为已经配好了。
+      if (created) await deps.configs.remove(saved.id).catch(() => undefined);
+      throw error;
+    }
     openIds.add(sourceId);
     try {
-      const saved = await deps.configs.save({
-        id: prepared.configId,
-        kind,
-        name: prepared.name || opened.name,
-        fields: prepared.fields,
-        secret: prepared.secret,
-      });
-      const record: StoredSource = {
+      const existing = await state.read(conversationId);
+      const record = existing.sources.find((item) => item.id === sourceId);
+      if (record !== undefined) {
+        const updated = await state.update(conversationId, (draft) => {
+          const item = draft.sources.find((candidate) => candidate.id === sourceId);
+          if (item !== undefined) {
+            item.active = true;
+            if (opened.tables.length > 0) item.tables = opened.tables;
+            item.updatedAt = iso();
+            return item;
+          }
+          return record;
+        });
+        const doc = await state.read(conversationId);
+        return { source: publicSource(updated, openIds), sources: await mergedView(doc), configId: saved.id };
+      }
+      const stored: StoredSource = {
         id: sourceId,
         kind,
-        name: prepared.name || opened.name,
+        name: saved.name || opened.name,
         active: true,
         descriptor: prepared.stored,
         configId: saved.id,
@@ -942,12 +1008,13 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         createdAt: iso(),
         updatedAt: iso(),
       };
-      const sources = await appendSource(conversationId, record);
-      return { source: publicSource(record, openIds), sources, configId: saved.id };
+      const sources = await appendSource(conversationId, stored);
+      return { source: publicSource(stored, openIds), sources, configId: saved.id };
     } catch (error) {
-      // 配置或文档没写成功时，不能留下一个 compute 里打开、界面看不到的连接。
+      // 登记失败时把刚打开的 compute 来源关掉；新建的配置也删掉，避免留下空配置。
       openIds.delete(sourceId);
       await closeCompute(sourceId);
+      if (created) await deps.configs.remove(saved.id).catch(() => undefined);
       throw error;
     }
   };
@@ -994,11 +1061,11 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       await state.read(conversationId);
       if (params.sourceId !== undefined) {
         const sourceId = patternParam(params, "sourceId", SOURCE_ID_PATTERN, "s_xxxxxxxx");
-        const doc = await state.read(conversationId);
-        const record = requireStoredSource(doc, sourceId);
+        const record = await ensureRecordFor(conversationId, sourceId);
         const tables = await ensureOpen(record);
         record.tables = tables;
-        return { source: publicSource(record, openIds), sources: sourceView(doc) };
+        const doc = await state.read(conversationId);
+        return { source: publicSource(record, openIds), sources: await mergedView(doc) };
       }
       if (params.uploadId !== undefined) return openUploaded(conversationId, params);
       if (params.kind === undefined) throw invalidParams("'kind' or 'uploadId' or 'sourceId' is required");
@@ -1008,17 +1075,28 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     "source.list": async (params) => {
       const conversationId = conversationIdParam(params);
       const doc = await state.read(conversationId);
-      return { sources: sourceView(doc) };
+      return { sources: await mergedView(doc) };
     },
 
     "source.close": async (params) => {
       const conversationId = conversationIdParam(params);
       const sourceId = patternParam(params, "sourceId", SOURCE_ID_PATTERN, "s_xxxxxxxx");
       const doc = await state.read(conversationId);
-      requireStoredSource(doc, sourceId);
+      const record = requireStoredSource(doc, sourceId);
       const wasOpen = openIds.has(sourceId);
-      await closeCompute(sourceId);
-      return { ok: true, closed: wasOpen, sources: sourceView(doc) };
+      if (record.configId === undefined) {
+        await closeCompute(sourceId);
+        return { ok: true, closed: wasOpen, sources: await mergedView(doc) };
+      }
+      // 连接配置是全应用共享的：关掉会波及别的会话，所以这里只在本会话停用。
+      await state.update(conversationId, (draft) => {
+        const item = draft.sources.find((candidate) => candidate.id === sourceId);
+        if (item !== undefined) {
+          item.active = false;
+          item.updatedAt = iso();
+        }
+      });
+      return { ok: true, closed: true, sources: await mergedView(await state.read(conversationId)) };
     },
 
     "source.remove": async (params) => {
@@ -1036,10 +1114,13 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         const [record] = draft.sources.splice(index, 1);
         return record!;
       });
-      await closeCompute(removed.id);
-      deleteUploadCopy(removed);
+      // 共享连接属于配置，不随一个会话移除：配置还在，别的会话照用，本会话下次列出来是未启用状态。
+      if (removed.configId === undefined) {
+        await closeCompute(removed.id);
+        deleteUploadCopy(removed);
+      }
       const doc = await state.read(conversationId);
-      return { ok: true, sources: sourceView(doc) };
+      return { ok: true, sources: await mergedView(doc) };
     },
 
     /** 对应旧 `DELETE /api/session/<sid>/datasource`：断开并清空本会话的全部来源。 */
@@ -1052,24 +1133,41 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         return records;
       });
       for (const record of removed) {
+        if (record.configId !== undefined) continue;
         await closeCompute(record.id);
         deleteUploadCopy(record);
       }
-      return { ok: true, removed: removed.length, sources: sourceView(await state.read(conversationId)) };
+      return { ok: true, removed: removed.length, sources: await mergedView(await state.read(conversationId)) };
     },
 
     "source.toggle": async (params) => {
       const conversationId = conversationIdParam(params);
       const sourceId = patternParam(params, "sourceId", SOURCE_ID_PATTERN, "s_xxxxxxxx");
       const requested = optionalBooleanParam(params, "active");
+      const current = await ensureRecordFor(conversationId, sourceId);
+      const next = requested ?? !current.active;
+      // 共享连接在第一次启用时打开：compute 里按来源 id 打开一次，所有会话都用同一份。
+      if (next && !openIds.has(sourceId)) {
+        const record = await state.update(conversationId, (draft) => {
+          const item = draft.sources.find((candidate) => candidate.id === sourceId);
+          if (item === undefined) throw appError("not_found", `data source not found: ${sourceId}`);
+          return item;
+        });
+        const tables = await ensureOpen(structuredClone(record));
+        await state.update(conversationId, (draft) => {
+          const item = draft.sources.find((candidate) => candidate.id === sourceId);
+          if (item !== undefined) item.tables = tables;
+        });
+      }
       const updated = await state.update(conversationId, (draft) => {
-        const record = requireStoredSource(draft, sourceId);
-        record.active = requested ?? !record.active;
-        record.updatedAt = iso();
-        return record;
+        const item = draft.sources.find((candidate) => candidate.id === sourceId);
+        if (item === undefined) throw appError("not_found", `data source not found: ${sourceId}`);
+        item.active = next;
+        item.updatedAt = iso();
+        return item;
       });
       const doc = await state.read(conversationId);
-      return { ok: true, active: updated.active, source: publicSource(updated, openIds), sources: sourceView(doc) };
+      return { ok: true, active: updated.active, source: publicSource(updated, openIds), sources: await mergedView(doc) };
     },
 
     "source.rename": async (params) => {

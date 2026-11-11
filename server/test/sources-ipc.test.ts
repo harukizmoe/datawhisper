@@ -384,6 +384,68 @@ describe("来源生命周期与透传", () => {
   });
 });
 
+describe("SQL 连接是全应用共享的记录", () => {
+  async function connect(conversationId: number, name: string): Promise<string> {
+    const opened = await server.call<{ source: { id: string }; configId: string }>("source.open", {
+      conversationId,
+      kind: "sql",
+      name,
+      driver: "postgresql",
+      host: "db.internal",
+      port: "5432",
+      database: "sales",
+      username: "analyst",
+      password: "pw",
+    });
+    expect(opened.error).toBeUndefined();
+    return opened.result!.source.id;
+  }
+
+  test("在一个会话里连上，别的会话也列出来，但默认未启用", async () => {
+    const sourceId = await connect(1, "销售库");
+    const other = await server.call<{ sources: { id: string; name: string; active: boolean; configId?: string }[] }>("source.list", {
+      conversationId: 2,
+    });
+    expect(other.error).toBeUndefined();
+    const shared = other.result!.sources.find((item) => item.id === sourceId);
+    expect(shared).toMatchObject({ name: "销售库", active: false });
+    expect(shared?.configId).toBeTruthy();
+    // 新会话列出来但未启用：store 里没有它的记录。
+    expect(store.peek(2).sources).toHaveLength(0);
+  });
+
+  test("在另一个会话里启用：compute 只打开一次，两边都能用", async () => {
+    const sourceId = await connect(1, "销售库");
+    const opensBefore = compute.calls.filter((call) => call.method === "source.open").length;
+    const toggled = await server.call<{ active: boolean; sources: { id: string; active: boolean }[] }>("source.toggle", {
+      conversationId: 2,
+      sourceId,
+      active: true,
+    });
+    expect(toggled.error).toBeUndefined();
+    expect(toggled.result!.active).toBe(true);
+    expect(compute.calls.filter((call) => call.method === "source.open").length).toBe(opensBefore);
+    expect(store.peek(2).sources.find((item) => item.id === sourceId)?.active).toBe(true);
+    expect(store.peek(1).sources.find((item) => item.id === sourceId)?.active).toBe(true);
+  });
+
+  test("从一个会话移除不会删掉配置：别的会话仍能看到它，重连也不用再填字段", async () => {
+    const sourceId = await connect(1, "销售库");
+    const removed = await server.call<{ sources: { id: string }[] }>("source.remove", { conversationId: 1, sourceId });
+    expect(removed.error).toBeUndefined();
+    expect(store.peek(1).sources).toHaveLength(0);
+    const listed = await server.call<{ configs: { id: string }[] }>("source.config.list", {});
+    expect(listed.result!.configs).toHaveLength(1);
+    const other = await server.call<{ sources: { id: string; active: boolean }[] }>("source.list", { conversationId: 2 });
+    expect(other.result!.sources.find((item) => item.id === sourceId)?.active).toBe(false);
+    // 配置里的字段还在：重新连接时只传 configId 就够。
+    const configId = listed.result!.configs[0]!.id;
+    const reopened = await server.call<{ source: { id: string } }>("source.open", { conversationId: 2, kind: "sql", configId });
+    expect(reopened.error).toBeUndefined();
+    expect(reopened.result!.source.id).toBe(sourceId);
+  });
+});
+
 describe("数据源配置：密钥只进不出", () => {
   test("保存、列表、连接、重开都不回显连接串", async () => {
     const marker = "s3cr3t-marker";
