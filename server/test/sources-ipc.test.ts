@@ -861,6 +861,30 @@ describe("工作区", () => {
     expect(malformed.error?.code).toBe(INVALID_PARAMS);
   });
 
+  test("importFiles 只把指定文件交给 compute；路径与数量都校验", async () => {
+    const { id } = await createWorkspace("project");
+    const imported = await server.call<{ ok: boolean; added: { source_name: string }[] }>("workspace.importFiles", {
+      workspaceId: id,
+      paths: ["data.csv", "sub/report.xlsx"],
+    });
+    expect(imported.error).toBeUndefined();
+    expect(imported.result!.ok).toBe(true);
+    expect(callsOf("workspace.sync").at(-1)!.params.paths).toEqual(["data.csv", "sub/report.xlsx"]);
+    // 已经打开过的工作区仍然是同一个导入目标。
+    expect(callsOf("workspace.sync").at(-1)!.params.source_id).toBeString();
+
+    // 普通 sync 不带 paths：compute 会整理整个目录。
+    await server.call("workspace.sync", { workspaceId: id });
+    expect(callsOf("workspace.sync").at(-1)!.params.paths).toBeUndefined();
+
+    for (const paths of [[], [".."], ["/etc/passwd"], ["a/../../b"], [""], [1]]) {
+      const reply = await server.call("workspace.importFiles", { workspaceId: id, paths });
+      expect(reply.error?.code).toBe(INVALID_PARAMS);
+    }
+    expect(reasonOf(await server.call("workspace.importFiles", { workspaceId: id, paths: [".."] }))).toBe("invalid_path");
+    expect((await server.call("workspace.importFiles", { workspaceId: "nope", paths: ["a.csv"] })).error?.code).toBe(INVALID_PARAMS);
+  });
+
   test("目录被删后报 workspace_unavailable，list 标出不可用，对话不会被悄悄挂上", async () => {
     const { workdir, id } = await createWorkspace("project");
     rmSync(workdir, { recursive: true, force: true });

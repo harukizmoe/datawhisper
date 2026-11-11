@@ -170,6 +170,17 @@ type TreeEntry struct {
 	Ignored bool    `json:"ignored"`
 	Empty   bool    `json:"empty"`
 	Data    bool    `json:"data"`
+	// ImportState 是数据文件的导入状态：new 没导入过、changed 导入后变了、imported 已导入、none 不是数据文件。
+	ImportState string `json:"importState"`
+	// Pending 是目录下没导入或已变化的数据文件数。
+	Pending int `json:"pending"`
+}
+
+// PendingFile 是「Changes」页签里的一项：还没导入或导入后变了的数据文件。
+type PendingFile struct {
+	Path  string `json:"path"`
+	State string `json:"state"`
+	Size  int64  `json:"size"`
 }
 
 // TreeListing 是工作区里一个目录的一层内容；一层超过上限时 Truncated 为真，Total 是实际项数。
@@ -184,5 +195,22 @@ type TreeListing struct {
 func (c *Client) WorkspaceTree(ctx context.Context, workspaceID, path string) (TreeListing, error) {
 	var out TreeListing
 	err := c.callInto(ctx, "workspace.tree", map[string]any{"workspaceId": workspaceID, "path": path}, &out)
+	return out, err
+}
+
+// WorkspacePending 列出工作区里还没导入或已变化的数据文件；Truncated 表示扫描到上限就停了。
+func (c *Client) WorkspacePending(ctx context.Context, workspaceID string) ([]PendingFile, bool, error) {
+	var out struct {
+		Files     []PendingFile `json:"files"`
+		Truncated bool          `json:"truncated"`
+	}
+	err := c.callInto(ctx, "workspace.pending", map[string]any{"workspaceId": workspaceID}, &out)
+	return out.Files, out.Truncated, err
+}
+
+// ImportWorkspaceFiles 只导入指定的数据文件（相对工作区根的路径），返回导入结果与最新的工作区。
+func (c *Client) ImportWorkspaceFiles(ctx context.Context, workspaceID string, paths []string) (WorkspaceMount, error) {
+	var out WorkspaceMount
+	err := c.callInto(ctx, "workspace.importFiles", map[string]any{"workspaceId": workspaceID, "paths": paths}, &out)
 	return out, err
 }

@@ -578,7 +578,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
   };
 
   /** 把目录里的数据文件增量导入持久化库，并在尚未打开时打开它；成功后写回注册表。 */
-  const syncWorkspace = async (record: WorkspaceRecord) => {
+  const syncWorkspace = async (record: WorkspaceRecord, paths?: readonly string[]) => {
     const alreadyOpen = record.sourceId !== "" && openIds.has(record.sourceId);
     const sourceId = record.sourceId !== "" ? record.sourceId : randomId("s_");
     const syncParams: Record<string, unknown> = {
@@ -588,6 +588,8 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     };
     // 已打开的持久化连接直接作为导入目标；否则让 compute 只建库，随后再 open。
     if (alreadyOpen) syncParams.source_id = sourceId;
+    // 指定文件时只导入这几项（workspace.importFiles）；不给就是整理目录。
+    if (paths !== undefined) syncParams.paths = paths;
     const synced = await computeCall<WorkspaceSync>("workspace.sync", syncParams);
     const descriptor = synced.descriptor;
     if (typeof descriptor !== "object" || descriptor === null || Array.isArray(descriptor)) {
@@ -1377,6 +1379,34 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     },
 
     /** 建对话之前先确认工作区可用、共享来源已打开：失败时不会留下一个空对话。 */
+    /** 只导入指定文件（界面里的「Import」）；路径是相对工作区根的文件名。 */
+    "workspace.importFiles": async (params) => {
+      const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
+      requireAvailable(record);
+      const raw = params.paths;
+      if (!Array.isArray(raw) || raw.length === 0) throw invalidParams("'paths' must be a non-empty array");
+      if (raw.length > 200) throw invalidParams("'paths' accepts at most 200 files");
+      const paths = raw.map((item) => {
+        if (typeof item !== "string") throw invalidParams("'paths' must contain only strings");
+        const rel = item.replace(/\\/g, "/").trim();
+        if (rel === "" || rel.startsWith("/") || rel.split("/").some((part) => part === "" || part === "..")) {
+          throw invalidReason(say(`Not a path inside the workspace: ${item}`, `不是工作区内的路径：${item}`), "invalid_path");
+        }
+        return rel;
+      });
+      const result = await syncWorkspace(record, paths);
+      const current = await currentWorkspaceId(params);
+      return {
+        ok: true,
+        workspace: publicWorkspace(result.record, current),
+        tables: result.tables,
+        added: result.synced.added ?? [],
+        errors: result.synced.errors ?? [],
+        skipped: result.synced.skipped ?? 0,
+        reused: result.synced.reused ?? 0,
+      };
+    },
+
     "workspace.prepare": async (params) => {
       const record = await requireWorkspaceRecord(patternParam(params, "workspaceId", WORKSPACE_ID_PATTERN, "ws_<16 hex>"));
       requireAvailable(record);

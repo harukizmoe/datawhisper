@@ -34,7 +34,44 @@ def safe_table_name(filename: str) -> str:
     return cleaned or 'data'
 
 
-def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
+def select_files(runtime, paths) -> tuple[list[dict], list[str]]:
+    """把界面给的一组相对路径变成导入清单：只接受工作区内的可注册数据文件。
+
+    返回 ``(files, errors)``；``files`` 的元素与 ``runtime.list_data_files()`` 的形状一致
+    （``name``/``size``/``suffix``），所以后面的导入逻辑不用分情况处理。
+    """
+    from data.workspace import _is_blocked_path
+
+    root = runtime.workdir.resolve()
+    files: list[dict] = []
+    errors: list[str] = []
+    for raw in paths:
+        rel = str(raw).replace("\\", "/").strip()
+        if not rel or rel.startswith("/") or any(part in {"..", ""} for part in rel.split("/")):
+            errors.append(say(f"{raw}: not a path inside the workspace", f"{raw}: 不是工作区内的路径"))
+            continue
+        candidate = (root / rel)
+        try:
+            resolved = candidate.resolve(strict=False)
+            if resolved != root and root not in resolved.parents:
+                errors.append(say(f"{rel}: outside the workspace", f"{rel}: 在工作区之外"))
+                continue
+            if _is_blocked_path(resolved) or candidate.is_symlink():
+                errors.append(say(f"{rel}: blocked path", f"{rel}: 不允许导入的路径"))
+                continue
+            suffix = candidate.suffix.lower()
+            if suffix not in REGISTERABLE_SUFFIXES:
+                errors.append(say(f"{rel}: not a data file", f"{rel}: 不是可导入的数据文件"))
+                continue
+            size = candidate.stat().st_size
+        except OSError:
+            errors.append(say(f"{rel}: cannot read file", f"{rel}: 无法读取文件"))
+            continue
+        files.append({"name": rel, "size": size, "suffix": suffix})
+    return files, errors
+
+
+def import_workdir_files(runtime, source, run_job, check_canceled=None, paths=None) -> dict:
     """把 *runtime* 的 workdir 中新增或有变化的数据文件导入其持久化 DuckDB，
     该 DuckDB 已由 *source*（一个 ``WorkspacePersistentSource``）打开。
 
@@ -54,7 +91,12 @@ def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
     reused = 0
 
     registry = runtime.load_registry()
-    files = runtime.list_data_files(max_files=50)
+    # paths 给出时只导入这几项（界面里的「Import」）；否则整理目录（挂载时的行为）。
+    if paths is None:
+        files = runtime.list_data_files(max_files=50)
+    else:
+        files, path_errors = select_files(runtime, paths)
+        errors.extend(path_errors)
 
     for f in files:
         if check_canceled:
@@ -127,6 +169,7 @@ def import_workdir_files(runtime, source, run_job, check_canceled=None) -> dict:
             # 更新 registry
             entry = {
                 "sha256": current_hash,
+                **runtime.file_signature(Path(file_path)),
                 "tables": tables,
                 "source_type": suffix.lstrip("."),
                 "file_path": file_path,

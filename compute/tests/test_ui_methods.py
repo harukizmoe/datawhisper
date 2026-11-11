@@ -416,6 +416,24 @@ class WorkspaceSyncTest(UiTestBase):
         path.mkdir()
         return path
 
+    def test_sync_with_paths_imports_only_the_selected_files(self):
+        workdir = self.workdir()
+        shutil.copyfile(FIXTURES / "sales.csv", workdir / "orders.csv")
+        shutil.copyfile(FIXTURES / "stores.csv", workdir / "shops.csv")
+        (workdir / "sub").mkdir()
+        shutil.copyfile(FIXTURES / "stores.csv", workdir / "sub" / "nested.csv")
+        params = {"workspace_id": "ws-2", "workdir": str(workdir)}
+        # 只导入其中一个文件：另一个文件即便在目录里也不该出现。
+        first = self.result("workspace.sync", {**params, "paths": ["orders.csv"]})
+        self.assertEqual([a["source_name"] for a in first["added"]], ["orders.csv"])
+        self.assertEqual(sorted(first["tables"]), ["orders"])
+
+        # 子目录用相对路径；不可导入的文件与越界路径各自报错，不影响其余文件。
+        second = self.result("workspace.sync", {**params, "source_id": None, "paths": ["sub/nested.csv", "..", "notes.md"]})
+        self.assertEqual([a["source_name"] for a in second["added"]], ["sub/nested.csv"])
+        self.assertEqual(sorted(second["tables"]), ["orders", "sub_nested"])
+        self.assertEqual(len(second["errors"]), 2)
+
     def test_sync_imports_new_and_changed_files(self):
         workdir = self.workdir()
         shutil.copyfile(FIXTURES / "sales.csv", workdir / "orders.csv")  # 13 KB：走 job 路径

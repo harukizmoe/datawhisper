@@ -77,6 +77,15 @@ def _detect_blocked_system_dirs() -> List[Path]:
 _BLOCKED_SYSTEM_DIRS = _detect_blocked_system_dirs()
 
 
+def file_signature(path: Path) -> dict:
+    """文件的大小与修改时间：导入时记进 registry，列目录时只比这两个值，不重算哈希。"""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
 def _is_blocked_path(resolved: Path) -> bool:
     """检查 resolve 后的路径是否命中始终黑名单。"""
     # 路径片段
@@ -303,6 +312,11 @@ class WorkspaceRuntime:
             )
         except OSError as e:
             log.warning("[workspace] save_registry failed: %s", e)
+
+    @staticmethod
+    def file_signature(path: Path) -> dict:
+        """兼容旧的调用点：实际实现是模块级函数。"""
+        return file_signature(path)
 
     @staticmethod
     def compute_file_hash(path: Path) -> str:

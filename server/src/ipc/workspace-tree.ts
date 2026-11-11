@@ -6,7 +6,7 @@
  * 改用户文件只由 agent 的 `workspace_*` 工具完成，并受对话的权限模式约束。
  */
 
-import { lstatSync, opendirSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
+import { lstatSync, opendirSync, readFileSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { extname, isAbsolute, join, relative, sep } from "node:path";
 import { say } from "../i18n.ts";
 import { INVALID_PARAMS, invalidParams, RpcError } from "./errors.ts";
@@ -23,6 +23,32 @@ const IGNORED_NAMES: ReadonlySet<string> = new Set([".git", ".venv", "node_modul
 /** 敏感名字：不显示，也不让界面知道它们存在。 */
 const HIDDEN_SUFFIXES: ReadonlySet<string> = new Set([".key", ".pem", ".crt", ".pfx", ".keystore"]);
 const DATA_SUFFIXES: ReadonlySet<string> = new Set([".csv", ".tsv", ".parquet", ".json", ".jsonl", ".xlsx", ".xls"]);
+/** 一次请求里为算徽标最多 stat 多少个文件；超出后目录徽标可能不完整。 */
+const PENDING_SCAN_LIMIT = 2000;
+
+/** 导入状态：没导入过、导入后变了、已导入，或不是数据文件。 */
+export type ImportState = "new" | "changed" | "imported" | "none";
+
+type RegistryEntry = { readonly size?: number; readonly mtime_ns?: number };
+
+/** 读取 compute 写的 `.zhixi/registry.json`（导入过哪些文件、当时多大）。坏了就当空。 */
+function readRegistry(workdir: string): Record<string, RegistryEntry> {
+  try {
+    const raw = JSON.parse(readFileSync(join(workdir, ".zhixi", "registry.json"), "utf8"));
+    return typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, RegistryEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function importStateOf(registry: Record<string, RegistryEntry>, rel: string, stats: { size: number; mtimeMs: number }): ImportState {
+  const entry = registry[rel];
+  if (entry === undefined) return "new";
+  // 旧版本记的条目没有大小与时间：只能认为已导入，否则整棵树都会标成「已变化」。
+  if (typeof entry.size !== "number" || typeof entry.mtime_ns !== "number") return "imported";
+  const mtimeNs = Math.round(stats.mtimeMs * 1e6);
+  return entry.size === stats.size && Math.abs(entry.mtime_ns - mtimeNs) < 2_000_000 ? "imported" : "changed";
+}
 
 export type TreeEntry = {
   /** 显示名；折叠过单子目录链时是 `a/b/c`。 */
@@ -37,6 +63,10 @@ export type TreeEntry = {
   readonly empty: boolean;
   /** 仅文件：扩展名是能导入成表的数据文件。 */
   readonly data: boolean;
+  /** 仅数据文件：导入状态。 */
+  readonly importState: ImportState;
+  /** 仅目录：这棵子树里没导入或变了的数据文件数。 */
+  readonly pending: number;
 };
 
 export type TreeListing = {
@@ -114,6 +144,8 @@ function followChain(dir: string, name: string): { name: string; dir: string } {
 export function listDirectory(workdir: string, rel: string): TreeListing {
   const root = realpathSync.native(workdir);
   const target = resolveInside(workdir, rel);
+  const registry = readRegistry(root);
+  const pendingDirs = countPendingDirs(root, registry);
   const children = visibleChildren(target).sort((a, b) => {
     if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
     return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
@@ -139,6 +171,8 @@ export function listDirectory(workdir: string, rel: string): TreeListing {
         ignored,
         empty: isEmptyDir(chain.dir),
         data: false,
+        importState: "none",
+        pending: pendingDirs.get(relative(root, chain.dir).split(sep).join("/")) ?? 0,
       });
     } else if (child.isFile()) {
       entries.push({
@@ -150,30 +184,151 @@ export function listDirectory(workdir: string, rel: string): TreeListing {
         ignored,
         empty: false,
         data: DATA_SUFFIXES.has(extname(child.name).toLowerCase()),
+        importState: DATA_SUFFIXES.has(extname(child.name).toLowerCase())
+          ? importStateOf(registry, relative(root, full).split(sep).join("/"), { size: stats.size, mtimeMs: stats.mtimeMs })
+          : "none",
+        pending: 0,
       });
     }
   }
   return { path: relative(root, target).split(sep).join("/"), entries, truncated: children.length > TREE_LIMIT, total: children.length };
 }
 
-export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore }): Record<string, RpcMethod> {
-  return {
-    "workspace.tree": async (params: MethodParams) => {
-      const workspaceId = params.workspaceId;
-      if (typeof workspaceId !== "string" || !WORKSPACE_ID_PATTERN.test(workspaceId)) {
-        throw invalidParams("'workspaceId' must look like ws_<16 hex>");
+/**
+ * 走一遍工作区，统计每个目录下「没导入或已变化」的数据文件数（给目录行的小圆点）。
+ * 只比大小与修改时间，不重读文件；扫到 PENDING_SCAN_LIMIT 个文件就停。
+ */
+function countPendingDirs(root: string, registry: Record<string, RegistryEntry>): Map<string, number> {
+  const counts = new Map<string, number>();
+  let seen = 0;
+  const walk = (dir: string): void => {
+    let children: Dirent[];
+    try {
+      children = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const child of children) {
+      if (seen >= PENDING_SCAN_LIMIT || child.isSymbolicLink() || isHidden(child.name)) continue;
+      const full = join(dir, child.name);
+      if (child.isDirectory()) {
+        if (IGNORED_NAMES.has(child.name)) continue;
+        walk(full);
+        continue;
       }
-      const path = params.path === undefined ? "" : params.path;
-      if (typeof path !== "string") throw invalidParams("'path' must be a string");
-      const record = await deps.workspaces.get(workspaceId);
-      if (record === undefined) {
-        throw new RpcError(say("That workspace is not registered.", "没有这个工作区。"), INVALID_PARAMS, {
+      if (!child.isFile() || !DATA_SUFFIXES.has(extname(child.name).toLowerCase())) continue;
+      seen += 1;
+      let stats;
+      try {
+        stats = lstatSync(full);
+      } catch {
+        continue;
+      }
+      if (importStateOf(registry, relative(root, full).split(sep).join("/"), { size: stats.size, mtimeMs: stats.mtimeMs }) === "imported") continue;
+      // 从文件所在目录一路数到根：每一级祖先目录都 +1。
+      let rel = relative(root, dir).split(sep).join("/");
+      while (rel !== "") {
+        counts.set(rel, (counts.get(rel) ?? 0) + 1);
+        rel = dirnameOf(rel);
+      }
+      counts.set("", (counts.get("") ?? 0) + 1);
+    }
+  };
+  walk(root);
+  return counts;
+}
+
+/** 相对目录路径的父路径（`a/b` → `a`，`a` → 空串表示根）。 */
+function dirnameOf(rel: string): string {
+  const index = rel.lastIndexOf("/");
+  return index === -1 ? "" : rel.slice(0, index);
+}
+
+export type PendingFile = {
+  readonly path: string;
+  readonly state: "new" | "changed";
+  readonly size: number;
+  readonly mtimeMs: number;
+};
+
+/** 列出整个工作区里还没导入或已变化的数据文件，给「Changes」页签用；扫描上限与树相同。 */
+export function listPendingFiles(workdir: string): { files: PendingFile[]; truncated: boolean } {
+  const root = realpathSync.native(workdir);
+  const registry = readRegistry(root);
+  const files: PendingFile[] = [];
+  let truncated = false;
+  const walk = (dir: string): void => {
+    if (truncated) return;
+    let children: Dirent[];
+    try {
+      children = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const child of children) {
+      if (child.isSymbolicLink() || isHidden(child.name)) continue;
+      const full = join(dir, child.name);
+      if (child.isDirectory()) {
+        if (!IGNORED_NAMES.has(child.name)) walk(full);
+        continue;
+      }
+      if (!child.isFile() || !DATA_SUFFIXES.has(extname(child.name).toLowerCase())) continue;
+      if (files.length >= PENDING_SCAN_LIMIT) {
+        truncated = true;
+        return;
+      }
+      let stats;
+      try {
+        stats = lstatSync(full);
+      } catch {
+        continue;
+      }
+      const rel = relative(root, full).split(sep).join("/");
+      const state = importStateOf(registry, rel, { size: stats.size, mtimeMs: stats.mtimeMs });
+      if (state !== "new" && state !== "changed") continue;
+      files.push({ path: rel, state, size: stats.size, mtimeMs: stats.mtimeMs });
+    }
+  };
+  walk(root);
+  files.sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
+  return { files, truncated };
+}
+
+export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore }): Record<string, RpcMethod> {
+  const requireRecord = async (params: MethodParams) => {
+    const workspaceId = params.workspaceId;
+    if (typeof workspaceId !== "string" || !WORKSPACE_ID_PATTERN.test(workspaceId)) {
+      throw invalidParams("'workspaceId' must look like ws_<16 hex>");
+    }
+    const record = await deps.workspaces.get(workspaceId);
+    if (record === undefined) {
+      throw new RpcError(say("That workspace is not registered.", "没有这个工作区。"), INVALID_PARAMS, {
+        kind: "invalid_input",
+        reason: "workspace_not_found",
+      });
+    }
+    return record;
+  };
+
+  return {
+    /** 还没导入或已变化的数据文件：数据面板「Changes」页签的列表。 */
+    "workspace.pending": async (params: MethodParams) => {
+      const record = await requireRecord(params);
+      try {
+        return { workspaceId: record.workspaceId, ...listPendingFiles(record.workdir) };
+      } catch {
+        throw new RpcError(say("The workspace folder is not available.", "工作区目录不可用。"), INVALID_PARAMS, {
           kind: "invalid_input",
-          reason: "workspace_not_found",
+          reason: "workspace_unavailable",
         });
       }
+    },
+    "workspace.tree": async (params: MethodParams) => {
+      const path = params.path === undefined ? "" : params.path;
+      if (typeof path !== "string") throw invalidParams("'path' must be a string");
+      const record = await requireRecord(params);
       try {
-        return { workspaceId, ...listDirectory(record.workdir, path) };
+        return { workspaceId: record.workspaceId, ...listDirectory(record.workdir, path) };
       } catch (error) {
         if (error instanceof RpcError) throw error;
         // 工作区目录本身没了（被移走或卸载）：与 workspace_unavailable 一致，让界面提示重新选择。
