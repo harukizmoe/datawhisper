@@ -587,6 +587,9 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, current.Name).Bold().Grow(1).MinWidth(0).SingleLine()
 					ui.Badge(c, a.tr("data.badgeMounted"))
+					if iconButton(c, icons.Settings, a.tr("ws.settings")).Clicked() {
+						a.openWorkspaceSettings(current.WorkspaceID)
+					}
 				})
 				ui.Text(c, current.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable()
 				// 权限模式在输入区底栏切换：这里只说明它管什么。

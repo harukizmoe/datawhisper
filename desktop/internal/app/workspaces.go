@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,229 @@ type workspaceDialog struct {
 	instructions string
 	busy         bool
 	err          string
+}
+
+// workspaceSettings 是「工作区设置」对话框的状态。
+type workspaceSettings struct {
+	open         bool
+	workspaceID  string
+	name         string
+	instructions string
+	workdir      string
+	syncedAt     string
+	busy         string // save / sync / remove；非空时按钮禁用并转圈
+	err          string
+	notice       string
+	confirmOpen  bool
+}
+
+// openWorkspaceSettings 打开某个工作区的设置；记录已经不在时什么都不做。
+func (a *app) openWorkspaceSettings(workspaceID string) {
+	record := a.workspaceByID(workspaceID)
+	if record == nil {
+		return
+	}
+	a.wsSet = workspaceSettings{
+		open:         true,
+		workspaceID:  workspaceID,
+		name:         record.Name,
+		instructions: record.Instructions,
+		workdir:      record.Workdir,
+		syncedAt:     record.SyncedAt,
+	}
+}
+
+// saveWorkspaceSettings 保存名字与说明；服务端清掉名字里的换行、限制说明长度。
+func (a *app) saveWorkspaceSettings() {
+	client, settings := a.client, a.wsSet
+	if client == nil || settings.busy != "" {
+		return
+	}
+	if strings.TrimSpace(settings.name) == "" {
+		a.wsSet.err = a.tr("ws.nameRequired")
+		return
+	}
+	a.wsSet.busy, a.wsSet.err, a.wsSet.notice = "save", "", ""
+	name, instructions := settings.name, settings.instructions
+	conversationID := a.conv
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		out, err := client.UpdateWorkspace(ctx, conversationID, settings.workspaceID, &name, &instructions)
+		a.post(func() {
+			if client != a.client || a.wsSet.workspaceID != settings.workspaceID {
+				return
+			}
+			a.wsSet.busy = ""
+			if err != nil {
+				a.wsSet.err = a.sourceErr(err)
+				return
+			}
+			a.replaceWorkspace(out.Workspace)
+			a.wsSet.notice = a.tr("ws.settingsSaved")
+		})
+	}()
+}
+
+// refreshWorkspace 重新导入目录里新增或变化的数据文件，并刷新文件树与 Changes 列表。
+func (a *app) refreshWorkspace() {
+	client, settings := a.client, a.wsSet
+	if client == nil || settings.busy != "" {
+		return
+	}
+	a.wsSet.busy, a.wsSet.err, a.wsSet.notice = "sync", "", ""
+	workspaceID := settings.workspaceID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		out, err := client.SyncWorkspace(ctx, workspaceID)
+		a.post(func() {
+			if client != a.client || a.wsSet.workspaceID != workspaceID {
+				return
+			}
+			a.wsSet.busy = ""
+			if err != nil {
+				a.wsSet.err = a.sourceErr(err)
+				return
+			}
+			if out.Workspace != nil {
+				a.replaceWorkspace(*out.Workspace)
+				a.wsSet.syncedAt = out.Workspace.SyncedAt
+			}
+			added := 0
+			for _, item := range out.Added {
+				added += len(item.Tables)
+			}
+			a.wsSet.notice = a.tr("ws.syncDone", "added", strconv.Itoa(added), "skipped", strconv.Itoa(out.Skipped))
+			if a.ft.workspaceID == workspaceID {
+				a.reloadTree()
+				a.loadPending()
+			}
+		})
+	}()
+}
+
+// removeWorkspaceFromSettings 移除工作区记录；目录本身不动，仍有对话属于它时服务端拒绝。
+func (a *app) removeWorkspaceFromSettings() {
+	client, settings := a.client, a.wsSet
+	if client == nil || settings.busy != "" {
+		return
+	}
+	a.wsSet.busy, a.wsSet.err, a.wsSet.notice = "remove", "", ""
+	workspaceID := settings.workspaceID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, err := client.RemoveWorkspace(ctx, workspaceID)
+		a.post(func() {
+			if client != a.client {
+				return
+			}
+			a.wsSet.busy = ""
+			if err != nil {
+				a.wsSet.err = a.sourceErr(err)
+				return
+			}
+			a.dropWorkspace(workspaceID)
+			if a.wsSet.workspaceID == workspaceID {
+				a.wsSet.open = false
+			}
+			a.src.notice, a.src.noticeErr = a.tr("ws.removed", "name", settings.name), false
+		})
+	}()
+}
+
+// replaceWorkspace 用服务端返回的最新记录替换索引里的那一份（名字、说明、同步时间）。
+func (a *app) replaceWorkspace(updated service.Workspace) {
+	for i := range a.ws.list {
+		if a.ws.list[i].WorkspaceID == updated.WorkspaceID {
+			a.ws.list[i] = updated
+			return
+		}
+	}
+}
+
+// dropWorkspace 从索引里去掉一个工作区（记录已被移除）。
+func (a *app) dropWorkspace(workspaceID string) {
+	kept := a.ws.list[:0]
+	for _, workspace := range a.ws.list {
+		if workspace.WorkspaceID != workspaceID {
+			kept = append(kept, workspace)
+		}
+	}
+	a.ws.list = kept
+	if a.newChatScope == workspaceID {
+		a.newChatScope = ""
+	}
+	if a.ft.workspaceID == workspaceID {
+		a.ft = fileTree{}
+	}
+	// 数据面板里的当前工作区卡片也来自这份索引：记录没了就别再画它。
+	if a.src.current != nil && a.src.current.WorkspaceID == workspaceID {
+		a.src.current = nil
+	}
+}
+
+// workspaceSettingsView 画「工作区设置」对话框。
+func (a *app) workspaceSettingsView(c *ui.Context) {
+	if !a.wsSet.open {
+		return
+	}
+	t := c.Theme()
+	ui.Modal(c, &a.wsSet.open, func() {
+		ui.Column(c).WidthPercent(70).MaxWidth(480).MinWidth(300).Gap(10).Children(func() {
+			ui.Text(c, a.tr("ws.settingsTitle")).Bold()
+			ui.Text(c, a.wsSet.workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable().SingleLine().Tooltip(a.wsSet.workdir)
+			ui.Field(c, a.tr("data.fieldName"), func() {
+				ui.TextInput(c, &a.wsSet.name).Label(a.tr("ws.name"))
+			})
+			ui.Field(c, a.tr("ws.instructions"), func() {
+				ui.TextArea(c, &a.wsSet.instructions).Label(a.tr("ws.instructionsLabel")).Placeholder(a.tr("ws.instructionsHint")).Lines(3, 8)
+			})
+			// 共享来源：一个工作区只有一份，所有对话共用；这里只列出状态并给刷新入口。
+			ui.Column(c).Gap(4).Padding(8).Radius(8).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Children(func() {
+				ui.Text(c, a.tr("ws.sharedSource")).FontSize(a.fs(textCaption)).Bold()
+				hint := a.tr("ws.sharedSourceNone")
+				if a.wsSet.syncedAt != "" {
+					hint = a.tr("ws.sharedSourceSynced", "when", formatWhen(a.wsSet.syncedAt))
+				}
+				ui.Text(c, hint).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					if a.wsSet.busy == "sync" {
+						ui.Spinner(c)
+					}
+					if ui.Button(c, a.tr("ws.refreshFiles")).Disabled(a.wsSet.busy != "").Tooltip(a.tr("ws.refreshFilesTip")).Clicked() {
+						a.refreshWorkspace()
+					}
+				})
+			})
+			if a.wsSet.notice != "" {
+				ui.Text(c, a.wsSet.notice).FontSize(a.fs(textCaption)).TextColor(t.Success)
+			}
+			if a.wsSet.err != "" {
+				ui.Text(c, a.wsSet.err).FontSize(a.fs(textCaption)).TextColor(t.Danger)
+			}
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				if ui.Button(c, a.tr("ws.removeWorkspace")).Disabled(a.wsSet.busy != "").Clicked() {
+					a.wsSet.confirmOpen = true
+				}
+				ui.Spacer(c)
+				if a.wsSet.busy != "" {
+					ui.Spinner(c)
+				}
+				if ui.Button(c, a.tr("chat.cancel")).Disabled(a.wsSet.busy != "").Clicked() {
+					a.wsSet.open = false
+				}
+				if ui.PrimaryButton(c, a.tr("ws.save")).Disabled(a.wsSet.busy != "").Clicked() {
+					a.saveWorkspaceSettings()
+				}
+			})
+			ui.Text(c, a.tr("ws.removeHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			if ui.AlertDialog(c, &a.wsSet.confirmOpen, a.tr("ws.removeConfirmTitle"), a.tr("ws.removeConfirmBody", "name", a.wsSet.name), a.tr("chat.cancel"), a.tr("ws.removeWorkspace")) == 1 {
+				a.removeWorkspaceFromSettings()
+			}
+		})
+	})
 }
 
 // newScope 是下一条新对话要归属的工作区 id；空串表示普通聊天。沿用上次的选择。
@@ -272,6 +496,9 @@ func (a *app) workspaceSection(c *ui.Context, t *ui.Theme) {
 		header.PopoverMenu(func(m *ui.Menu) {
 			if m.Item(a.tr("ws.newChatIn", "name", row.name)).Disabled(row.missing).Chosen() {
 				a.newChatInWorkspace(row.id)
+			}
+			if m.Item(a.tr("ws.settings")).Chosen() {
+				a.openWorkspaceSettings(row.id)
 			}
 		})
 		if folded {

@@ -114,6 +114,7 @@ type WorkspaceAdded struct {
 type WorkspaceMount struct {
 	Workspace *Workspace       `json:"workspace"`
 	Sources   []Source         `json:"sources"`
+	Tables    []string         `json:"tables"`
 	Added     []WorkspaceAdded `json:"added"`
 	Errors    []string         `json:"errors"`
 	Skipped   int              `json:"skipped"`
