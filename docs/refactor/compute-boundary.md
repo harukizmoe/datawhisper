@@ -92,7 +92,9 @@ compute 侧还留着两个对应的 RPC（`tool.fetch_table_parse`、`tool.load_
 
 现状：每个 `server/src/ipc/*` 方法自己校验参数（`stringParam`、`patternParam`、`conversationIdParam` 等），错误统一带 `kind` / `reason`，桌面端按 `kind` 决定提示。**compute 侧同样有一层校验**（Python 的 `INVALID_PARAMS`），因为 compute 也要能被单独启动调试。
 
-目标（handoff step 1）：把 server 每个 RPC 的入参整理成 JSON Schema，在派发前统一校验一次，把手写校验收敛成「Schema + 语义检查」两层。收益是错误信息一致、桌面端不需要逐个方法猜参数名；风险是目前有 50 多个方法，Schema 与手写校验并存期间容易出现两套规则。落地顺序：先给 `workspace.*` 与 `source.*` 加 Schema（这两组最近改得最多），再推到其余分组。
+目标（handoff step 1）：把 server 每个 RPC 的入参整理成一份声明，在方法入口统一校验一次，把手写校验收敛成「形状 + 语义」两层。收益是错误信息一致、桌面端不需要逐个方法猜参数名；风险是方法多（50+），两套规则并存期间容易漂移。
+
+进展：`server/src/ipc/params.ts` 提供 `checkParams(params, rules)` 与 `WORKSPACE_ID_RULE`，只做形状校验（类型、必填、`pattern`、`minLength`、数组项数与元素形状），语义仍留在方法里；错误文案可以按旧实现逐字覆盖，避免界面提示漂移。已采用：`workspace.tree` / `workspace.pending` / `workspace.readFile`（`test/params.test.ts`、`test/workspace-tree.test.ts`）。未采用：`workspace.create/update/sync/importFiles/prepare/remove` 与整个 `source.*` 组仍是手写校验，按「最近改得最多的组先动」的顺序排在后面。
 
 ## 验证方式
 
