@@ -82,15 +82,13 @@ func (a *app) chatPage(c *ui.Context) {
 						}
 					})
 				}).Grow(1).MinWidth(0).Padding(20, 24, 0, 24).Gap(14).Justify(ui.End).Scrollbars(false)
-				a.navRail(c, messages, dock)
+				a.navRail(c, messages)
 			})
 		}
-		// 输入区浮在消息列之上（参考 Tern）：贴底的绝对定位，不再占消息列的高度；消息列最后一行底下留一块
-		// 等高的空白（用上一帧量到的高度），滚到底时最后一条不会被盖住。
-		ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Background(t.Background).Bind(&a.cv.dockRef).Children(func() {
-			// 消息列在输入区上方渐隐（参考 Tern 输入区边缘的虚化）：一条贴在输入区顶边、向上伸出的渐变，
-			// 把滚到那里的内容淡成背景色。
-			ui.Box(c).Absolute().Left(0).Right(0).Top(-28).Height(28).Gradient(t.Background.Alpha(0), t.Background, 180)
+		// 输入区浮在消息列之上（参考 Tern）：消息列铺满整个面板，输入区是贴底的绝对定位，自己不占高度；
+		// 卡片是磨砂玻璃（frost.go），滚到它下面的文字模糊后透出来。消息列最后一行底下留一块等高的空白
+		// （用上一帧量到的高度），滚到底时最后一条不会被盖住。
+		ui.Column(c).Absolute().Left(0).Right(0).Bottom(0).Bind(&a.cv.dockRef).Children(func() {
 			if a.chat.Failure != "" && !a.chat.Busy {
 				a.centered(c, func() {
 					ui.Text(c, a.tr("chat.lastReplyFailed", "error", a.chat.Failure)).FontSize(a.fs(textCaption)).TextColor(t.Warning).Padding(4, 0)
@@ -608,7 +606,7 @@ func (a *app) turnMeta(c *ui.Context, info turnInfo) {
 // navRail 是对话列右侧的导航轨（参考 Tern），同时当滚动条用：它占满对话列的整个高度（到输入区上沿为止），
 // 每条用户消息一道短横，按它在对话中的位置排布，视口所在的那条用强调色，点一道横线跳到那条提问，悬停时显示
 // 提问的第一行；列表自己的滚动条关掉了，改由这条轨上的滑块表示视口位置，滑块只在刚滚动过的一小会儿显示。
-func (a *app) navRail(c *ui.Context, messages []conversation.Message, bottom float32) {
+func (a *app) navRail(c *ui.Context, messages []conversation.Message) {
 	var users []int
 	for i, m := range messages {
 		if m.Role == "user" {
@@ -641,7 +639,7 @@ func (a *app) navRail(c *ui.Context, messages []conversation.Message, bottom flo
 		c.After(left)
 	}
 	n := float32(len(messages))
-	ui.Column(c).Width(14).Shrink(0).Margin(0, 0, bottom, 0).AlignItems(ui.Center).Children(func() {
+	ui.Column(c).Width(14).Shrink(0).AlignItems(ui.Center).Children(func() {
 		// 滑块：按行下标估位置与长度（各行高度不同，是近似值）；到底时贴底。
 		if rows := float32(len(a.cv.rows)); shown && rows > 0 && lastRow >= row {
 			height := max(float32(lastRow-row+1)/rows*100, 6)
@@ -710,9 +708,9 @@ func (a *app) composer(c *ui.Context) {
 					return
 				}
 			}
-			ui.Column(c).Radius(radiusBubble).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Padding(10, 12, 8, 12).Gap(6).Bind(&a.cv.cardRef).Children(func() {
+			frosted(ui.Column(c).Radius(radiusBubble).BorderWidth(1).BorderColor(t.Border), t.Surface, radiusBubble).Padding(10, 12, 8, 12).Gap(6).Bind(&a.cv.cardRef).Children(func() {
 				area := ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
-					BorderWidth(0).Background(t.Surface).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
+					BorderWidth(0).Background(t.Surface.Alpha(0)).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
 					if k.Key != ui.KeyEnter || k.Mods != 0 {
 						return false // Shift+Enter 换行
 					}

@@ -35,7 +35,7 @@ func (a *app) collapsedComposer(c *ui.Context, busy bool) {
 			break
 		}
 	}
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Radius(radiusBubble).Background(t.Surface).BorderWidth(1).BorderColor(t.Border).Padding(4, 8).Children(func() {
+	frosted(ui.Row(c).Gap(6).AlignItems(ui.Center).Radius(radiusBubble).BorderWidth(1).BorderColor(t.Border), t.Surface, radiusBubble).Padding(4, 8).Children(func() {
 		if ui.ButtonBase(c).Label(a.tr("chat.expandComposer")).Grow(1).MinWidth(0).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6, 6).Children(func() {
 				ui.Text(c, hint).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Italic().SingleLine().Grow(1).MinWidth(0)
