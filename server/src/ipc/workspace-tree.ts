@@ -6,6 +6,7 @@
  * 改用户文件只由 agent 的 `workspace_*` 工具完成，并受对话的权限模式约束。
  */
 
+import { checkParams, WORKSPACE_ID_RULE } from "./params.ts";
 import { lstatSync, opendirSync, readFileSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { extname, isAbsolute, join, relative, sep } from "node:path";
 import { say } from "../i18n.ts";
@@ -336,6 +337,13 @@ export function readTextFile(workdir: string, rel: string): { path: string; text
   };
 }
 
+/** 三个方法的入参：工作区 id 必填；树与预览的路径可选（空串是根），预览时不能为空。 */
+const TREE_PARAMS = { workspaceId: WORKSPACE_ID_RULE, path: { type: "string", optional: true } } as const;
+const PREVIEW_PARAMS = {
+  workspaceId: WORKSPACE_ID_RULE,
+  path: { type: "string", minLength: 1, message: "'path' must be a non-empty string" },
+} as const;
+
 export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore }): Record<string, RpcMethod> {
   const requireRecord = async (params: MethodParams) => {
     const workspaceId = params.workspaceId;
@@ -355,8 +363,8 @@ export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore
   return {
     /** 读一个文本文件的开头：文件树里点文件时的预览。 */
     "workspace.readFile": async (params: MethodParams) => {
-      const path = params.path;
-      if (typeof path !== "string" || path.trim() === "") throw invalidParams("'path' must be a non-empty string");
+      checkParams(params, PREVIEW_PARAMS);
+      const path = params.path as string;
       const record = await requireRecord(params);
       try {
         return { workspaceId: record.workspaceId, ...readTextFile(record.workdir, path) };
@@ -371,6 +379,7 @@ export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore
 
     /** 还没导入或已变化的数据文件：数据面板「Changes」页签的列表。 */
     "workspace.pending": async (params: MethodParams) => {
+      checkParams(params, { workspaceId: WORKSPACE_ID_RULE });
       const record = await requireRecord(params);
       try {
         return { workspaceId: record.workspaceId, ...listPendingFiles(record.workdir) };
@@ -382,8 +391,8 @@ export function workspaceTreeMethods(deps: { readonly workspaces: WorkspaceStore
       }
     },
     "workspace.tree": async (params: MethodParams) => {
-      const path = params.path === undefined ? "" : params.path;
-      if (typeof path !== "string") throw invalidParams("'path' must be a string");
+      checkParams(params, TREE_PARAMS);
+      const path = params.path === undefined ? "" : (params.path as string);
       const record = await requireRecord(params);
       try {
         return { workspaceId: record.workspaceId, ...listDirectory(record.workdir, path) };
