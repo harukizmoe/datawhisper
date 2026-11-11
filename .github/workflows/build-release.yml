@@ -108,10 +108,20 @@ jobs:
           }
           tmp="$(mktemp -d)"
           # 服务：stdout 第一行是 ready 记录，读到 EOF 就优雅退出。
-          head -1 < <(DW_DATA_DIR="$tmp" "$res/bin/datawhisper-server" < /dev/null) | tee /dev/stderr | grep -q '"type":"ready"'
-          # compute：发一条 ping 走完整的 JSON-RPC 通路。
+          DW_DATA_DIR="$tmp" "$res/bin/datawhisper-server" < /dev/null > "$tmp/server.out" 2> "$tmp/server.err" || true
+          head -5 "$tmp/server.out" "$tmp/server.err"
+          grep -q '"type"[[:space:]]*:[[:space:]]*"ready"' "$tmp/server.out" || {
+            echo "the bundled server did not report ready" >&2
+            exit 2
+          }
+          # compute：发一条 ping 走完整的 JSON-RPC 通路；输出原样打出来，失败时不用再翻日志找原因。
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' \
-            | timeout 60 "$res/bin/datawhisper-compute" | grep -q '"id":1'
+            | timeout 120 "$res/bin/datawhisper-compute" > "$tmp/compute.out" 2> "$tmp/compute.err" || true
+          head -5 "$tmp/compute.out" "$tmp/compute.err"
+          grep -q '"id"[[:space:]]*:[[:space:]]*1' "$tmp/compute.out" || {
+            echo "the bundled compute did not answer ping" >&2
+            exit 2
+          }
       - name: Checksums
         run: |
           cd desktop/build/linux-amd64
