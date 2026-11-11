@@ -83,7 +83,8 @@ export function createPermissionGate(options: {
           ),
         };
       }
-      if (reply === "allow_chat") {
+      // 破坏性操作每次都问：界面不提供「本对话都允许」，但客户端直接发 allow_chat 也不能把它写进名单。
+      if (reply === "allow_chat" && change === "edit") {
         await state.update(conversationId, (draft) => {
           const allowed = new Set(draft.permissionAllow ?? []);
           allowed.add(call.name);

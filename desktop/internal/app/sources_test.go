@@ -1550,3 +1550,20 @@ func TestChipMenuSurvivesTheComposerGracePeriod(t *testing.T) {
 	tt.Frame()
 	expectTexts(t, tt, []string{"sales"}, []string{"Write a message"})
 }
+
+func TestDismissedPermissionDoesNotComeBackFromALateSnapshot(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales"}
+	f.requests = []service.PermissionRequest{{RequestID: "r1", ConversationID: 1, Tool: "workspace_write_file", Summary: "Write file note.md", AllowChat: true}}
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the permission card", func() bool { return len(a.perm.requests) == 1 })
+
+	// permission.resolved 先到：卡片撤下。此时服务端对 permission.pending 的快照（拉取发生在撤下之前）仍带着它。
+	a.dropPermission("r1")
+	a.perm.scope = service.ConversationScope{}
+	a.loadPermissions()
+	q.pump(t, tt, "the late snapshot", func() bool { return a.perm.scope.Mode == service.ModeManual })
+	if len(a.perm.requests) != 0 {
+		t.Errorf("a dismissed request came back: %v", a.perm.requests)
+	}
+}

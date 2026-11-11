@@ -15,7 +15,9 @@ type permState struct {
 	requests []service.PermissionRequest
 	// busy 记着已经发出回复、还没得到确认的请求，卡片上的按钮据此禁用。
 	busy map[string]bool
-	err  string
+	// dropped 记着本对话里已撤下的请求：拉取状态的响应可能晚于 resolved 通知到达，不能让已撤下的卡片复活。
+	dropped map[string]bool
+	err     string
 	// gen 丢弃过期的响应：切换对话或重新加载后，旧请求的结果不能覆盖新状态。
 	gen int
 }
@@ -88,7 +90,12 @@ func (a *app) loadPermissions() {
 				a.perm.scope = scope
 			}
 			if requestsErr == nil {
-				a.perm.requests = requests
+				a.perm.requests = a.perm.requests[:0:0]
+				for _, request := range requests {
+					if !a.perm.dropped[request.RequestID] {
+						a.perm.requests = append(a.perm.requests, request)
+					}
+				}
 			}
 		})
 	}()
@@ -120,6 +127,10 @@ func (a *app) dropPermission(requestID string) {
 	}
 	a.perm.requests = kept
 	delete(a.perm.busy, requestID)
+	if a.perm.dropped == nil {
+		a.perm.dropped = map[string]bool{}
+	}
+	a.perm.dropped[requestID] = true
 }
 
 // respondPermission 回复一个待审批请求。回复被接受后服务端会推 permission.resolved，这里也先撤下卡片。

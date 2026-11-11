@@ -107,6 +107,21 @@ describe("权限闸门", () => {
     expect((await other).tool).toBe("workspace_edit_file");
   });
 
+  test("破坏性工具收到 allow_chat 也只放行这一次，不写进名单", async () => {
+    const { gate, broker, state } = await setup("manual");
+    const seen = nextRequest(broker);
+    const first = gate.check({ name: "workspace_delete_file", arguments: { file_path: "a.csv" } }, 1, ctx);
+    const request = await seen;
+    expect(request.allowChat).toBe(false);
+    broker.respond(request.requestId, "allow_chat");
+    expect(await first).toBeUndefined();
+    expect((await state.read(1)).permissionAllow).toBeUndefined();
+
+    const again = nextRequest(broker);
+    void gate.check({ name: "workspace_delete_file", arguments: { file_path: "a.csv" } }, 1, ctx).catch(() => undefined);
+    expect((await again).tool).toBe("workspace_delete_file");
+  });
+
   test("plan 直接拒绝、bypass 直接放行，两者都不打扰用户", async () => {
     const plan = await setup("plan");
     expect((await plan.gate.check(write, 1, ctx))?.block).toContain("Plan mode");
