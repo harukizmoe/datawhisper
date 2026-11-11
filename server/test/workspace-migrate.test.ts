@@ -170,6 +170,6 @@ describe("旧名字里的 📁", () => {
     });
 
     await stripLegacyNames({ state, workspaces, conversationIds: [1] });
-    expect(state.peek(1).sources[0].name).toBe("📁 project");
+    expect(state.peek(1).sources[0]?.name).toBe("📁 project");
   });
 });
