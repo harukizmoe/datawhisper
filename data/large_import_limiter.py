@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from compute.i18n import say
 from infrastructure.paths import content_data_path
 
 
@@ -122,7 +123,7 @@ def acquire_large_import_slot(ctx) -> Iterator[ImportSlot]:
                 ctx.record_event("large_import_slot_acquired", slot=slot.slot)
             break
         if not waiting:
-            ctx.set_progress(1, "等待大型文件导入槽位")
+            ctx.set_progress(1, say("Waiting for a large-file import slot", "等待大型文件导入槽位"))
             if hasattr(ctx, "record_event"):
                 ctx.record_event("large_import_slot_waiting")
             waiting = True

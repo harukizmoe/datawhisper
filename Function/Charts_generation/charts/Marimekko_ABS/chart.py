@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,15 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(类别) + y列(数值) + Z列(数值)"
-_DESC = "在柱状图的基础上，通过改变柱宽引入第二变量"
+def _data_fmt() -> str:
+    return say("x column (category) + y column (value) + Z column (value)", "x列(类别) + y列(数值) + Z列(数值)")
+
+
+def _desc() -> str:
+    return say(
+        "Extends a bar chart by varying bar width to introduce a second variable",
+        "在柱状图的基础上，通过改变柱宽引入第二变量",
+    )
 
 # 麦肯锡配色方案（全局强制）
 _MCKINSEY_COLORS = [
@@ -83,7 +91,7 @@ def generate(
     x: str = "x",
     y: str = "y",
     group: str = None,
-    title: str = "马赛克图_绝对数值版",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -104,14 +112,14 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     if df is None or df.empty:
-        return ChartResult(warnings=["输入数据为空"])
+        return ChartResult(warnings=[say("Input data is empty", "输入数据为空")])
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Marimekko Chart (absolute values)", "马赛克图_绝对数值版"))
 
     # -------- 1) 识别宽格式 / 长格式 --------
     # 宽格式：首列是x，其余列全数值（如 年份 + 各品牌）。
@@ -156,11 +164,11 @@ def generate(
             group_col = None
 
         if x_col not in df.columns:
-            return ChartResult(warnings=[f"找不到列 [{x_col}]"])
+            return ChartResult(warnings=[say(f"Column [{x_col}] not found", f"找不到列 [{x_col}]")])
         if not y_col or y_col not in df.columns:
-            return ChartResult(warnings=[f"找不到数值列 [{y_col}]"])
+            return ChartResult(warnings=[say(f"Numeric column [{y_col}] not found", f"找不到数值列 [{y_col}]")])
         if not pd.api.types.is_numeric_dtype(df[y_col]):
-            return ChartResult(warnings=[f"列 [{y_col}] 不是数值类型"])
+            return ChartResult(warnings=[say(f"Column [{y_col}] is not numeric", f"列 [{y_col}] 不是数值类型")])
 
         use_cols = [x_col, y_col] + ([group_col] if group_col else [])
         data = df[use_cols].copy()
@@ -172,7 +180,7 @@ def generate(
         group_col_actual = group_col
 
     if data.empty:
-        return ChartResult(warnings=["有效数据为空"])
+        return ChartResult(warnings=[say("No valid data", "有效数据为空")])
 
     # -------- 标签系统（仅显示，不影响计算）--------
     label_x = x_label_user or str(x_col_actual) or "x"
@@ -187,7 +195,7 @@ def generate(
     x_totals = data.groupby(x_col_actual, sort=False)[y_col_actual].sum()
     grand_total = float(x_totals.sum())
     if grand_total <= 0:
-        return ChartResult(warnings=["总值为0"])
+        return ChartResult(warnings=[say("Total value is 0", "总值为0")])
 
     x_order = list(x_totals.index)
     x_widths = (x_totals / grand_total).to_dict()
@@ -244,12 +252,17 @@ def generate(
                 name=str(g),
                 marker=dict(color=color_map[g]),
                 customdata=customdata,
-                hovertemplate=(
+                hovertemplate=say(
                     f"<b>{label_x}</b>: %{{customdata[0]}}<br>"
                     f"<b>{label_group}</b>: %{{customdata[1]}}<br>"
                     f"<b>{label_y}</b>: %{{customdata[2]:,.0f}}<br>"
                     f"<b>{label_x} total {label_y}</b>: %{{customdata[3]:,.0f}}<br>"
-                    f"<b>柱宽(总占比)</b>: %{{customdata[4]:.1%}}<extra></extra>"
+                    "<b>Bar width (share of total)</b>: %{customdata[4]:.1%}<extra></extra>",
+                    f"<b>{label_x}</b>: %{{customdata[0]}}<br>"
+                    f"<b>{label_group}</b>: %{{customdata[1]}}<br>"
+                    f"<b>{label_y}</b>: %{{customdata[2]:,.0f}}<br>"
+                    f"<b>{label_x} total {label_y}</b>: %{{customdata[3]:,.0f}}<br>"
+                    "<b>柱宽(总占比)</b>: %{customdata[4]:.1%}<extra></extra>"
                 ),
                 showlegend=True
             ))
@@ -266,7 +279,10 @@ def generate(
             width=widths,
             marker=dict(color=_palette[0]),
             customdata=customdata,
-            hovertemplate=(
+            hovertemplate=say(
+                f"<b>{label_x}</b>: %{{customdata[0]}}<br>"
+                f"{label_y}: %{{y:,.0f}}<br>"
+                "Bar width (share of total): %{customdata[1]:.1%}<extra></extra>",
                 f"<b>{label_x}</b>: %{{customdata[0]}}<br>"
                 f"{label_y}: %{{y:,.0f}}<br>"
                 "柱宽(总占比): %{customdata[1]:.1%}<extra></extra>"
@@ -285,7 +301,7 @@ def generate(
         paper_bgcolor="white",
         margin=dict(l=50, r=50, t=70, b=70),
         xaxis=dict(
-            title=f"{label_x}（柱宽={label_y}占比）",
+            title=say(f"{label_x} (bar width = share of {label_y})", f"{label_x}（柱宽={label_y}占比）"),
             range=[0, 1],
             tickmode="array",
             tickvals=tickvals,
@@ -294,7 +310,7 @@ def generate(
             zeroline=False
         ),
         yaxis=dict(
-            title=f"{label_y}（绝对值）",
+            title=say(f"{label_y} (absolute value)", f"{label_y}（绝对值）"),
             tickformat=",.0f",
             showgrid=True,
             gridcolor="#f0f0f0",
@@ -307,10 +323,10 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "marimekko_ABS", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "marimekko_ABS", "plotly", _data_fmt(), _desc(), chart_html)
 
     if not html or len(html) < 500:
-        return ChartResult(warnings=["生成的 HTML 无效或过短"])
+        return ChartResult(warnings=[say("Generated HTML is invalid or too short", "生成的 HTML 无效或过短")])
 
     meta = {
         "chart_id": "marimekko",

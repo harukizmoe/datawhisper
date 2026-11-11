@@ -23,6 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,15 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "label列(地区名) + value列(数值)"
-_DESC = "白色底图，按地区数据改变颜色，颜色深浅代表数值大小。"
+def _data_fmt() -> str:
+    return say("label column (region name) + value column (numeric)", "label列(地区名) + value列(数值)")
+
+
+def _desc() -> str:
+    return say(
+        "White base map; regions are colored by data, with darker colors for larger values.",
+        "白色底图，按地区数据改变颜色，颜色深浅代表数值大小。",
+    )
 
 
 def _fuzzy_match_region(name: str) -> str:
@@ -145,7 +153,7 @@ def generate(
     excel_path: str = None,
     label: str = None,
     value: str = "value",
-    title: str = "面量图",
+    title: str = None,
     maptype: str = "china",
     **kwargs,
 ) -> ChartResult:
@@ -169,16 +177,16 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     # ── 参数解析 ──────────────────────────────────────────
     lbl_hint = mapping.get("label")
     lbl_hint = lbl_hint if lbl_hint is not None else label
     val_hint = mapping.get("value")
     val_hint = val_hint if val_hint is not None else value
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Choropleth Map", "面量图"))
     maptype = options.get("maptype", maptype)
 
     # ── 列识别 ────────────────────────────────────────────
@@ -214,10 +222,10 @@ def generate(
 
     # ── 验证必要字段 ──────────────────────────────────────
     if _label is None:
-        warnings_.append("找不到地区名列 [label]")
+        warnings_.append(say("Region name column [label] not found", "找不到地区名列 [label]"))
         return ChartResult(warnings=warnings_)
     if _value is None:
-        warnings_.append("找不到数值列 [value]")
+        warnings_.append(say("Value column [value] not found", "找不到数值列 [value]"))
         return ChartResult(warnings=warnings_)
 
     # ── 构建数据 ──────────────────────────────────────────
@@ -233,13 +241,13 @@ def generate(
             val = round(val, 2)
         except Exception as e:
             log.warning("[chart] 图表生成异常: %s", e)
-            warnings_.append(f"行数据解析失败: {e}")
+            warnings_.append(say(f"Row parsing failed: {e}", f"行数据解析失败: {e}"))
             continue
 
         pairs.append((name, val))
 
     if not pairs:
-        warnings_.append("没有有效数据点")
+        warnings_.append(say("No valid data points", "没有有效数据点"))
         return ChartResult(warnings=warnings_)
 
     # ── 值域 ──────────────────────────────────────────────
@@ -288,7 +296,7 @@ def generate(
 
     # title/列名 用户/LLM 可控，HTML 转义防注入
     esc_title = _html.escape(str(title))
-    esc_sub = _html.escape(f"共 {len(pairs)} 个地区 · 字段: {_value} · 范围: {vmin:.2f} ~ {vmax:.2f}")
+    esc_sub = _html.escape(say(f"{len(pairs)} regions · Field: {_value} · Range: {vmin:.2f} ~ {vmax:.2f}", f"共 {len(pairs)} 个地区 · 字段: {_value} · 范围: {vmin:.2f} ~ {vmax:.2f}"))
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">

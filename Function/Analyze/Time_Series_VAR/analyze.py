@@ -28,21 +28,28 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Optional, Tuple, List
 
+from compute.i18n import say
+
 warnings.filterwarnings("ignore")
 
 # ── 模块元数据 ──────────────────────────────────────────────────────────────
 ANALYSIS_ID   = "Time_Series_VAR"
-ANALYSIS_NAME = "VAR 多变量时间序列预测"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("VAR multivariate time-series forecast", "VAR 多变量时间序列预测")
+ANALYSIS_DESC = say(
+    "Jointly models several related time-series variables with a vector autoregression (VAR) to capture dynamic dependencies between them. "
+    "Automatically selects the lag order and outputs per-variable forecasts and Granger causality test results. "
+    "Use groupby_column to specify the time column name (or comma-separated variable column names); "
+    "use n_deciles to specify the number of forecast steps (default 6).",
     "使用向量自回归（VAR）对多个相关时间序列变量联合建模，捕捉变量间动态依赖关系。"
     "自动选择滞后阶数，输出各变量预测值与格兰杰因果检验结果。"
     "通过 groupby_column 指定时间列名（或逗号分隔的多变量列名）；"
-    "通过 n_deciles 指定预测步数（默认 6）。"
+    "通过 n_deciles 指定预测步数（默认 6）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
-    "groupby_column (时间列名；或逗号分隔的多个变量列名如 'sales,cost')",
-    "n_deciles (预测步数，默认 6)",
+    say("groupby_column (time column name; or comma-separated variable column names such as 'sales,cost')", "groupby_column (时间列名；或逗号分隔的多个变量列名如 'sales,cost')"),
+    say("n_deciles (forecast steps, default 6)", "n_deciles (预测步数，默认 6)"),
 ]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
 
@@ -254,11 +261,11 @@ def _build_metrics_df(
     diffs: dict,
 ) -> pd.DataFrame:
     rows = [
-        {"metric": "模型类型",    "value": f"VAR({lag})"},
-        {"metric": "滞后阶数 p", "value": lag},
-        {"metric": "变量数量",    "value": len(original_data.columns)},
-        {"metric": "变量列表",    "value": ", ".join(original_data.columns)},
-        {"metric": "训练样本数",  "value": len(original_data)},
+        {"metric": say("Model type", "模型类型"),    "value": f"VAR({lag})"},
+        {"metric": say("Lag order p", "滞后阶数 p"), "value": lag},
+        {"metric": say("Number of variables", "变量数量"),    "value": len(original_data.columns)},
+        {"metric": say("Variable list", "变量列表"),    "value": ", ".join(original_data.columns)},
+        {"metric": say("Training samples", "训练样本数"),  "value": len(original_data)},
         {"metric": "AIC",        "value": round(result.aic, 4)},
         {"metric": "BIC",        "value": round(result.bic, 4)},
     ]
@@ -275,12 +282,12 @@ def _build_metrics_df(
             continue
         mae  = float(np.mean(np.abs(y_true[mask] - y_pred[mask])))
         rmse = float(np.sqrt(np.mean((y_true[mask] - y_pred[mask]) ** 2)))
-        rows.append({"metric": f"MAE（{col}）",  "value": round(mae,  4)})
-        rows.append({"metric": f"RMSE（{col}）", "value": round(rmse, 4)})
+        rows.append({"metric": say(f"MAE ({col})", f"MAE（{col}）"),  "value": round(mae,  4)})
+        rows.append({"metric": say(f"RMSE ({col})", f"RMSE（{col}）"), "value": round(rmse, 4)})
     # 差分信息
     diff_info = ", ".join(f"{c}:d={v}" for c, v in diffs.items() if v > 0)
     if diff_info:
-        rows.append({"metric": "差分处理", "value": diff_info})
+        rows.append({"metric": say("Differencing", "差分处理"), "value": diff_info})
     return pd.DataFrame(rows)
 
 
@@ -300,25 +307,25 @@ def _build_md(
     original_data: pd.DataFrame,
 ) -> str:
     L = [
-        f"## VAR 多变量时间序列预测 — `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 模型类型 | VAR({lag}) |",
-        f"| 建模变量 | {', '.join(value_cols)} |",
-        f"| 时间列 | `{time_col or '（行序号）'}` |",
-        f"| 训练样本数 | {len(original_data)} |",
-        f"| 预测步数 | {steps} |",
+        say(f"## VAR multivariate time-series forecast — `{target_col}`\n", f"## VAR 多变量时间序列预测 — `{target_col}`\n"),
+        say("### Model overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Model type | VAR({lag}) |", f"| 模型类型 | VAR({lag}) |"),
+        say(f"| Modeled variables | {', '.join(value_cols)} |", f"| 建模变量 | {', '.join(value_cols)} |"),
+        say(f"| Time column | `{time_col or '(row index)'}` |", f"| 时间列 | `{time_col or '（行序号）'}` |"),
+        say(f"| Training samples | {len(original_data)} |", f"| 训练样本数 | {len(original_data)} |"),
+        say(f"| Forecast steps | {steps} |", f"| 预测步数 | {steps} |"),
         "",
-        "### 模型评估",
-        "| 指标 | 值 |", "|------|-----|",
+        say("### Model evaluation", "### 模型评估"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
     ]
     for _, row in metrics_df.iterrows():
         L.append(f"| {row['metric']} | {row['value']} |")
     L.append("")
 
     # 格兰杰因果
-    L += ["### 格兰杰因果检验（p<0.05 表示显著）",
-          "| 原因变量 | 效果变量 | F 统计量 | p 值 | 显著 |",
+    L += [say("### Granger causality test (p<0.05 means significant)", "### 格兰杰因果检验（p<0.05 表示显著）"),
+          say("| Cause | Effect | F statistic | p-value | Significant |", "| 原因变量 | 效果变量 | F 统计量 | p 值 | 显著 |"),
           "|----------|----------|--------:|-----:|:----:|"]
     for _, row in granger_df.iterrows():
         L.append(f"| `{row['cause']}` | `{row['effect']}` "
@@ -326,8 +333,8 @@ def _build_md(
     L.append("")
 
     # 预测摘要（仅 target_col）
-    L += [f"### `{target_col}` 预测摘要",
-          "| 时间点 | 预测值 |",
+    L += [say(f"### `{target_col}` forecast summary", f"### `{target_col}` 预测摘要"),
+          say("| Time | Forecast |", "| 时间点 | 预测值 |"),
           "|--------|-------:|"]
     for i, (idx, row) in enumerate(forecast_df.iterrows()):
         if i >= 10:
@@ -340,26 +347,28 @@ def _build_md(
     sig_causes = granger_df[
         (granger_df["effect"] == target_col) & (granger_df["significant"] == "✓")
     ]
-    L.append("### 核心洞察")
+    L.append(say("### Key insights", "### 核心洞察"))
     if not sig_causes.empty:
-        causes_str = "、".join(f"`{c}`" for c in sig_causes["cause"])
-        L.append(f"- **格兰杰因果**：{causes_str} 对 `{target_col}` 有显著的预测能力（p<0.05）。")
+        causes_str = say(", ", "、").join(f"`{c}`" for c in sig_causes["cause"])
+        L.append(say(f"- **Granger causality**: {causes_str} have significant predictive power for `{target_col}` (p<0.05).", f"- **格兰杰因果**：{causes_str} 对 `{target_col}` 有显著的预测能力（p<0.05）。"))
     else:
-        L.append(f"- 未检测到其他变量对 `{target_col}` 的显著格兰杰因果关系（p≥0.05）。")
+        L.append(say(f"- No significant Granger causality from other variables to `{target_col}` detected (p≥0.05).", f"- 未检测到其他变量对 `{target_col}` 的显著格兰杰因果关系（p≥0.05）。"))
 
     last_actual = float(original_data[target_col].iloc[-1])
     last_pred   = float(forecast_df[target_col].iloc[-1])
-    direction   = "上升" if last_pred > last_actual else "下降"
+    direction   = say("up", "上升") if last_pred > last_actual else say("down", "下降")
     chg_pct     = abs(last_pred - last_actual) / abs(last_actual) * 100 if last_actual != 0 else 0
-    L.append(f"- **预测趋势**：`{target_col}` 预测期末值（{last_pred:.4f}）"
-             f"较历史末值（{last_actual:.4f}）{direction}，幅度约 **{chg_pct:.1f}%**。")
+    L.append(say(f"- **Forecast trend**: the end-of-horizon value of `{target_col}` ({last_pred:.4f}) "
+                 f"is {direction} about **{chg_pct:.1f}%** vs the last observed value ({last_actual:.4f}).",
+                 f"- **预测趋势**：`{target_col}` 预测期末值（{last_pred:.4f}）"
+                 f"较历史末值（{last_actual:.4f}）{direction}，幅度约 **{chg_pct:.1f}%**。"))
 
     L += [
         "",
-        "> **图表建议**",
-        f"> - Line_Chart(analysis_result)：x=ds，y={target_col}_pred + {target_col}_actual",
-        "> - Heatmap(analysis_breakdown)：x=effect，y=cause，value=f_stat — 因果热图",
-        "> - analysis_metrics 表直接展示各变量 MAE/RMSE",
+        say("> **Chart suggestions**", "> **图表建议**"),
+        say(f"> - Line_Chart(analysis_result): x=ds, y={target_col}_pred + {target_col}_actual", f"> - Line_Chart(analysis_result)：x=ds，y={target_col}_pred + {target_col}_actual"),
+        say("> - Heatmap(analysis_breakdown): x=effect, y=cause, value=f_stat — causality heatmap", "> - Heatmap(analysis_breakdown)：x=effect，y=cause，value=f_stat — 因果热图"),
+        say("> - Show the analysis_metrics table directly for per-variable MAE/RMSE", "> - analysis_metrics 表直接展示各变量 MAE/RMSE"),
     ]
     return "\n".join(L)
 
@@ -384,14 +393,14 @@ def run(
     n_deciles      : 预测步数（默认 6）
     """
     progress = progress_callback or (lambda _pct, _message="": None)
-    progress(5, "正在校验 VAR 输入")
+    progress(5, say("Validating VAR input", "正在校验 VAR 输入"))
     try:
         from statsmodels.tsa.api import VAR as _chk  # noqa
     except ImportError:
-        raise ImportError("statsmodels 未安装。请运行：pip install statsmodels>=0.14.0")
+        raise ImportError(say("statsmodels is not installed. Run: pip install statsmodels>=0.14.0", "statsmodels 未安装。请运行：pip install statsmodels>=0.14.0"))
 
     if target_column not in df.columns:
-        raise ValueError(f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}")
+        raise ValueError(say(f"Target column '{target_column}' does not exist. Available columns: {', '.join(df.columns[:20])}", f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}"))
 
     steps = int(n_deciles) if int(n_deciles) > 0 else _DEFAULT_STEPS
 
@@ -432,27 +441,29 @@ def run(
         value_cols = value_cols[:8]
 
     if len(value_cols) < 2:
-        raise ValueError(
+        raise ValueError(say(
+            "VAR needs at least 2 numeric columns. Make sure the data contains several numeric columns, "
+            "or specify several column names with commas via groupby_column, e.g. 'sales,cost'.",
             "VAR 需要至少 2 个数值列。请确保数据中包含多个数值列，"
             "或通过 groupby_column 用逗号指定多个列名，如 'sales,cost'。"
-        )
+        ))
 
     # ── 准备数据 ───────────────────────────────────────────────────────────
-    progress(20, "正在准备多变量时序数据")
+    progress(20, say("Preparing multivariate time-series data", "正在准备多变量时序数据"))
     data = _prepare_multivariate(df, time_col, value_cols)
     if len(data) < _MAX_LAG * 2 + 4:
-        raise ValueError(f"有效数据点不足（{len(data)} 个），VAR 需要更多样本。")
+        raise ValueError(say(f"Not enough valid data points ({len(data)}); VAR needs more samples.", f"有效数据点不足（{len(data)} 个），VAR 需要更多样本。"))
 
     # ── 差分至平稳 ─────────────────────────────────────────────────────────
-    progress(35, "正在进行平稳化处理")
+    progress(35, say("Making series stationary", "正在进行平稳化处理"))
     stationary_data, diffs = _make_stationary(data)
 
     # ── 拟合 VAR ───────────────────────────────────────────────────────────
-    progress(55, "正在拟合 VAR 模型")
+    progress(55, say("Fitting VAR model", "正在拟合 VAR 模型"))
     var_result, lag = _fit_var(stationary_data, _MAX_LAG)
 
     # ── 预测 ───────────────────────────────────────────────────────────────
-    progress(72, "正在生成多变量预测")
+    progress(72, say("Generating multivariate forecast", "正在生成多变量预测"))
     forecast_df = _forecast_var(var_result, stationary_data, steps, lag)
 
     # 将差分预测还原（逆差分）
@@ -476,7 +487,7 @@ def run(
             fitted_df[col] = fitted_df[col].cumsum() + last_orig
 
     # ── 格兰杰因果 ─────────────────────────────────────────────────────────
-    progress(85, "正在执行格兰杰因果检验")
+    progress(85, say("Running Granger causality test", "正在执行格兰杰因果检验"))
     granger_df = _granger_test(stationary_data, min(lag, 4))
 
     # ── 结果表 ────────────────────────────────────────────────────────────
@@ -495,5 +506,5 @@ def run(
         original_data = data,
     )
 
-    progress(98, "VAR 分析计算完成")
+    progress(98, say("VAR analysis completed", "VAR 分析计算完成"))
     return result_df, granger_df, metrics_df, markdown

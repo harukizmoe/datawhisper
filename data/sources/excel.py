@@ -15,6 +15,8 @@ from ._utils import (
     _list_tables, _new_conn, _preview_table_dict, _query, _register,
     _table_schema_str, is_write_sql, snapshot_tables_to_memory,
 )
+from compute.i18n import say
+
 from .base import DataSource
 
 log = logging.getLogger(__name__)
@@ -58,11 +60,11 @@ def parse_excel_job(ctx, file_path: str, db_path: str, filename: str) -> dict:
     complete = False
     conn = None
     try:
-        ctx.set_progress(2, f"正在读取 {filename} 的工作表")
+        ctx.set_progress(2, say(f"Reading worksheets of {filename}", f"正在读取 {filename} 的工作表"))
         ctx.check_canceled()
         engine, sheet_names = _excel_engine(file_path)
         if not sheet_names:
-            raise ValueError("Excel 文件中未发现工作表。")
+            raise ValueError(say("No worksheets found in the Excel file.", "Excel 文件中未发现工作表。"))
 
         total = len(sheet_names)
         completed = 0
@@ -72,7 +74,7 @@ def parse_excel_job(ctx, file_path: str, db_path: str, filename: str) -> dict:
             completed = done
             ctx.set_progress(
                 5 + int(done * 78 / total),
-                f"已解析工作表 {done}/{total}：{sheet}",
+                say(f"Parsed worksheet {done}/{total}: {sheet}", f"已解析工作表 {done}/{total}：{sheet}"),
             )
 
         parsed = _parse_sheets_parallel(
@@ -99,13 +101,13 @@ def parse_excel_job(ctx, file_path: str, db_path: str, filename: str) -> dict:
                 tables.append(table)
             ctx.set_progress(
                 83 + int(index * 14 / total),
-                f"正在注册工作表 {index}/{total}：{sheet}",
+                say(f"Registering worksheet {index}/{total}: {sheet}", f"正在注册工作表 {index}/{total}：{sheet}"),
             )
 
         if not tables:
-            raise ValueError("Excel 文件中未发现有效工作表。")
+            raise ValueError(say("No valid worksheets found in the Excel file.", "Excel 文件中未发现有效工作表。"))
         complete = True
-        ctx.set_progress(100, f"{filename} 解析完成，共 {len(tables)} 个工作表")
+        ctx.set_progress(100, say(f"{filename} parsed, {len(tables)} worksheet(s) in total", f"{filename} 解析完成，共 {len(tables)} 个工作表"))
         return {
             "file_path": str(Path(file_path).resolve()),
             "db_path": str(target.resolve()),
@@ -347,7 +349,7 @@ class ExcelDataSource(DataSource):
         obj._tables = _list_tables(obj._conn)
         if not obj._tables:
             obj._conn.close()
-            raise ValueError("解析数据库中没有可用工作表。")
+            raise ValueError(say("The parsed database has no usable worksheets.", "解析数据库中没有可用工作表。"))
         return obj
 
     # ── A6 shadow (副 sheet) support — only for from_database instances ─────
@@ -381,7 +383,7 @@ class ExcelDataSource(DataSource):
             self._tables.append(table)
 
         if not self._tables:
-            raise ValueError("Excel 文件中未发现有效工作表。")
+            raise ValueError(say("No valid worksheets found in the Excel file.", "Excel 文件中未发现有效工作表。"))
 
     def get_schema(self) -> str:
         parts: List[str] = []

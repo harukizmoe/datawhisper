@@ -1,0 +1,1751 @@
+package app
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"datawhisper/desktop/internal/service"
+	"datawhisper/desktop/internal/supervisor"
+	"github.com/egoist/mygo/ui"
+)
+
+// sourceCall 是假服务收到的一次请求，参数保留 JSON 解码后的形状，便于检查实际发出去的字段。
+type sourceCall struct {
+	Method string
+	Params map[string]any
+}
+
+// sourceFake 是数据面板用到的 stateful 假服务：它保存来源、表、工作区、产物与已保存配置，并按真服务的
+// 形状回答 source.* / workspace.* / artifact.*，包括上传的三段式与各种拒绝原因。
+type sourceFake struct {
+	t *testing.T
+
+	mu      sync.Mutex
+	closers []func()
+	calls   []sourceCall
+
+	sources []service.Source
+	preview map[string]service.SourcePreview
+	rows    map[string]service.PreviewTable
+	schema  map[string]string
+	work    []service.Workspace
+	current *service.Workspace
+	// mode 与 requests 是假服务的权限状态：当前模式（空表示手动）与等着回复的请求。
+	mode     string
+	requests []service.PermissionRequest
+	// sessions 是 conversation.list 返回的会话；scopes 把对话映射到工作区。
+	sessions []service.Session
+	scopes   map[int]string
+	// tree 是 workspace.tree 的内容：键是相对工作区根的目录路径。
+	tree    map[string][]service.TreeEntry
+	arts    []service.Artifact
+	artText map[string]string
+	configs []service.SourceConfig
+
+	// 上传：uploadDir 是 staging 目录，maxBytes 是 begin 声明的上限。
+	uploadDir string
+	maxBytes  int64
+	// uploadErr / openErr / workErr 让测试模拟服务端拒绝。
+	uploadErr map[string]any
+	openErr   map[string]any
+	workErr   map[string]any
+	// lastTicket 记录最近一次开票返回的路径，测试用它检查界面有没有提前写盘。
+	lastTicket  string
+	fileAtOpen  bool   // source.open 时 staging 文件是否存在
+	bytesAtOpen string // source.open 时 staging 文件的内容
+}
+
+func newSourceFake(t *testing.T) *sourceFake {
+	f := &sourceFake{
+		t:         t,
+		preview:   map[string]service.SourcePreview{},
+		rows:      map[string]service.PreviewTable{},
+		schema:    map[string]string{},
+		artText:   map[string]string{},
+		uploadDir: t.TempDir(),
+		maxBytes:  512 << 20,
+	}
+	t.Cleanup(f.stop)
+	return f
+}
+
+func (f *sourceFake) stop() {
+	f.mu.Lock()
+	closers := f.closers
+	f.closers = nil
+	f.mu.Unlock()
+	for i := len(closers) - 1; i >= 0; i-- {
+		closers[i]()
+	}
+}
+
+// ready 新建一对内存管道并在另一端启动假服务，返回 supervisor 的 ready 状态。
+func (f *sourceFake) ready(pid int) supervisor.Status {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan struct{})
+	f.mu.Lock()
+	f.closers = append(f.closers,
+		func() { _ = inW.Close() },
+		func() { _ = outW.Close() },
+		func() { close(done) },
+	)
+	f.mu.Unlock()
+	go f.serve(inR, outW)
+	return supervisor.Status{State: supervisor.StateReady, Pipe: &fakePipe{r: outR, w: inW, done: done}, PID: pid}
+}
+
+func (f *sourceFake) record(method string, raw json.RawMessage) {
+	params := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &params)
+	}
+	f.mu.Lock()
+	f.calls = append(f.calls, sourceCall{Method: method, Params: params})
+	f.mu.Unlock()
+}
+
+// call 返回最后一次 method 的参数；没有时返回 nil。
+func (f *sourceFake) call(method string) map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.calls) - 1; i >= 0; i-- {
+		if f.calls[i].Method == method {
+			return f.calls[i].Params
+		}
+	}
+	return nil
+}
+
+// methods 返回收到的全部方法名，按到达顺序。
+func (f *sourceFake) methods() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.calls))
+	for i, c := range f.calls {
+		out[i] = c.Method
+	}
+	return out
+}
+
+// seedSource 放进一份来源、它的预览与 schema。调用前不能持锁。
+func (f *sourceFake) seedSource(src service.Source, tables []string, sp service.SourcePreview, schema string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	src.Tables = tables
+	f.sources = append(f.sources, src)
+	f.preview[src.ID] = sp
+	f.schema[src.ID] = schema
+	for _, table := range sp.Tables {
+		f.rows[src.ID+"/"+table.Name] = service.PreviewTable{
+			Name:      table.Name,
+			Columns:   table.Columns,
+			Rows:      [][]string{{"alpha", "1"}, {"beta", "2"}, {"gamma", "3"}},
+			TotalRows: table.TotalRows,
+		}
+	}
+}
+
+func (f *sourceFake) serve(in io.Reader, out io.Writer) {
+	write := func(record any) {
+		line, err := json.Marshal(record)
+		if err != nil {
+			f.t.Errorf("fake source service: %v", err)
+			return
+		}
+		f.mu.Lock()
+		_, _ = fmt.Fprintf(out, "%s\n", line)
+		f.mu.Unlock()
+	}
+	respond := func(id json.RawMessage, result any) {
+		write(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+	}
+	fail := func(id json.RawMessage, rpcErr map[string]any) {
+		write(map[string]any{"jsonrpc": "2.0", "id": id, "error": rpcErr})
+	}
+	event := func(subscriptionID int, name string, fields map[string]any) {
+		params := map[string]any{"subscriptionId": subscriptionID, "event": name}
+		for k, v := range fields {
+			params[k] = v
+		}
+		write(map[string]any{"jsonrpc": "2.0", "method": "conversation.event", "params": params})
+	}
+	// snapshotLocked 复制来源列表；调用方必须持有 f.mu。
+	snapshotLocked := func() []service.Source {
+		return append([]service.Source(nil), f.sources...)
+	}
+	notFound := map[string]any{"code": -32000, "message": "data source not found", "data": map[string]any{"kind": "not_found"}}
+
+	br := bufio.NewReader(in)
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return
+		}
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &req) != nil || req.Method == "" {
+			continue
+		}
+		var params map[string]any
+		_ = json.Unmarshal(req.Params, &params)
+
+		switch req.Method {
+		case "conversation.list":
+			respond(req.ID, map[string]any{"conversations": []any{}})
+		case "session.list":
+			f.mu.Lock()
+			sessions := append([]service.Session{}, f.sessions...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"conversations": sessions})
+		case "conversation.create":
+			f.record(req.Method, req.Params)
+			respond(req.ID, map[string]any{"id": 3})
+		case "conversation.scopes":
+			f.mu.Lock()
+			scopes := make([]map[string]any, 0, len(f.scopes))
+			for conversationID, workspaceID := range f.scopes {
+				scopes = append(scopes, map[string]any{"conversationId": conversationID, "workspace_id": workspaceID})
+			}
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"scopes": scopes})
+		case "conversation.subscribe":
+			// 与真服务一致：先推 snapshot，再回订阅响应。
+			event(1, "snapshot", map[string]any{"seq": 0, "view": fakeView(1)})
+			respond(req.ID, map[string]any{"subscriptionId": 1})
+		case "conversation.unsubscribe":
+			respond(req.ID, map[string]any{"ok": true})
+		case "models.available":
+			respond(req.ID, map[string]any{"models": []any{}})
+		case "usage.summary":
+			respond(req.ID, map[string]any{"models": map[string]any{}, "tools": map[string]any{}})
+
+		case "source.list":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"sources": list})
+
+		case "source.upload.begin":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			uploadErr := f.uploadErr
+			if uploadErr != nil {
+				f.mu.Unlock()
+				fail(req.ID, uploadErr)
+				continue
+			}
+			filename, _ := params["filename"].(string)
+			id := strings.Repeat("a", 32)
+			path := filepath.Join(f.uploadDir, id)
+			f.lastTicket = path
+			maxBytes := f.maxBytes
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{
+				"uploadId": id, "path": path, "filename": filename,
+				"maxBytes": maxBytes, "expiresAt": "2026-01-01T00:15:00.000Z",
+			})
+
+		case "source.open":
+			f.record(req.Method, req.Params)
+			uploadID, _ := params["uploadId"].(string)
+			sourceID, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			openErr := f.openErr
+			path := f.lastTicket
+			if uploadID != "" {
+				if data, err := os.ReadFile(path); err == nil {
+					f.fileAtOpen, f.bytesAtOpen = true, string(data)
+				}
+			}
+			if openErr != nil {
+				f.mu.Unlock()
+				fail(req.ID, openErr)
+				continue
+			}
+			if sourceID != "" {
+				found := false
+				for i := range f.sources {
+					if f.sources[i].ID != sourceID {
+						continue
+					}
+					f.sources[i].Open = true
+					src := f.sources[i]
+					list := snapshotLocked()
+					f.mu.Unlock()
+					respond(req.ID, map[string]any{"source": src, "sources": list})
+					found = true
+					break
+				}
+				if found {
+					continue
+				}
+				f.mu.Unlock()
+				fail(req.ID, notFound)
+				continue
+			}
+			if uploadID != "" {
+				if !f.fileAtOpen {
+					f.mu.Unlock()
+					fail(req.ID, map[string]any{"code": -32602, "message": "upload missing", "data": map[string]any{"kind": "invalid_input", "reason": "upload_missing"}})
+					continue
+				}
+				src := service.Source{ID: "s_00000002", Name: "orders.csv", Kind: "csv", Active: true, Open: true, Tables: []string{"orders"}}
+				f.sources = append(f.sources, src)
+				_ = os.Remove(path)
+				list := snapshotLocked()
+				f.mu.Unlock()
+				respond(req.ID, map[string]any{"source": src, "sources": list})
+				continue
+			}
+			// 远程连接：返回一个来源；密钥只在这次请求里，返回值没有它。
+			kind, _ := params["kind"].(string)
+			name, _ := params["name"].(string)
+			if name == "" {
+				name = "Remote " + kind
+			}
+			// 远程 SQL 来源刚连上时没有分析表（服务端默认不开放任何表）；其余类型直接带表。
+			tables := []string{"orders"}
+			if kind == "sql" {
+				tables = nil
+			}
+			src := service.Source{ID: "s_00000003", Name: name, Kind: kind, Active: true, Open: true, Tables: tables}
+			f.sources = append(f.sources, src)
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"source": src, "sources": list, "configId": "ds_00000001"})
+
+		case "source.toggle":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			found := false
+			for i := range f.sources {
+				if f.sources[i].ID != id {
+					continue
+				}
+				active := !f.sources[i].Active
+				if raw, ok := params["active"].(bool); ok {
+					active = raw
+				}
+				f.sources[i].Active = active
+				src := f.sources[i]
+				list := snapshotLocked()
+				f.mu.Unlock()
+				respond(req.ID, map[string]any{"ok": true, "active": active, "source": src, "sources": list})
+				found = true
+				break
+			}
+			if !found {
+				f.mu.Unlock()
+				fail(req.ID, notFound)
+			}
+
+		case "source.close":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			for i := range f.sources {
+				if f.sources[i].ID == id {
+					f.sources[i].Open = false
+				}
+			}
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "closed": true, "sources": list})
+
+		case "source.remove":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			kept := make([]service.Source, 0, len(f.sources))
+			for _, src := range f.sources {
+				if src.ID != id {
+					kept = append(kept, src)
+				}
+			}
+			f.sources = kept
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "sources": list})
+
+		case "source.removeAll":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			f.sources = nil
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "removed": 0, "sources": []any{}})
+
+		case "source.schema":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			schema := f.schema[id]
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"source_id": id, "schema": schema})
+
+		case "source.preview":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			sp, ok := f.preview[id]
+			list := snapshotLocked()
+			f.mu.Unlock()
+			if !ok {
+				fail(req.ID, map[string]any{"code": -32000, "message": "no data source", "data": map[string]any{"kind": "not_found"}})
+				continue
+			}
+			sp.Sources = list
+			respond(req.ID, sp)
+
+		case "source.previewTable":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			table, _ := params["table"].(string)
+			f.mu.Lock()
+			rows, ok := f.rows[id+"/"+table]
+			f.mu.Unlock()
+			if !ok {
+				fail(req.ID, map[string]any{"code": -32000, "message": "preview failed", "data": map[string]any{"kind": "invalid_input", "reason": "preview_failed"}})
+				continue
+			}
+			respond(req.ID, rows)
+
+		case "source.setAnalysisTables":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			tables := []string{}
+			if raw, ok := params["tables"].([]any); ok {
+				for _, item := range raw {
+					if name, ok := item.(string); ok {
+						tables = append(tables, name)
+					}
+				}
+			}
+			respond(req.ID, map[string]any{"source_id": id, "tables": tables})
+
+		case "source.config.list":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			configs := append([]service.SourceConfig(nil), f.configs...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"configs": configs})
+
+		case "source.rename":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			name, _ := params["name"].(string)
+			f.mu.Lock()
+			var renamed service.Source
+			for i := range f.sources {
+				if f.sources[i].ID == id {
+					f.sources[i].Name = name
+					renamed = f.sources[i]
+				}
+			}
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"source": renamed, "sources": list})
+
+		case "source.update":
+			f.record(req.Method, req.Params)
+			id, _ := params["sourceId"].(string)
+			f.mu.Lock()
+			var updated service.Source
+			for i := range f.sources {
+				if f.sources[i].ID == id {
+					if name, _ := params["name"].(string); name != "" {
+						f.sources[i].Name = name
+					}
+					updated = f.sources[i]
+				}
+			}
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"source": updated, "sources": list})
+
+		case "source.test":
+			f.record(req.Method, req.Params)
+			respond(req.ID, map[string]any{"name": "Remote sql", "tables": 3, "server": "PostgreSQL 16.0"})
+
+		case "source.config.remove":
+			f.record(req.Method, req.Params)
+			id, _ := params["id"].(string)
+			f.mu.Lock()
+			kept := make([]service.SourceConfig, 0, len(f.configs))
+			for _, cfg := range f.configs {
+				if cfg.ID != id {
+					kept = append(kept, cfg)
+				}
+			}
+			f.configs = kept
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "removed": id, "configs": kept})
+
+		case "workspace.list":
+			f.record(req.Method, req.Params)
+			// 与真实服务一致：带了 conversationId 就必须是正整数（首页没有对话，客户端得省略它）。
+			var listParams struct {
+				ConversationID *int `json:"conversationId"`
+			}
+			_ = json.Unmarshal(req.Params, &listParams)
+			if listParams.ConversationID != nil && *listParams.ConversationID < 1 {
+				fail(req.ID, map[string]any{"code": -32602, "message": "'conversationId' must be a positive integer"})
+				continue
+			}
+			f.mu.Lock()
+			view := map[string]any{
+				"workspace":  f.current,
+				"workspaces": append([]service.Workspace(nil), f.work...),
+			}
+			f.mu.Unlock()
+			respond(req.ID, view)
+
+		case "workspace.tree":
+			f.record(req.Method, req.Params)
+			var treeParams struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(req.Params, &treeParams)
+			f.mu.Lock()
+			entries := append([]service.TreeEntry{}, f.tree[treeParams.Path]...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"path": treeParams.Path, "entries": entries, "truncated": false, "total": len(entries)})
+
+		case "workspace.create":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			workErr := f.workErr
+			if workErr != nil {
+				f.mu.Unlock()
+				fail(req.ID, workErr)
+				continue
+			}
+			path, _ := params["path"].(string)
+			name, _ := params["name"].(string)
+			if name == "" {
+				name = filepath.Base(path)
+			}
+			ws := service.Workspace{
+				WorkspaceID: "ws_0000000000000001",
+				Workdir:     path,
+				Name:        name,
+				SourceID:    "s_00000004",
+				Available:   true,
+			}
+			kept := make([]service.Workspace, 0, len(f.work)+1)
+			for _, existing := range f.work {
+				if existing.WorkspaceID != ws.WorkspaceID {
+					kept = append(kept, existing)
+				}
+			}
+			f.work = append(kept, ws)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"existing": false, "workspace": ws, "added": []any{}, "errors": []any{}, "skipped": 0, "reused": 0})
+
+		case "conversation.moveToWorkspace":
+			f.record(req.Method, req.Params)
+			id, _ := params["workspaceId"].(string)
+			f.mu.Lock()
+			var moved *service.Workspace
+			for i := range f.work {
+				if f.work[i].WorkspaceID == id {
+					f.work[i].Current = true
+					copied := f.work[i]
+					moved = &copied
+				}
+			}
+			if moved == nil {
+				f.mu.Unlock()
+				fail(req.ID, map[string]any{"code": -32000, "message": "workspace not found: " + id, "data": map[string]any{"kind": "not_found"}})
+				continue
+			}
+			f.current = moved
+			f.sources = append(f.sources, service.Source{ID: moved.SourceID, Name: moved.Name, Kind: "workspace_persistent", Active: true, Open: true, Tables: []string{"sales"}})
+			list := snapshotLocked()
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "workspace": moved, "sources": list})
+
+		case "conversation.scope":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			scope := map[string]any{"scope": "chat", "workspace_id": nil, "mode": nil, "allowed_tools": []string{}}
+			if f.current != nil {
+				mode := f.mode
+				if mode == "" {
+					mode = service.ModeManual
+				}
+				scope = map[string]any{"scope": "workspace", "workspace_id": f.current.WorkspaceID, "mode": mode, "allowed_tools": []string{}}
+			}
+			f.mu.Unlock()
+			respond(req.ID, scope)
+
+		case "conversation.setMode":
+			f.record(req.Method, req.Params)
+			mode, _ := params["mode"].(string)
+			f.mu.Lock()
+			f.mode = mode
+			workspaceID := ""
+			if f.current != nil {
+				workspaceID = f.current.WorkspaceID
+			}
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "scope": "workspace", "workspace_id": workspaceID, "mode": mode, "allowed_tools": []string{}})
+
+		case "permission.pending":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			pending := append([]service.PermissionRequest(nil), f.requests...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"requests": pending})
+
+		case "permission.respond":
+			f.record(req.Method, req.Params)
+			id, _ := params["requestId"].(string)
+			f.mu.Lock()
+			kept := make([]service.PermissionRequest, 0, len(f.requests))
+			for _, request := range f.requests {
+				if request.RequestID != id {
+					kept = append(kept, request)
+				}
+			}
+			f.requests = kept
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true})
+
+		case "workspace.remove":
+			f.record(req.Method, req.Params)
+			id, _ := params["workspaceId"].(string)
+			f.mu.Lock()
+			kept := make([]service.Workspace, 0, len(f.work))
+			for _, ws := range f.work {
+				if ws.WorkspaceID != id {
+					kept = append(kept, ws)
+				}
+			}
+			f.work = kept
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"ok": true, "removed_workspace_id": id, "files_deleted": 0, "directory_deleted": false})
+
+		case "artifact.list":
+			f.record(req.Method, req.Params)
+			f.mu.Lock()
+			arts := append([]service.Artifact(nil), f.arts...)
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"artifacts": arts})
+
+		case "artifact.read":
+			f.record(req.Method, req.Params)
+			name, _ := params["name"].(string)
+			as, _ := params["as"].(string)
+			f.mu.Lock()
+			text, ok := f.artText[name]
+			f.mu.Unlock()
+			if !ok {
+				fail(req.ID, map[string]any{"code": -32000, "message": "artifact not found: " + name, "data": map[string]any{"kind": "not_found"}})
+				continue
+			}
+			out := map[string]any{
+				"name": name, "path": "/data/outputs/exports/" + name, "size": len(text),
+				"modified": "2026-01-01T00:00:00.000Z", "content_type": "text/csv; charset=utf-8",
+			}
+			if as == "text" {
+				out["text"] = text
+			}
+			respond(req.ID, out)
+
+		default:
+			fail(req.ID, map[string]any{"code": -32601, "message": "method not found: " + req.Method})
+		}
+	}
+}
+
+// openDataPanel 启动假服务，切到会话 1 并展开右侧数据面板。
+func openDataPanel(t *testing.T, f *sourceFake, width, height int) (*app, *uiQueue, *ui.Tester) {
+	t.Helper()
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, width, height)
+	a.onService(f.ready(61))
+	a.show(1)
+	q.run()
+	tt.Frame()
+	if err := tt.Click("Data"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the data panel", func() bool { return a.src.loaded && !a.src.loading })
+	return a, q, tt
+}
+
+func TestDataPanelListsSourcesAndPreviewsTable(t *testing.T) {
+	f := newSourceFake(t)
+	three := 3
+	f.seedSource(
+		service.Source{ID: "s_00000001", Name: "sales.csv", Kind: "csv", Active: true, Open: true},
+		[]string{"sales"},
+		service.SourcePreview{
+			SourceName: "sales.csv",
+			Tables: []service.PreviewTableInfo{{
+				Name: "sales", Columns: []string{"name", "amount"}, TotalRows: &three,
+				SourceID: "s_00000001", SourceName: "sales.csv",
+			}},
+		},
+		"CREATE TABLE sales (name VARCHAR, amount BIGINT);",
+	)
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	expectTexts(t, tt, []string{
+		"sales.csv", "csv", "1 tables · open", "In analysis", "Preview", "More", "Remove",
+		"Import", "The service sets the limit when the import starts.",
+	}, nil)
+
+	if err := tt.Click("Preview"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the table preview", func() bool { return a.src.table != nil })
+	expectTexts(t, tt, []string{
+		"Preview: sales.csv", "name", "amount", "alpha", "beta", "gamma",
+		"3 rows · 2 columns", "Schema", "CREATE TABLE sales",
+	}, nil)
+
+	previewParams := f.call("source.preview")
+	if previewParams == nil || previewParams["sourceId"] != "s_00000001" || previewParams["conversationId"] != float64(1) {
+		t.Errorf("source.preview params: %v", previewParams)
+	}
+	tableParams := f.call("source.previewTable")
+	if tableParams == nil || tableParams["table"] != "sales" || tableParams["sourceId"] != "s_00000001" {
+		t.Errorf("source.previewTable params: %v", tableParams)
+	}
+}
+
+func TestDataPanelTogglesAnalysisAndRemovesWithConfirmation(t *testing.T) {
+	f := newSourceFake(t)
+	f.seedSource(
+		service.Source{ID: "s_00000001", Name: "sales.csv", Kind: "csv", Active: true, Open: true},
+		[]string{"sales"},
+		service.SourcePreview{SourceName: "sales.csv", Tables: []service.PreviewTableInfo{{Name: "sales", Columns: []string{"a"}}}},
+		"schema",
+	)
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	// 先打开预览，再用开关验证写操作之后列表与预览都会自己刷新。
+	if err := tt.Click("Preview"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the preview", func() bool { return a.src.table != nil })
+	before := countMethod(f.methods(), "source.previewTable")
+
+	if err := tt.Click("Use sales.csv in analysis"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the toggle", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return len(f.sources) == 1 && !f.sources[0].Active
+	})
+	toggle := f.call("source.toggle")
+	if toggle == nil || toggle["active"] != false || toggle["sourceId"] != "s_00000001" {
+		t.Errorf("source.toggle params: %v", toggle)
+	}
+	q.pump(t, tt, "the refreshed preview", func() bool {
+		return countMethod(f.methods(), "source.previewTable") > before
+	})
+
+	if err := tt.Click("Remove"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the confirmation", func() bool { return a.src.confirmOpen })
+	expectTexts(t, tt, []string{"Remove this data source?", "Remove source"}, nil)
+
+	if err := tt.Click("Remove source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the removed source", func() bool { return len(a.src.sources) == 0 })
+	remove := f.call("source.remove")
+	if remove == nil || remove["sourceId"] != "s_00000001" {
+		t.Errorf("source.remove params: %v", remove)
+	}
+	if got := strings.Join(tt.Texts(), "\n"); !strings.Contains(got, "No data sources yet") {
+		t.Errorf("the empty list is not shown after removing the source; texts %q", got)
+	}
+}
+
+func TestDataPanelUploadsInThreeSteps(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orders.csv")
+	content := "id,total\n1,10\n2,20\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.uploadFile(path)
+	q.pump(t, tt, "the upload", func() bool { return !a.src.uploading && len(a.src.sources) == 1 })
+
+	begin := f.call("source.upload.begin")
+	if begin == nil {
+		t.Fatal("source.upload.begin was not called")
+	}
+	if begin["conversationId"] != float64(1) || begin["filename"] != "orders.csv" || begin["size"] != float64(len(content)) {
+		t.Errorf("source.upload.begin params: %v", begin)
+	}
+	open := f.call("source.open")
+	if open == nil || open["uploadId"] != strings.Repeat("a", 32) || open["conversationId"] != float64(1) {
+		t.Errorf("source.open params: %v", open)
+	}
+	methods := f.methods()
+	beginAt, openAt := indexOfMethod(methods, "source.upload.begin"), indexOfMethod(methods, "source.open")
+	if beginAt < 0 || openAt < 0 || beginAt > openAt {
+		t.Errorf("the upload calls are out of order: %v", methods)
+	}
+	f.mu.Lock()
+	wroteFile, written := f.fileAtOpen, f.bytesAtOpen
+	f.mu.Unlock()
+	if !wroteFile {
+		t.Fatal("the bytes were not at the staging path when source.open ran")
+	}
+	if written != content {
+		t.Errorf("the staging file holds %q, want %q", written, content)
+	}
+	if !strings.Contains(strings.Join(tt.Texts(), "\n"), "orders.csv") {
+		t.Errorf("the imported source is not listed; texts %q", tt.Texts())
+	}
+}
+
+func TestDataPanelRejectsOversizeUploadBeforeWriting(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.maxBytes = 4
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.csv")
+	if err := os.WriteFile(path, []byte("much more than four bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.uploadFile(path)
+	q.pump(t, tt, "the rejected upload", func() bool { return !a.src.uploading && a.src.uploadErr != "" })
+
+	f.mu.Lock()
+	staging := f.lastTicket
+	f.mu.Unlock()
+	if staging == "" {
+		t.Fatal("source.upload.begin was not called: the limit comes from the service")
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Errorf("the interface wrote the file despite the service limit (stat %v)", err)
+	}
+	if f.call("source.open") != nil {
+		t.Error("source.open ran for a file that was never copied")
+	}
+	text := strings.Join(tt.Texts(), "\n")
+	if !strings.Contains(text, "accepts at most 4 B") {
+		t.Errorf("the limit is not explained; texts %q", text)
+	}
+}
+
+func TestDataPanelExplainsUploadRefusals(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.uploadErr = map[string]any{
+		"code": -32602, "message": "仅支持 .xlsx / .xls / .csv / .pdf 文件",
+		"data": map[string]any{"kind": "invalid_input", "reason": "unsupported_format"},
+	}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.uploadFile(path)
+	q.pump(t, tt, "the refusal", func() bool { return !a.src.uploading && a.src.uploadErr != "" })
+	if !strings.Contains(a.src.uploadErr, "Only .csv, .xlsx, .xls and .pdf files can be imported") {
+		t.Errorf("the refusal text is %q", a.src.uploadErr)
+	}
+	if f.call("source.open") != nil {
+		t.Error("source.open ran after the service refused the upload")
+	}
+}
+
+func TestDataPanelMountsWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	dir := t.TempDir()
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Folder to mount"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(dir)
+	if err := tt.Click("Mount"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the mounted folder", func() bool { return a.src.current != nil })
+	create := f.call("workspace.create")
+	if create == nil || create["path"] != dir {
+		t.Errorf("workspace.create params: %v", create)
+	}
+	if _, hasPermission := create["permission"]; hasPermission {
+		t.Errorf("workspace.create still sends a permission: %v", create)
+	}
+	if move := f.call("conversation.moveToWorkspace"); move == nil || move["workspaceId"] != "ws_0000000000000001" {
+		t.Errorf("conversation.moveToWorkspace params: %v", move)
+	}
+	// 挂载之后对话属于工作区：底栏出现权限模式芯片，默认是手动。
+	q.pump(t, tt, "the permission mode", func() bool { return a.perm.scope.Mode == service.ModeManual })
+	expectTexts(t, tt, []string{dir, "mounted", "Known folders", "Manual"}, nil)
+}
+
+// openChat 启动假服务并切到会话 1，不展开数据面板。
+func openChat(t *testing.T, f *sourceFake) (*app, *uiQueue, *ui.Tester) {
+	t.Helper()
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, 1400, 1000)
+	a.onService(f.ready(61))
+	a.show(1)
+	q.run()
+	tt.Frame()
+	return a, q, tt
+}
+
+func TestWorkspaceChatSwitchesPermissionMode(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales"}
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the permission mode", func() bool { return a.perm.scope.Mode == service.ModeManual })
+	expectTexts(t, tt, []string{"Manual"}, nil)
+
+	if err := tt.Click("Manual"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{
+		"Manual  ·  Always ask before making changes",
+		"Accept edits  ·  Automatically accept file edits",
+		"Plan  ·  Create a plan before making changes",
+		"Auto  ·  Routine changes go through, risky ones still ask",
+		"Bypass permissions  ·  Accepts all permissions",
+	}, nil)
+	if err := tt.Click("Plan  ·  Create a plan before making changes"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the plan mode", func() bool { return a.perm.scope.Mode == service.ModePlan })
+	if call := f.call("conversation.setMode"); call == nil || call["mode"] != "plan" || call["conversationId"] != float64(1) {
+		t.Errorf("conversation.setMode params: %v", call)
+	}
+	expectTexts(t, tt, []string{"Plan"}, []string{"Manual"})
+}
+
+func TestPlainChatHasNoPermissionMode(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the scope", func() bool { return f.call("conversation.scope") != nil })
+	q.run()
+	tt.Frame()
+	if a.perm.scope.Scope != "chat" || a.perm.scope.Mode != "" {
+		t.Errorf("scope = %+v", a.perm.scope)
+	}
+	expectTexts(t, tt, nil, []string{"Manual", "Bypass permissions"})
+}
+
+func TestPendingPermissionShowsCardAndAnswers(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales"}
+	f.requests = []service.PermissionRequest{{
+		RequestID: "r1", ConversationID: 1, Tool: "workspace_write_file",
+		Summary: "Write file note.md", Detail: "hello", AllowChat: true,
+	}}
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the permission card", func() bool { return len(a.perm.requests) == 1 })
+	expectTexts(t, tt, []string{"Permission needed", "Write file note.md", "hello", "Allow", "Allow for this chat", "Deny"}, nil)
+
+	if err := tt.Click("Allow for this chat"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the answer", func() bool { return len(a.perm.requests) == 0 })
+	if call := f.call("permission.respond"); call == nil || call["requestId"] != "r1" || call["decision"] != "allow_chat" {
+		t.Errorf("permission.respond params: %v", call)
+	}
+	expectTexts(t, tt, nil, []string{"Permission needed", "Write file note.md"})
+}
+
+func TestDataPanelNeverShowsSecrets(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	const secret = "postgres://user:hunter2pass@db.internal/app"
+
+	if err := tt.Click("Connect"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("SQL database"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	// 默认是按字段填写；连接串在「改用连接字符串」之后才出现。
+	if err := tt.Click("Use a connection string instead"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Connection string"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type(secret)
+	if a.src.remoteConn != secret {
+		t.Fatalf("the connection field holds %q", a.src.remoteConn)
+	}
+	if strings.Contains(strings.Join(tt.Texts(), "\n"), secret) {
+		t.Fatal("the form showed the connection string")
+	}
+	if err := tt.Click("Add source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connected source", func() bool { return !a.src.remoteBusy && !a.src.remoteOpen })
+
+	params := f.call("source.open")
+	if params == nil || params["kind"] != "sql" {
+		t.Fatalf("source.open params: %v", params)
+	}
+	secretFields, _ := params["secret"].(map[string]any)
+	if secretFields["connection_string"] != secret {
+		t.Errorf("the secret was not sent to the service: %v", params)
+	}
+	if a.src.remoteConn != "" {
+		t.Errorf("the connection string stayed in the form: %q", a.src.remoteConn)
+	}
+	text := strings.Join(tt.Texts(), "\n")
+	if strings.Contains(text, secret) {
+		t.Error("the connection string appeared in the panel after connecting")
+	}
+	if !strings.Contains(text, "Remote sql") {
+		t.Errorf("the connected source is not listed; texts %q", text)
+	}
+}
+
+func TestDataPanelSQLFormSendsFieldsAndKeepsThePasswordSecret(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openDataPanel(t, f, 1400, 1600)
+	const password = "p@ss/w#rd-ogvxmi3"
+
+	if err := tt.Click("Connect"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("SQL database"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	for _, step := range []struct{ label, text string }{
+		{"Host", "db.internal"}, {"Port", "5433"}, {"Database name", "shop"}, {"User", "analyst"}, {"Password", password},
+	} {
+		if err := tt.Click(step.label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Type(step.text)
+	}
+	if strings.Contains(strings.Join(tt.Texts(), "\n"), password) {
+		t.Fatal("the form showed the password")
+	}
+
+	if err := tt.Click("Test connection"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the test result", func() bool { return !a.src.testBusy && a.src.testNote != "" })
+	if a.src.testFail || !strings.Contains(a.src.testNote, "PostgreSQL 16.0") {
+		t.Errorf("test note %q (fail=%v)", a.src.testNote, a.src.testFail)
+	}
+	if f.call("source.open") != nil {
+		t.Error("testing the connection opened a source")
+	}
+
+	if err := tt.Click("Add source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connected source", func() bool { return !a.src.remoteBusy && !a.src.remoteOpen })
+	params := f.call("source.open")
+	fields, _ := params["fields"].(map[string]any)
+	secret, _ := params["secret"].(map[string]any)
+	for key, want := range map[string]string{"driver": "postgresql", "host": "db.internal", "port": "5433", "database": "shop", "username": "analyst", "ssl": "false"} {
+		if fields[key] != want {
+			t.Errorf("fields[%s] = %v, want %q", key, fields[key], want)
+		}
+	}
+	if secret["password"] != password {
+		t.Errorf("the password was not sent as a secret: %v", params)
+	}
+	// 新建连接要显式清掉连接串，否则服务端会沿用最近保存的那条旧配置里的连接串。
+	if cs, ok := secret["connection_string"]; !ok || cs != "" {
+		t.Errorf("a new form connection must clear connection_string explicitly: %v", secret)
+	}
+	if a.src.sql.password != "" {
+		t.Error("the password stayed in the form after connecting")
+	}
+}
+
+func TestDataPanelReusesSavedConnectionWithoutItsSecret(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.configs = []service.SourceConfig{{
+		ID: "ds_00000001", Kind: "sql", Name: "Warehouse",
+		Fields: map[string]string{}, SecretFields: []string{"connection_string"},
+	}}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+
+	if err := tt.Click("Connect"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("SQL database"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	if err := tt.Click("Saved connection"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Warehouse"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the saved connection", func() bool { return a.src.remoteConfigID == "ds_00000001" })
+	if a.src.remoteConn != "" {
+		t.Errorf("a saved secret came back into the form: %q", a.src.remoteConn)
+	}
+	expectTexts(t, tt, []string{"Warehouse"}, nil)
+
+	if err := tt.Click("Add source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the reopened source", func() bool { return !a.src.remoteOpen && !a.src.remoteBusy })
+	params := f.call("source.open")
+	if params == nil || params["configId"] != "ds_00000001" {
+		t.Errorf("source.open params: %v", params)
+	}
+	if _, hasSecret := params["secret"]; hasSecret {
+		t.Errorf("the form sent a secret for a saved connection: %v", params)
+	}
+}
+
+func TestDataPanelPreviewsTextArtifacts(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.arts = []service.Artifact{{Name: "summary.csv", Path: "/data/outputs/exports/summary.csv", Size: 12, Modified: "2026-01-01T00:00:00.000Z", Root: "exports"}}
+	f.artText["summary.csv"] = "group,total\nA,3\n"
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1200)
+
+	if err := tt.Click("Artifacts"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"Artifacts", "summary.csv", "exports", "/data/outputs/exports/summary.csv"}, nil)
+	if err := tt.Click("Preview"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the artifact text", func() bool { return a.src.artifactLoaded })
+	read := f.call("artifact.read")
+	if read == nil || read["as"] != "text" || read["name"] != "summary.csv" {
+		t.Errorf("artifact.read params: %v", read)
+	}
+	if !strings.Contains(strings.Join(tt.Texts(), "\n"), "group,total") {
+		t.Errorf("the artifact text is not shown; texts %q", tt.Texts())
+	}
+}
+
+func TestDataPanelSidebarEntryOpensPanel(t *testing.T) {
+	f := newSourceFake(t)
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, 1400, 1100)
+	a.onService(f.ready(62))
+	a.show(1)
+	q.run()
+	tt.Frame()
+
+	if err := tt.Click("Data"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the panel from the sidebar", func() bool { return a.src.open && a.src.loaded })
+	if a.nav != navOf(1) {
+		t.Errorf("the sidebar selection is %q, want the chat", a.nav)
+	}
+	expectTexts(t, tt, []string{"Hide data", "Sources", "Workspace", "Artifacts"}, nil)
+}
+
+func TestDataPanelEditsAnalysisTables(t *testing.T) {
+	f := newSourceFake(t)
+	f.seedSource(
+		service.Source{ID: "s_00000005", Name: "warehouse", Kind: "sql", Active: true, Open: true},
+		[]string{"orders", "customers"},
+		service.SourcePreview{SourceName: "warehouse", RequiresTableSelection: true, Tables: []service.PreviewTableInfo{
+			{Name: "orders", Columns: []string{"id"}, SelectableForAnalysis: true},
+			{Name: "customers", Columns: []string{"id"}, SelectableForAnalysis: true},
+		}},
+		"schema",
+	)
+	a, q, tt := openDataPanel(t, f, 1400, 1300)
+
+	if err := tt.Click("Tables"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the source editor", func() bool { return a.src.editOpen && !a.src.editBusy })
+	expectTexts(t, tt, []string{"Source: warehouse", "sql", "Tables the agent may analyse", "orders", "customers"}, nil)
+
+	if err := tt.Click("customers"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.src.editPicked["customers"] {
+		t.Fatal("checking a table did not mark it")
+	}
+	if err := tt.Click("Save tables"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the saved tables", func() bool { return !a.src.editOpen && !a.src.editBusy })
+	params := f.call("source.setAnalysisTables")
+	if params == nil || params["sourceId"] != "s_00000005" {
+		t.Fatalf("source.setAnalysisTables params: %v", params)
+	}
+	tables, _ := params["tables"].([]any)
+	if len(tables) != 1 || tables[0] != "customers" {
+		t.Errorf("the chosen tables are %v, want [customers]", tables)
+	}
+}
+
+// countMethod 数 calls 里 method 出现的次数。
+func countMethod(calls []string, method string) int {
+	n := 0
+	for _, name := range calls {
+		if name == method {
+			n++
+		}
+	}
+	return n
+}
+
+// indexOfMethod 返回 method 在 calls 里第一次出现的位置。
+func indexOfMethod(calls []string, method string) int {
+	for i, name := range calls {
+		if name == method {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestConnectingASQLSourceAsksForTablesRightAway 回归：远程 SQL 来源连上后默认不向 agent 开放任何表，
+// 界面必须当场弹出选表对话框（库里表不多就默认全选），保存后才算可用；不选就关掉时，卡片上要明说
+// 「还没选数据表」并给出「选择数据表」按钮，而不是只写「0 张表」。
+func TestConnectingASQLSourceAsksForTablesRightAway(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.preview["s_00000003"] = service.SourcePreview{
+		SourceName: "Remote sql",
+		Tables:     []service.PreviewTableInfo{{Name: "customers"}, {Name: "orders"}},
+	}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1600)
+
+	if err := tt.Click("Connect"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("SQL database"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	if err := tt.Click("Use a connection string instead"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Connection string"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("postgresql://u:pw-xx@db/app")
+	if err := tt.Click("Add source"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the table picker", func() bool { return a.src.editOpen && !a.src.editBusy && len(a.src.editTables) == 2 })
+	if !a.src.editPicked["customers"] || !a.src.editPicked["orders"] {
+		t.Errorf("a small database should be ticked by default: %v", a.src.editPicked)
+	}
+	expectTexts(t, tt, []string{"Tables the agent may analyse", "2 of 20 selected"}, nil)
+
+	// 先不保存，直接取消：卡片上要提示还没选表。
+	if err := tt.Click("Cancel"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"No tables chosen yet", "Choose tables"}, nil)
+
+	// 卡片上的按钮重新打开选表，保存后把勾选的表发给服务端。
+	if err := tt.Click("Choose tables"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the picker again", func() bool { return a.src.editOpen && !a.src.editBusy && len(a.src.editTables) == 2 })
+	if err := tt.Click("Save tables"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the saved tables", func() bool { return !a.src.editOpen && !a.src.editBusy })
+	params := f.call("source.setAnalysisTables")
+	tables, _ := params["tables"].([]any)
+	if params["sourceId"] != "s_00000003" || len(tables) != 2 {
+		t.Errorf("source.setAnalysisTables params: %v", params)
+	}
+}
+
+// TestEditingAConnectionKeepsTheSecretAndUpdatesTheSource 回归：已连接的数据库改了主机或端口，要能直接在卡片上
+// 「编辑」，而不是删掉重建。表单从来源引用的配置里回填非密字段，密码留空即沿用；保存走 source.update，
+// 来源 id 不变，且不能再换类型。
+func TestEditingAConnectionKeepsTheSecretAndUpdatesTheSource(t *testing.T) {
+	f := newSourceFake(t)
+	f.seedSource(
+		service.Source{ID: "s_00000005", Name: "warehouse", Kind: "sql", Active: true, Open: true, Tables: []string{"orders"}, ConfigID: "ds_00000001"},
+		[]string{"orders"},
+		service.SourcePreview{SourceName: "warehouse", Tables: []service.PreviewTableInfo{{Name: "orders", Columns: []string{"id"}}}},
+		"schema",
+	)
+	f.mu.Lock()
+	f.configs = []service.SourceConfig{{
+		ID: "ds_00000001", Kind: "sql", Name: "warehouse",
+		Fields:       map[string]string{"driver": "postgresql", "host": "10.0.0.5", "port": "5432", "database": "app", "username": "analyst", "ssl": "false"},
+		SecretFields: []string{"password"},
+	}}
+	f.mu.Unlock()
+	a, q, tt := openDataPanel(t, f, 1400, 1800)
+
+	if err := tt.Click("Edit"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the connection form", func() bool { return a.src.remoteOpen })
+	if a.src.sql.host != "10.0.0.5" || a.src.sql.user != "analyst" || a.src.sql.password != "" {
+		t.Fatalf("the form was filled with %+v", a.src.sql)
+	}
+	expectTexts(t, tt, []string{"Edit SQL database connection", "Save changes"}, []string{"Saved connection"})
+
+	// 主机换了：清空旧值再写新的。
+	if err := tt.Click("Host"); err != nil {
+		t.Fatal(err)
+	}
+	a.src.sql.host = ""
+	tt.Frame()
+	tt.Type("10.0.0.9")
+	if err := tt.Click("Save changes"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the update", func() bool { return !a.src.remoteBusy && !a.src.remoteOpen })
+
+	if f.call("source.open") != nil {
+		t.Error("editing a connection opened a new source instead of updating the old one")
+	}
+	params := f.call("source.update")
+	if params == nil || params["sourceId"] != "s_00000005" {
+		t.Fatalf("source.update params: %v", params)
+	}
+	fields, _ := params["fields"].(map[string]any)
+	if fields["host"] != "10.0.0.9" || fields["database"] != "app" {
+		t.Errorf("fields: %v", fields)
+	}
+	if secret, _ := params["secret"].(map[string]any); secret != nil {
+		if _, sent := secret["password"]; sent {
+			t.Errorf("an untouched password must not be sent again: %v", secret)
+		}
+	}
+	if a.src.remoteEditID != "" {
+		t.Error("the form is still in edit mode after saving")
+	}
+}
+
+// TestAnySourceCanBeRenamed 回归：文件来源没有连接设置，也要能改名；名称里的首尾空白被去掉，空名在界面上就被拦下。
+func TestAnySourceCanBeRenamed(t *testing.T) {
+	f := newSourceFake(t)
+	f.seedSource(
+		service.Source{ID: "s_00000001", Name: "sales.csv", Kind: "csv", Active: true, Open: true, Tables: []string{"sales"}},
+		[]string{"sales"},
+		service.SourcePreview{SourceName: "sales.csv"},
+		"schema",
+	)
+	a, q, tt := openDataPanel(t, f, 1400, 1100)
+
+	if err := tt.Click("More"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	// 界面上还有标题栏的「Rename」按钮，按文字点会点到它；菜单已经拿到焦点，用键盘选第一项（重命名）。
+	tt.Key(0, ui.KeyDown)
+	tt.Key(0, ui.KeyEnter)
+	q.pump(t, tt, "the rename dialog", func() bool { return a.src.renameOpen })
+	if a.src.renameText != "sales.csv" {
+		t.Fatalf("the dialog starts with %q", a.src.renameText)
+	}
+
+	// 空名：不发请求，对话框里提示。
+	a.src.renameText = "   "
+	tt.Frame()
+	if err := tt.Click("Save"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if f.call("source.rename") != nil || a.src.renameErr == "" {
+		t.Errorf("a blank name was sent or not reported: err=%q", a.src.renameErr)
+	}
+
+	a.src.renameText = "  Monthly sales  "
+	tt.Frame()
+	if err := tt.Click("Save"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the renamed source", func() bool { return !a.src.renameOpen && !a.src.renameBusy })
+	params := f.call("source.rename")
+	if params == nil || params["sourceId"] != "s_00000001" || params["name"] != "Monthly sales" {
+		t.Fatalf("source.rename params: %v", params)
+	}
+	q.pump(t, tt, "the refreshed list", func() bool { return len(a.src.sources) == 1 && a.src.sources[0].Name == "Monthly sales" })
+}
+
+// seedWorkspaces 给假服务放一个工作区索引：一个工作区，对话 2 属于它。
+func seedWorkspaces(f *sourceFake) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.work = []service.Workspace{{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}}
+	f.sessions = []service.Session{
+		{ID: 1, Title: "plain chat"},
+		{ID: 2, Title: "in the workspace"},
+	}
+	f.scopes = map[int]string{2: "ws_0000000000000001"}
+}
+
+func TestSidebarGroupsChatsByWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Workspaces", "sales", "in the workspace", "plain chat", "Today"}, nil)
+}
+
+func TestNewChatGoesIntoTheChosenWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace index", func() bool { return len(a.ws.list) == 1 })
+
+	a.newChat()
+	q.run()
+	tt.Frame()
+	// 首页的范围选择：选中工作区后创建出来的对话自带 workspaceId（选择器的选项由工作区列表生成）。
+	a.setNewScope("ws_0000000000000001")
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"sales"}, nil)
+
+	a.input = "hello"
+	a.send()
+	q.pump(t, tt, "the created conversation", func() bool { return f.call("conversation.create") != nil })
+	if call := f.call("conversation.create"); call["workspaceId"] != "ws_0000000000000001" {
+		t.Errorf("conversation.create params: %v", call)
+	}
+}
+
+func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
+	f := newSourceFake(t)
+	dir := t.TempDir()
+	a, q, tt := openChat(t, f)
+	a.newChat()
+	q.run()
+	tt.Frame()
+	// 新对话页上选「工作区」：一个工作区都没有时直接打开新建对话框。
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
+	expectTexts(t, tt, []string{"New workspace", "Folder", "Name", "Instructions for this workspace", "Create"}, nil)
+	if err := tt.Click("Choose a folder first."); err == nil {
+		t.Fatal("Create worked with an empty folder")
+	}
+	a.wsDlg.path = dir
+	a.wsDlg.name = "Sales"
+	tt.Frame()
+	if err := tt.Click("Create"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the created workspace", func() bool { return f.call("workspace.create") != nil && !a.wsDlg.open })
+	create := f.call("workspace.create")
+	if create["path"] != dir || create["name"] != "Sales" {
+		t.Errorf("workspace.create params: %v", create)
+	}
+	if a.newScope() != "ws_0000000000000001" {
+		t.Errorf("the new workspace became the next chat's scope: %q", a.newScope())
+	}
+	// 创建后侧栏立刻有这一行（还没有对话也要看得见），数据面板与侧栏读的是同一份。
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Sales", "Start a chat"}, nil)
+	if len(a.ws.list) != 1 {
+		t.Errorf("workspace index: %v", a.ws.list)
+	}
+}
+
+func TestHomeScreenGroupsWorkspaceChatsWithoutAnOpenConversation(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	q := newQueue()
+	a := newTestApp(t, q)
+	tt := ui.NewTester(a.view, 1400, 1000)
+	// 刚启动：还没有打开任何对话（conv == 0），侧栏分组和范围选择器照样要有数据。
+	a.onService(f.ready(61))
+	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 && len(a.ws.list) == 1 })
+	if a.ws.err != "" {
+		t.Errorf("workspace index error: %s", a.ws.err)
+	}
+	expectTexts(t, tt, []string{"sales", "in the workspace", "plain chat"}, nil)
+}
+
+func TestWorkspaceRowFoldsAndUnfolds(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace row", func() bool { return len(a.ws.scopes) == 1 })
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Workspaces", "sales", "in the workspace", "plain chat"}, nil)
+
+	// 点工作区那一行折叠：名下的会话收起，普通聊天不受影响。
+	if err := tt.Click("sales"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"sales", "plain chat"}, []string{"in the workspace"})
+
+	if err := tt.Click("sales"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"in the workspace"}, nil)
+}
+
+// 刚建好、还没有对话的工作区也在侧栏里，并写明还没有对话；点它的加号进入一个归属已选好的空白对话。
+func TestEmptyWorkspaceShowsInTheSidebarAndStartsAChat(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.work = []service.Workspace{{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}}
+	f.mu.Unlock()
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace row", func() bool { return len(a.ws.list) == 1 })
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Workspaces", "sales", "Start a chat", "New workspace…"}, nil)
+
+	if err := tt.Click("Start a chat"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.conv != 0 || a.newScope() != "ws_0000000000000001" {
+		t.Fatalf("conv=%d scope=%q", a.conv, a.newScope())
+	}
+	// 标题栏与芯片都说明下一条对话属于哪个工作区；顶部的 New chat 回到普通聊天。
+	if err := tt.Click("New chat"); err != nil {
+		t.Fatal(err)
+	}
+	if a.newScope() != "" {
+		t.Errorf("New chat kept the workspace scope: %q", a.newScope())
+	}
+}
+
+func TestSidebarWithoutWorkspacesInvitesToCreateOne(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	expectTexts(t, tt, []string{"Workspaces", "Turn a folder into a workspace"}, nil)
+	if err := tt.Click("Turn a folder into a workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
+}
+
+func TestChipMenuSurvivesTheComposerGracePeriod(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace index", func() bool { return len(a.ws.list) == 1 })
+	a.show(1) // 普通聊天：底栏是范围芯片
+	q.run()
+	tt.Frame()
+
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Move to workspace"); err != nil {
+		t.Fatal(err)
+	}
+	// 在菜单里停留的时间超过输入区失焦后的宽限：输入区不能折叠，否则芯片和菜单一起消失。
+	tt.Advance(composerGrace * 4)
+	tt.Frame()
+	tt.Advance(composerGrace * 4)
+	tt.Frame()
+	expectTexts(t, tt, []string{"sales"}, []string{"Write a message"})
+}
+
+func TestDismissedPermissionDoesNotComeBackFromALateSnapshot(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales"}
+	f.requests = []service.PermissionRequest{{RequestID: "r1", ConversationID: 1, Tool: "workspace_write_file", Summary: "Write file note.md", AllowChat: true}}
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the permission card", func() bool { return len(a.perm.requests) == 1 })
+
+	// permission.resolved 先到：卡片撤下。此时服务端对 permission.pending 的快照（拉取发生在撤下之前）仍带着它。
+	a.dropPermission("r1")
+	a.perm.scope = service.ConversationScope{}
+	a.loadPermissions()
+	q.pump(t, tt, "the late snapshot", func() bool { return a.perm.scope.Mode == service.ModeManual })
+	if len(a.perm.requests) != 0 {
+		t.Errorf("a dismissed request came back: %v", a.perm.requests)
+	}
+}
+
+// 新对话页给出两种开始方式；选「工作区」就列出工作区供挑，开始的对话归属于选中的那个。
+func TestHomeOffersChatOrWorkspaceKind(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace index", func() bool { return len(a.ws.list) == 1 })
+	a.newChat()
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Start a new conversation as", "Chat", "Workspace"}, []string{"/work/sales"})
+
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.newScope() != "ws_0000000000000001" {
+		t.Fatalf("scope after choosing Workspace: %q", a.newScope())
+	}
+	expectTexts(t, tt, []string{"/work/sales"}, nil)
+
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatal(err)
+	}
+	if a.newScope() != "" {
+		t.Errorf("scope after choosing Chat: %q", a.newScope())
+	}
+}
+
+// seedTree 给假服务放一棵小树：根下一个目录 reports（里面一个 q1.csv）、一个文件 notes.md。
+func seedTree(f *sourceFake) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tree = map[string][]service.TreeEntry{
+		"": {
+			{Name: "reports", Path: "reports", Kind: "dir"},
+			{Name: "notes.md", Path: "notes.md", Kind: "file", Size: 12},
+		},
+		"reports": {{Name: "q1.csv", Path: "reports/q1.csv", Kind: "file", Size: 40, Data: true}},
+	}
+}
+
+func TestFileTreeRightClickOpensAChatInTheSubfolder(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}
+	seedTree(f)
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+	expectTexts(t, tt, []string{"Files", "reports", "notes.md", "Right-click a folder to start a chat in it."}, nil)
+
+	// 点开目录才取它这一层。
+	if err := tt.Click("reports"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the subfolder", func() bool { return a.ft.dirs["reports"] != nil && a.ft.dirs["reports"].loaded })
+	expectTexts(t, tt, []string{"q1.csv"}, nil)
+
+	// 右键目录：新建对话。登记成工作区后切到空白新对话，归属已选好。
+	if err := tt.RightClick("reports"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("New chat here"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the new workspace chat", func() bool { return f.call("workspace.create") != nil && a.conv == 0 && a.newScope() != "" })
+	if create := f.call("workspace.create"); create["path"] != "/work/sales/reports" {
+		t.Errorf("workspace.create params: %v", create)
+	}
+}
+
+func TestFileTreeReferencePutsThePathInTheInput(t *testing.T) {
+	f := newSourceFake(t)
+	f.current = &service.Workspace{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}
+	seedTree(f)
+	a, q, tt := openDataPanel(t, f, 1400, 1400)
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the tree root", func() bool { return a.ft.dirs[""] != nil && a.ft.dirs[""].loaded })
+	a.input = "summarize"
+	if err := tt.RightClick("notes.md"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Reference in chat"); err != nil {
+		t.Fatal(err)
+	}
+	if a.input != "summarize notes.md" {
+		t.Errorf("input: %q", a.input)
+	}
+}
+
+// 新对话页上选模型：会话还没创建，选择要随 conversation.create 一起带上，而不是报「先打开会话」。
+func TestModelChosenOnTheNewChatPageIsUsedToCreateTheConversation(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	a.newChat()
+	q.run()
+	tt.Frame()
+	a.cv.models, a.cv.modelsErr = []service.AvailableModel{{Provider: "custom-magpie", ID: "auto/deepseek", Name: "deepseek", ThinkingLevels: []string{"low", "high"}}}, ""
+
+	a.chooseModel("custom-magpie/auto/deepseek")
+	a.chooseThinking("high")
+	if a.cv.modelsErr != "" {
+		t.Fatalf("choosing a model on the new chat page failed: %s", a.cv.modelsErr)
+	}
+	if a.cv.modelChoice != "custom-magpie/auto/deepseek" || a.cv.thinkingChoice != "high" {
+		t.Errorf("controls: %q %q", a.cv.modelChoice, a.cv.thinkingChoice)
+	}
+
+	a.input = "hello"
+	a.send()
+	q.pump(t, tt, "the created conversation", func() bool { return f.call("conversation.create") != nil })
+	call := f.call("conversation.create")
+	model, _ := call["model"].(map[string]any)
+	if model["provider"] != "custom-magpie" || model["modelId"] != "auto/deepseek" || call["thinkingLevel"] != "high" {
+		t.Errorf("conversation.create params: %v", call)
+	}
+	q.pump(t, tt, "the new conversation", func() bool { return a.conv == 3 })
+	if a.cv.modelsErr != "" || a.cv.draftModel != nil {
+		t.Errorf("stale model state after the conversation was created: err=%q draft=%v", a.cv.modelsErr, a.cv.draftModel)
+	}
+}

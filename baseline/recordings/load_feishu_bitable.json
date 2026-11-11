@@ -1,0 +1,79 @@
+{
+  "blocked_reason": "Needs a configured Feishu application bot (app_id/app_secret) and a reachable Feishu OpenAPI with a real Bitable; none is available locally, so the compute path (data/sources/feishu_bitable.py DuckDB registration) is not exercised.",
+  "coverage": {
+    "load_feishu_bitable": [
+      "error"
+    ]
+  },
+  "covers": [
+    "load_feishu_bitable"
+  ],
+  "description": "Skill 'feishu-bitable' loads a Bitable. No Feishu app credentials exist in the isolated data root, so the recorded output is the configuration error.",
+  "scenario": "load_feishu_bitable",
+  "status": "blocked",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:load_feishu_bitable",
+        "end:load_feishu_bitable"
+      ],
+      "final_text": "飞书表格处理结束。",
+      "message": "读取飞书多维表格 https://example.feishu.cn/base/bascnBaselineFixture?table=tblBaselineFixture 做分析。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "select_chart",
+            "generate_chart",
+            "list_feishu_bitable_tables",
+            "load_feishu_bitable",
+            "create_feishu_bitable",
+            "append_feishu_bitable_records",
+            "update_feishu_bitable_record"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "select_chart",
+            "generate_chart",
+            "list_feishu_bitable_tables",
+            "load_feishu_bitable",
+            "create_feishu_bitable",
+            "append_feishu_bitable_records",
+            "update_feishu_bitable_record"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {
+        "skill": "feishu-bitable"
+      },
+      "tool_results": [
+        {
+          "arguments": {
+            "bitable": "https://example.feishu.cn/base/bascnBaselineFixture?table=tblBaselineFixture",
+            "max_records": 50,
+            "source_name": "feishu_fixture"
+          },
+          "content": "[TOOL_RESULT] load_feishu_bitable ERROR: 工具执行错误 [load_feishu_bitable]: 请先保存飞书 App ID\n{\"type\": \"tool_result\", \"ok\": false, \"error\": \"tool_error\", \"data\": \"工具执行错误 [load_feishu_bitable]: 请先保存飞书 App ID\", \"sources\": [], \"artifacts\": []}",
+          "status": "error",
+          "tool": "load_feishu_bitable",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

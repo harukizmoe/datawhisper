@@ -29,6 +29,11 @@ import pandas as pd
 _PROJECT = Path(__file__).resolve().parent.parent  # Charts_generation/
 sys.path.insert(0, str(_PROJECT))
 
+# 这些用例断言中文警告文案；模块默认英文，所以在这里把语言固定为 zh。
+from compute.i18n import set_language  # noqa: E402
+
+set_language("zh")
+
 import chart_generate  # noqa: E402
 
 

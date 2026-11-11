@@ -2,6 +2,8 @@
 import pandas as pd
 from typing import Tuple
 
+from compute.i18n import say
+
 
 def trim(
     df: pd.DataFrame,
@@ -17,20 +19,26 @@ def trim(
     (cleaned_df, markdown_summary)
     """
     if column not in df.columns:
-        return df.copy(), f"❌ 列 '{column}' 不存在。"
+        return df.copy(), say(f"❌ Column '{column}' does not exist.", f"❌ 列 '{column}' 不存在。")
     if min_val >= max_val:
-        return df.copy(), f"❌ 参数无效：min_val ({min_val}) 须小于 max_val ({max_val})。"
+        return df.copy(), say(f"❌ Invalid parameters: min_val ({min_val}) must be less than max_val ({max_val}).", f"❌ 参数无效：min_val ({min_val}) 须小于 max_val ({max_val})。")
 
     before = len(df)
     cleaned = df[(df[column] >= min_val) & (df[column] <= max_val)].copy().reset_index(drop=True)
     removed = before - len(cleaned)
 
-    summary = (
+    summary = say(
+        f"## Trimming complete\n"
+        f"- Column: **{column}**\n"
+        f"- Kept range: **[{min_val}, {max_val}]**\n"
+        f"- Original rows: {before:,}\n"
+        f"- Rows removed: **{removed:,}** ({removed / before * 100:.1f}%)\n"
+        f"- Rows kept: **{len(cleaned):,}**\n",
         f"## 截尾处理完成\n"
         f"- 列：**{column}**\n"
         f"- 保留范围：**[{min_val}, {max_val}]**\n"
         f"- 原始行数：{before:,}\n"
         f"- 移除行数：**{removed:,}**（{removed / before * 100:.1f}%）\n"
-        f"- 保留行数：**{len(cleaned):,}**\n"
+        f"- 保留行数：**{len(cleaned):,}**\n",
     )
     return cleaned, summary

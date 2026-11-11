@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -37,8 +38,12 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "source列 + target列 + value列"
-_DESC = "底部节点使用半圆表示节点规模，半圆之间的上拱弧带表示关系，弧带宽度表示关系强度；弧带颜色=流出(source)节点颜色。"
+def _data_fmt() -> str:
+    return say("source column + target column + value column", "source列 + target列 + value列")
+
+
+def _desc() -> str:
+    return say("Bottom nodes are half-circles sized by node scale; arcs between them show relationships, arc width shows strength, and arc color = the outflow (source) node color.", "底部节点使用半圆表示节点规模，半圆之间的上拱弧带表示关系，弧带宽度表示关系强度；弧带颜色=流出(source)节点颜色。")
 
 
 def _auto_col(df: pd.DataFrame, *hints: str, exclude: set = None) -> Optional[str]:
@@ -95,8 +100,8 @@ h1 {{ color: #222; font-size: 22px; margin-bottom: 6px; flex-shrink: 0; }}
 {embed}
 </div>
 <div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div>
 </div></body></html>"""
 
@@ -159,7 +164,7 @@ def generate(
     source: str = "source",
     target: str = "target",
     value: str = "value",
-    title: str = "弧图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -172,12 +177,12 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     if df is None or len(df) == 0:
-        return ChartResult(warnings=["输入数据为空"])
+        return ChartResult(warnings=[say("Input data is empty", "输入数据为空")])
 
     # chart_selector 声明 required_roles=["x","y","z"]（流出x + 流入y + 流出值z），
     # 调度器不做 x→source 转换。这里同时接受 selector 规范 (x/y/z) 与语义别名
@@ -189,6 +194,8 @@ def generate(
     val_col = mapping.get("value")
     val_col = val_col if val_col is not None else (mapping.get("z") if mapping.get("z") is not None else value)
     title = options.get("title", title)
+    if title is None:
+        title = say("Arc Chart", "弧图")
 
     # 链式 exclude：source/target/value 依次排除已解析列，避免无 hint 时
     # 三者回退到同一 strs[0]，产生 df[[c,c,v]] 重复列导致下游崩溃
@@ -203,10 +210,10 @@ def generate(
 
     for role, col_ in [("source", _src), ("target", _tgt), ("value", _val)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
     if _src is None or _tgt is None or _val is None or _src == _tgt:
         if _src == _tgt and _src is not None:
-            warnings.append("source 与 target 解析到同一列，请提供显式映射")
+            warnings.append(say("source and target resolve to the same column; provide an explicit mapping", "source 与 target 解析到同一列，请提供显式映射"))
         return ChartResult(warnings=warnings)
 
     d = df[[_src, _tgt, _val]].dropna().copy()
@@ -214,7 +221,7 @@ def generate(
     d = d.dropna(subset=[_val])
     d = d[d[_src] != d[_tgt]].copy()
     if len(d) == 0:
-        return ChartResult(warnings=["没有有效关系数据（全为自环或空）"])
+        return ChartResult(warnings=[say("No valid relationship data (all self-loops or empty)", "没有有效关系数据（全为自环或空）")])
 
     top_n = int(options.get("top_n", 200))
     min_value = options.get("min_value", None)
@@ -228,7 +235,7 @@ def generate(
         d = d[d[_val] >= float(min_value)]
     d = d.nlargest(top_n, _val)
     if len(d) == 0:
-        return ChartResult(warnings=["过滤后没有数据"])
+        return ChartResult(warnings=[say("No data after filtering", "过滤后没有数据")])
 
     node_size = {}
     for _, r in d.iterrows():
@@ -289,7 +296,7 @@ def generate(
                       smoothing=float(options.get("edge_smoothing", 1.15))),
             fill="toself",
             fillcolor=fill_color,
-            hovertemplate=f"{s} → {t}<br>关系值: {v:.2f}<extra></extra>",
+            hovertemplate=say(f"{s} → {t}<br>Value: {v:.2f}<extra></extra>", f"{s} → {t}<br>关系值: {v:.2f}<extra></extra>"),
             showlegend=False
         ))
 
@@ -327,7 +334,7 @@ def generate(
             line=dict(color=c, width=1.3, shape="spline", smoothing=float(options.get("node_smoothing", 1.0))),
             fill="tozeroy",
             fillcolor=node_fill_color,  # 不要再用 fill_color
-            hovertemplate=f"{n}<br>节点规模: {node_size[n]:.2f}<extra></extra>",
+            hovertemplate=say(f"{n}<br>Node size: {node_size[n]:.2f}<extra></extra>", f"{n}<br>节点规模: {node_size[n]:.2f}<extra></extra>"),
             showlegend=False
         ))
 
@@ -363,7 +370,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "arc_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "arc_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
 
     meta = {

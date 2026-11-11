@@ -19,6 +19,6 @@ allowedTools: [get_schema, get_table_detail, query_data, profile_data, generate_
 
 ## Implementation reference
 
-- Data tool entries: `agent/tools/business/data.py`
+- Data tool entries: `compute/tools/data.py`
 - Profiling implementation: `Function/Clean/data_profile.py`
 - Chart implementation: `Function/Charts_generation/chart_generate.py`

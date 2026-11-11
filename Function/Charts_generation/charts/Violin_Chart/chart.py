@@ -23,11 +23,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
-
-_DATA_FMT = "y列(数值) + [可选: x列(分类)]"
-_DESC = "结合箱线图和密度估计，展示分布形状，比箱线图更丰富。"
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -110,8 +108,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -159,12 +157,14 @@ def generate(
     excel_path: str = None,
     x: str = None,
     y: str = "y",
-    title: str = "小提琴图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
     options = options or {}
     mapping = mapping or {}
+    _data_fmt = say("y column (numeric) + [optional: x column (categorical)]", "y列(数值) + [可选: x列(分类)]")
+    _desc = say("Combines a box plot with density estimation to show the shape of the distribution; richer than a box plot.", "结合箱线图和密度估计，展示分布形状，比箱线图更丰富。")
 
     if df is None:
         if excel_path:
@@ -172,9 +172,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 检测并转换宽格式数据
     is_wide = _is_wide_format(df)
@@ -182,20 +182,20 @@ def generate(
         df = _wide_to_long(df)
         x_col = "group"
         y_col = "value"
-        warnings.append("检测到宽格式数据，已自动转换为长格式")
+        warnings.append(say("Wide-format data detected; automatically converted to long format", "检测到宽格式数据，已自动转换为长格式"))
     else:
         x_col = mapping.get("x")
         x_col = x_col if x_col is not None else x
         y_col = mapping.get("y")
         y_col = y_col if y_col is not None else y
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Violin Chart", "小提琴图"))
 
     _x = _auto_col(df, x_col, "x", "区域", "类别", "group") if x_col else None
     _y = _auto_col(df, y_col, "y", "价格", "销售额", "value", "num")
 
     if _y is None or _y not in df.columns:
-        warnings.append("找不到必填字段 [y]")
+        warnings.append(say("Required field not found [y]", "找不到必填字段 [y]"))
         return ChartResult(warnings=warnings)
 
     if _x and _x not in df.columns:
@@ -222,7 +222,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "violin_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "violin_chart", "plotly", _data_fmt, _desc, chart_html)
 
     meta = {
         "chart_id": "violin_chart",

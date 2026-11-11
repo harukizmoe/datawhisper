@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from compute.i18n import say
+
 from .sources._utils import _clean_identifier, _dedup_columns, _detect_header_row
 
 
@@ -101,9 +103,9 @@ def parse_html_tables(html: str) -> List[GridTable]:
     try:
         frames = pd.read_html(io.StringIO(html), header=None, flavor="lxml")
     except ValueError as exc:
-        raise TableExtractError("FETCH-001", f"页面中未检测到 HTML 表格: {exc}") from exc
+        raise TableExtractError("FETCH-001", say(f"No HTML table detected on the page: {exc}", f"页面中未检测到 HTML 表格: {exc}")) from exc
     except Exception as exc:  # lxml parse failures on malformed markup
-        raise TableExtractError("FETCH-001", f"HTML 解析失败: {exc}") from exc
+        raise TableExtractError("FETCH-001", say(f"HTML parsing failed: {exc}", f"HTML 解析失败: {exc}")) from exc
     grids: List[GridTable] = []
     for index, frame in enumerate(frames, 1):
         # read_html promotes <th> cells to DataFrame columns even with
@@ -121,7 +123,7 @@ def parse_html_tables(html: str) -> List[GridTable]:
             continue
         grids.append(grid)
     if not grids:
-        raise TableExtractError("FETCH-001", "页面中未检测到可用表格（至少 2 行 2 列）")
+        raise TableExtractError("FETCH-001", say("No usable table detected on the page (at least 2 rows and 2 columns)", "页面中未检测到可用表格（至少 2 行 2 列）"))
     return grids
 
 
@@ -129,11 +131,11 @@ def parse_json_tables(text: str) -> List[GridTable]:
     try:
         payload = json.loads(text)
     except (ValueError, TypeError) as exc:
-        raise TableExtractError("FETCH-001", f"内容不是有效 JSON: {exc}") from exc
+        raise TableExtractError("FETCH-001", say(f"The content is not valid JSON: {exc}", f"内容不是有效 JSON: {exc}")) from exc
     grids: List[GridTable] = []
     if isinstance(payload, list):
         if not payload:
-            raise TableExtractError("FETCH-001", "JSON 为空数组，无可导入数据")
+            raise TableExtractError("FETCH-001", say("The JSON is an empty array; there is no data to import", "JSON 为空数组，无可导入数据"))
         grids.append(_df_to_grid(pd.json_normalize(payload), "data"))
     elif isinstance(payload, dict):
         found_nested = False
@@ -144,10 +146,10 @@ def parse_json_tables(text: str) -> List[GridTable]:
         if not found_nested:
             grids.append(_df_to_grid(pd.json_normalize(payload), "data"))
     else:
-        raise TableExtractError("FETCH-001", "JSON 根节点不是对象或数组，无法转为表格")
+        raise TableExtractError("FETCH-001", say("The JSON root is neither an object nor an array and cannot be converted to a table", "JSON 根节点不是对象或数组，无法转为表格"))
     kept = [grid for grid in grids if _filter_junk(grid["rows"]) is not None]
     if not kept:
-        raise TableExtractError("FETCH-001", "JSON 中未发现可用表格（至少 2 行 2 列）")
+        raise TableExtractError("FETCH-001", say("No usable table found in the JSON (at least 2 rows and 2 columns)", "JSON 中未发现可用表格（至少 2 行 2 列）"))
     return kept
 
 
@@ -155,12 +157,12 @@ def parse_csv_table(text: str) -> List[GridTable]:
     try:
         frame = pd.read_csv(io.StringIO(text))
     except Exception as exc:
-        raise TableExtractError("FETCH-001", f"CSV 解析失败: {exc}") from exc
+        raise TableExtractError("FETCH-001", say(f"CSV parsing failed: {exc}", f"CSV 解析失败: {exc}")) from exc
     if frame.empty:
-        raise TableExtractError("FETCH-001", "CSV 内容为空")
+        raise TableExtractError("FETCH-001", say("The CSV content is empty", "CSV 内容为空"))
     grid = _df_to_grid(frame, "data")
     if _filter_junk(grid["rows"]) is None:
-        raise TableExtractError("FETCH-001", "CSV 少于 2 行或 2 列，无可导入内容")
+        raise TableExtractError("FETCH-001", say("The CSV has fewer than 2 rows or 2 columns; there is nothing to import", "CSV 少于 2 行或 2 列，无可导入内容"))
     return [grid]
 
 
@@ -173,7 +175,7 @@ def parse_pdf_tables(data: bytes) -> List[GridTable]:
     except ImportError as exc:
         raise TableExtractError(
             "PDF-001",
-            "PDF 解析依赖 pdfplumber 未安装；请执行 pip install pdfplumber 后重试",
+            say("PDF parsing requires pdfplumber, which is not installed; run pip install pdfplumber and retry", "PDF 解析依赖 pdfplumber 未安装；请执行 pip install pdfplumber 后重试"),
         ) from exc
     try:
         with pdfplumber.open(io.BytesIO(data)) as pdf:
@@ -181,7 +183,7 @@ def parse_pdf_tables(data: bytes) -> List[GridTable]:
             if len(pages) > MAX_PDF_PAGES:
                 raise TableExtractError(
                     "PDF-003",
-                    f"PDF 页数 {len(pages)} 超过上限 {MAX_PDF_PAGES}，请拆分后重试",
+                    say(f"The PDF has {len(pages)} pages, exceeding the limit of {MAX_PDF_PAGES}; split it and retry", f"PDF 页数 {len(pages)} 超过上限 {MAX_PDF_PAGES}，请拆分后重试"),
                 )
             grids: List[GridTable] = []
             for page_index, page in enumerate(pages, 1):
@@ -201,7 +203,7 @@ def parse_pdf_tables(data: bytes) -> List[GridTable]:
     except TableExtractError:
         raise
     except Exception as exc:
-        raise TableExtractError("PDF-002", f"PDF 无法解析（可能已加密或损坏）: {exc}") from exc
+        raise TableExtractError("PDF-002", say(f"The PDF cannot be parsed (it may be encrypted or corrupted): {exc}", f"PDF 无法解析（可能已加密或损坏）: {exc}")) from exc
 
 
 def fetch_url_tables(url: str, timeout: int = 30) -> List[GridTable]:
@@ -214,22 +216,22 @@ def fetch_url_tables(url: str, timeout: int = 30) -> List[GridTable]:
 
     scheme = str(url or "").split(":", 1)[0].lower()
     if scheme not in ("http", "https"):
-        raise TableExtractError("FETCH-001", "仅支持 http/https 链接")
+        raise TableExtractError("FETCH-001", say("Only http/https links are supported", "仅支持 http/https 链接"))
     timeout = max(5, min(int(timeout or 30), 60))
     try:
         response = requests.get(
             url, headers=_FETCH_HEADERS, timeout=timeout, stream=True,
         )
     except requests.RequestException as exc:
-        raise TableExtractError("FETCH-001", f"请求失败: {exc}") from exc
+        raise TableExtractError("FETCH-001", say(f"Request failed: {exc}", f"请求失败: {exc}")) from exc
     with response:
         if response.status_code >= 400:
             raise TableExtractError(
-                "FETCH-001", f"目标返回 HTTP {response.status_code}")
+                "FETCH-001", say(f"The target returned HTTP {response.status_code}", f"目标返回 HTTP {response.status_code}"))
         declared = response.headers.get("Content-Length")
         if declared and declared.isdigit() and int(declared) > MAX_FETCH_BYTES:
             raise TableExtractError(
-                "FETCH-002", f"内容超过 {MAX_FETCH_BYTES} 字节上限")
+                "FETCH-002", say(f"The content exceeds the limit of {MAX_FETCH_BYTES} bytes", f"内容超过 {MAX_FETCH_BYTES} 字节上限"))
         chunks: List[bytes] = []
         size = 0
         for chunk in response.iter_content(chunk_size=65536):
@@ -238,14 +240,16 @@ def fetch_url_tables(url: str, timeout: int = 30) -> List[GridTable]:
             size += len(chunk)
             if size > MAX_FETCH_BYTES:
                 raise TableExtractError(
-                    "FETCH-002", f"内容超过 {MAX_FETCH_BYTES} 字节上限")
+                    "FETCH-002", say(f"The content exceeds the limit of {MAX_FETCH_BYTES} bytes", f"内容超过 {MAX_FETCH_BYTES} 字节上限"))
             chunks.append(chunk)
         raw = b"".join(chunks)
         content_type = response.headers.get("Content-Type", "")
-    return _parse_body(raw, url, content_type)
+    return parse_body(raw, url, content_type)
 
 
-def _parse_body(raw: bytes, url: str, content_type: str) -> List[GridTable]:
+def parse_body(raw: bytes, url: str, content_type: str) -> List[GridTable]:
+    """Parse a fetched body (PDF / JSON / CSV / HTML, sniffed from the bytes,
+    content type and URL path) into table grids."""
     ct = (content_type or "").lower()
     path = url.split("?", 1)[0].split("#", 1)[0].lower()
     if raw[:1024].lstrip().startswith(b"%PDF-") or "pdf" in ct or path.endswith(".pdf"):
@@ -264,7 +268,7 @@ def _parse_body(raw: bytes, url: str, content_type: str) -> List[GridTable]:
     except TableExtractError:
         raise TableExtractError(
             "FETCH-001",
-            "无法从该链接识别出表格（内容既不是 HTML/JSON/CSV/PDF）",
+            say("No table could be identified from this link (the content is not HTML/JSON/CSV/PDF)", "无法从该链接识别出表格（内容既不是 HTML/JSON/CSV/PDF）"),
         ) from None
 
 

@@ -1,0 +1,76 @@
+{
+  "coverage": {
+    "generate_dashboard": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "generate_dashboard"
+  ],
+  "description": "Skill 'dashboard' proposes 2 widgets; the dashboard_confirm fast path runs generate_dashboard.",
+  "scenario": "generate_dashboard",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:propose_dashboard_outline",
+        "end:propose_dashboard_outline"
+      ],
+      "final_text": "",
+      "message": "做一个销售看板。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "query_data",
+            "ask_user"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {
+        "skill": "dashboard"
+      },
+      "tool_results": []
+    },
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:generate_dashboard"
+      ],
+      "final_text": "✅ 看板「销售看板」已生成，包含 **2** 个图表组件。\n\n[📊 打开看板](/dashboard/销售看板_<TS>?sid=<SID>)  [📥 下载 HTML](/api/dashboard/销售看板_<TS>/export-html)",
+      "message": "确认生成看板",
+      "model_requests": [],
+      "options": {
+        "dashboard_name": "销售看板",
+        "dashboard_widgets": [
+          {
+            "chart_type": "Bar_Chart",
+            "field_mapping": {
+              "x": "region",
+              "y": "revenue"
+            },
+            "sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region",
+            "title": "各区域销售额"
+          },
+          {
+            "chart_type": "Line_Chart",
+            "field_mapping": {
+              "x": "month",
+              "y": "revenue"
+            },
+            "sql": "SELECT SUBSTR(order_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY month ORDER BY month",
+            "title": "月度销售额"
+          }
+        ],
+        "internal_action": "dashboard_confirm"
+      },
+      "tool_results": []
+    }
+  ]
+}

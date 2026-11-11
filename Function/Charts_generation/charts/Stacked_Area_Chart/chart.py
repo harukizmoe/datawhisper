@@ -29,6 +29,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 from typing import List, Tuple
+from compute.i18n import say
 
 try:
     from charts.base import ChartResult, build_chart_html
@@ -87,7 +88,7 @@ def _auto_col_x(df: pd.DataFrame) -> str:
     for c in df.columns:
         if pd.api.types.is_numeric_dtype(df[c]):
             return c
-    raise ValueError("找不到有效的 x 列")
+    raise ValueError(say("No valid x column found", "找不到有效的 x 列"))
 
 
 def _auto_cols_y(df: pd.DataFrame, x_col: str) -> List[str]:
@@ -147,7 +148,7 @@ def generate(df: pd.DataFrame, mapping: dict = None, options: dict = None) -> Ch
     options = options or {}
 
     if df is None or df.empty:
-        return ChartResult("<p>数据为空</p>", warnings=["数据为空，无法绘制堆叠面积图"])
+        return ChartResult(say("<p>Data is empty</p>", "<p>数据为空</p>"), warnings=[say("Data is empty; cannot draw stacked area chart", "数据为空，无法绘制堆叠面积图")])
 
     df = df.copy()
 
@@ -172,32 +173,32 @@ def generate(df: pd.DataFrame, mapping: dict = None, options: dict = None) -> Ch
         except ValueError as e:
             log.debug("[chart] 图表生成异常: %s", e)
             warnings.append(str(e))
-            return ChartResult("<p>找不到有效的 x 列</p>", warnings=warnings, meta=meta)
+            return ChartResult(say("<p>No valid x column found</p>", "<p>找不到有效的 x 列</p>"), warnings=warnings, meta=meta)
 
     if x_col not in df.columns:
-        return ChartResult(f"<p>x列不存在: {x_col}</p>", warnings=[f"x列不存在: {x_col}"], meta=meta)
+        return ChartResult(say(f"<p>x column not found: {x_col}</p>", f"<p>x列不存在: {x_col}</p>"), warnings=[say(f"x column not found: {x_col}", f"x列不存在: {x_col}")], meta=meta)
 
     # 自动识别 y
     if not y_cols:
         y_cols = _auto_cols_y(df, x_col)
 
     if not y_cols:
-        warnings.append("找不到有效的数值列")
-        return ChartResult("<p>找不到有效的数值列</p>", warnings=warnings, meta=meta)
+        warnings.append(say("No valid numeric column found", "找不到有效的数值列"))
+        return ChartResult(say("<p>No valid numeric column found</p>", "<p>找不到有效的数值列</p>"), warnings=warnings, meta=meta)
 
     for y in y_cols:
         if y not in df.columns:
-            return ChartResult(f"<p>y列不存在: {y}</p>", warnings=[f"y列不存在: {y}"], meta=meta)
+            return ChartResult(say(f"<p>y column not found: {y}</p>", f"<p>y列不存在: {y}</p>"), warnings=[say(f"y column not found: {y}", f"y列不存在: {y}")], meta=meta)
 
     if series_col and series_col not in df.columns:
-        return ChartResult(f"<p>series列不存在: {series_col}</p>", warnings=[f"series列不存在: {series_col}"], meta=meta)
+        return ChartResult(say(f"<p>series column not found: {series_col}</p>", f"<p>series列不存在: {series_col}</p>"), warnings=[say(f"series column not found: {series_col}", f"series列不存在: {series_col}")], meta=meta)
 
-    title = options.get("title", "堆叠面积图")
+    title = options.get("title", say("Stacked Area Chart", "堆叠面积图"))
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
     # x 点数量检查
     if df[x_col].dropna().nunique() < 3:
-        warnings.append("x轴有效数据点少于3个，堆叠面积图效果可能不佳")
+        warnings.append(say("Fewer than 3 valid x-axis points; stacked area chart may not look good", "x轴有效数据点少于3个，堆叠面积图效果可能不佳"))
 
     fig = go.Figure()
 
@@ -207,8 +208,8 @@ def generate(df: pd.DataFrame, mapping: dict = None, options: dict = None) -> Ch
     if series_col:
         if len(y_cols) != 1:
             return ChartResult(
-                html="<p>series 模式下只支持单个 y 列</p>",
-                warnings=["series 模式下，堆叠面积图只支持单个 y 列"],
+                html=say("<p>Series mode supports only a single y column</p>", "<p>series 模式下只支持单个 y 列</p>"),
+                warnings=[say("In series mode, a stacked area chart supports only a single y column", "series 模式下，堆叠面积图只支持单个 y 列")],
                 meta=meta
             )
 
@@ -219,26 +220,26 @@ def generate(df: pd.DataFrame, mapping: dict = None, options: dict = None) -> Ch
         df_plot = df_plot.dropna(subset=[x_col, y_col, series_col])
 
         if df_plot.empty:
-            return ChartResult("<p>清洗后数据为空</p>", warnings=["清洗后数据为空，无法绘制堆叠面积图"], meta=meta)
+            return ChartResult(say("<p>Data is empty after cleaning</p>", "<p>清洗后数据为空</p>"), warnings=[say("Data is empty after cleaning; cannot draw stacked area chart", "清洗后数据为空，无法绘制堆叠面积图")], meta=meta)
 
         # series 个数检查
         n_series = df_plot[series_col].nunique()
         if n_series < 2:
             return ChartResult(
-                html="<p>series 分组不足</p>",
-                warnings=["series 分组数少于2，无法形成有效堆叠面积图"],
+                html=say("<p>Not enough series groups</p>", "<p>series 分组不足</p>"),
+                warnings=[say("Fewer than 2 series groups; cannot form a valid stacked area chart", "series 分组数少于2，无法形成有效堆叠面积图")],
                 meta=meta
             )
         if n_series > 5:
-            warnings.append(f"series 分组数过多({n_series}个)，建议控制在 2-5 个以内")
+            warnings.append(say(f"Too many series groups ({n_series}); keep it within 2-5", f"series 分组数过多({n_series}个)，建议控制在 2-5 个以内"))
 
         # 负值检查
         if (df_plot[y_col] < 0).any():
-            warnings.append("检测到负值，堆叠面积图可能无法正确表达累积关系")
+            warnings.append(say("Negative values detected; stacked area chart may not represent cumulative relationships correctly", "检测到负值，堆叠面积图可能无法正确表达累积关系"))
 
         # 重复组合聚合
         if df_plot.duplicated(subset=[x_col, series_col]).any():
-            warnings.append("检测到重复的 (x, series) 组合，已自动按求和聚合")
+            warnings.append(say("Duplicate (x, series) combinations detected; automatically aggregated by sum", "检测到重复的 (x, series) 组合，已自动按求和聚合"))
 
         df_plot = df_plot.groupby([x_col, series_col], as_index=False)[y_col].sum()
 
@@ -294,24 +295,24 @@ def generate(df: pd.DataFrame, mapping: dict = None, options: dict = None) -> Ch
     else:
         if len(y_cols) < 2:
             return ChartResult(
-                html="<p>非 series 模式下至少需要2个 y 列</p>",
-                warnings=["非 series 模式下，堆叠面积图至少需要 2 个 y 列"],
+                html=say("<p>At least 2 y columns are required in non-series mode</p>", "<p>非 series 模式下至少需要2个 y 列</p>"),
+                warnings=[say("In non-series mode, a stacked area chart requires at least 2 y columns", "非 series 模式下，堆叠面积图至少需要 2 个 y 列")],
                 meta=meta
             )
 
         if len(y_cols) > 5:
-            warnings.append(f"y列过多({len(y_cols)}列)，建议控制在 2-5 列以内")
+            warnings.append(say(f"Too many y columns ({len(y_cols)}); keep it within 2-5", f"y列过多({len(y_cols)}列)，建议控制在 2-5 列以内"))
 
         df_plot = df[[x_col] + y_cols].copy()
         df_plot = df_plot.dropna(subset=[x_col])
 
         if df_plot.empty:
-            return ChartResult("<p>清洗后数据为空</p>", warnings=["清洗后数据为空，无法绘制堆叠面积图"], meta=meta)
+            return ChartResult(say("<p>Data is empty after cleaning</p>", "<p>清洗后数据为空</p>"), warnings=[say("Data is empty after cleaning; cannot draw stacked area chart", "清洗后数据为空，无法绘制堆叠面积图")], meta=meta)
 
         for col in y_cols:
             df_plot[col] = _clean_numeric_series(df_plot[col]).fillna(0)
             if (df_plot[col] < 0).any():
-                warnings.append(f"列 {col} 检测到负值，堆叠面积图可能无法正确表达累积关系")
+                warnings.append(say(f"Column {col}: negative values detected; stacked area chart may not represent cumulative relationships correctly", f"列 {col} 检测到负值，堆叠面积图可能无法正确表达累积关系"))
 
         x_order = _sort_x_values(df_plot[x_col].tolist())
         df_plot[x_col] = pd.Categorical(df_plot[x_col], categories=x_order, ordered=True)
@@ -346,14 +347,14 @@ def generate(df: pd.DataFrame, mapping: dict = None, options: dict = None) -> Ch
         margin=dict(l=50, r=50, t=70, b=50),
         hovermode="x unified",
         xaxis_title=x_col,
-        yaxis_title="占比" if options.get("groupnorm") == "percent" else "数值",
+        yaxis_title=say("Share", "占比") if options.get("groupnorm") == "percent" else say("Value", "数值"),
         showlegend=True,
         legend=dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=0.01)
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
     html = build_chart_html(title, "stacked_area_chart", "plotly",
-                            "x列 + y列(多列) 或 x列 + y列 + series列",
-                            "堆叠面积图，展示各部分随时间的累积趋势。", chart_html)
+                            say("x column + y columns (multiple) or x column + y column + series column", "x列 + y列(多列) 或 x列 + y列 + series列"),
+                            say("Stacked area chart showing the cumulative trend of each part over time.", "堆叠面积图，展示各部分随时间的累积趋势。"), chart_html)
 
     return ChartResult(html=html, warnings=warnings, meta=meta)

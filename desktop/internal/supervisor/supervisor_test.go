@@ -1,0 +1,329 @@
+package supervisor
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"datawhisper/desktop/internal/service"
+)
+
+var fakeBin string
+
+// TestMain 为所有测试构建一次 testdata/fakeservice。
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "dw-fakeservice-")
+	if err != nil {
+		panic(err)
+	}
+	fakeBin = filepath.Join(dir, "fakeservice")
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", fakeBin, "./testdata/fakeservice")
+	build.Stdout, build.Stderr = os.Stdout, os.Stderr
+	if err := build.Run(); err != nil {
+		panic(fmt.Sprintf("build fakeservice: %v", err))
+	}
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// recorder 收集状态变化；wait 会阻塞到某个状态匹配为止。它那一分钟的上限只是把卡死变成失败：每次等待都在
+// 等 supervisor 真正会产出的事件。
+type recorder struct {
+	mu     sync.Mutex
+	states []Status
+	cond   *sync.Cond
+}
+
+func newRecorder() *recorder {
+	r := &recorder{}
+	r.cond = sync.NewCond(&r.mu)
+	return r
+}
+
+func (r *recorder) on(st Status) {
+	r.mu.Lock()
+	r.states = append(r.states, st)
+	r.mu.Unlock()
+	r.cond.Broadcast()
+}
+
+// wait 返回下标 >= from 的第一个状态为 want 的记录及其下标。
+func (r *recorder) wait(t *testing.T, from int, want State) (Status, int) {
+	t.Helper()
+	timer := time.AfterFunc(time.Minute, r.cond.Broadcast)
+	defer timer.Stop()
+	deadline := time.Now().Add(time.Minute)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for {
+		for i := from; i < len(r.states); i++ {
+			if r.states[i].State == want {
+				return r.states[i], i
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no %v state; got %v", want, r.kinds())
+		}
+		r.cond.Wait()
+	}
+}
+
+func (r *recorder) kinds() []string {
+	var out []string
+	for _, st := range r.states {
+		out = append(out, st.State.String())
+	}
+	return out
+}
+
+func (r *recorder) snapshot() []Status {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Status(nil), r.states...)
+}
+
+type fixture struct {
+	sup     *Supervisor
+	rec     *recorder
+	dataDir string
+	stopped string
+	delays  []time.Duration
+}
+
+func start(t *testing.T, env []string, tune func(*Config)) *fixture {
+	t.Helper()
+	f := &fixture{rec: newRecorder(), dataDir: t.TempDir()}
+	f.stopped = filepath.Join(f.dataDir, "stopped")
+	cfg := Config{
+		Command:        []string{fakeBin},
+		DataDir:        f.dataDir,
+		Env:            append([]string{"FAKE_STOPPED=" + f.stopped, "FAKE_COUNT=" + filepath.Join(f.dataDir, "count")}, env...),
+		BackoffInitial: 100 * time.Millisecond,
+		BackoffMax:     time.Second,
+		OnState:        f.rec.on,
+	}
+	if tune != nil {
+		tune(&cfg)
+	}
+	sup, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	sup.sleep = func(d time.Duration) { // 记录退避值，而不是真的等它
+		mu.Lock()
+		f.delays = append(f.delays, d)
+		mu.Unlock()
+	}
+	f.sup = sup
+	sup.Start()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_ = sup.Stop(ctx)
+	})
+	return f
+}
+
+// client 连上 ready 状态的管道；读循环随进程退出自行结束，不需要清理。
+func (f *fixture) client(st Status) *service.Client {
+	return service.New(st.Pipe)
+}
+
+// health 通过管道调用 health 方法，返回解码后的原始结果。
+func health(t *testing.T, c *service.Client) map[string]any {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	raw, err := c.Call(ctx, "health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func stop(t *testing.T, sup *Supervisor) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := sup.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadyHealthLogsAndGracefulStop(t *testing.T) {
+	f := start(t, []string{"FAKE_MODE=ok"}, nil)
+	ready, _ := f.rec.wait(t, 0, StateReady)
+	if ready.Pipe == nil || ready.PID == 0 {
+		t.Fatalf("ready without a pipe/pid: %+v", ready)
+	}
+	c := f.client(ready)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	h, err := c.Health(ctx)
+	if err != nil || !h.OK {
+		t.Errorf("health: %+v %v", h, err)
+	}
+	body := health(t, c)
+	if body["dataDir"] != f.dataDir || body["pid"] != float64(ready.PID) {
+		t.Errorf("health result: %v", body)
+	}
+	stop(t, f.sup)
+	if got := f.rec.kinds(); strings.Join(got, ",") != "starting,ready,stopped" {
+		t.Errorf("states %v", got)
+	}
+	if how, _ := os.ReadFile(f.stopped); string(how) != "stdin" {
+		t.Errorf("stopped by %q, want stdin", how)
+	}
+	log, err := os.ReadFile(f.sup.LogPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"[stderr] fake: starting ok", "[stderr] fake: a log line after the ready line", "stopped (stdin closed)"} {
+		if !strings.Contains(string(log), want) {
+			t.Errorf("log lacks %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(string(log), `"type":"ready"`) {
+		t.Errorf("log holds the ready line:\n%s", log)
+	}
+}
+
+func TestReadyTimeoutEndsFailed(t *testing.T) {
+	f := start(t, []string{"FAKE_MODE=noready"}, func(c *Config) {
+		c.ReadyTimeout = 200 * time.Millisecond
+		c.CrashLimit = 2
+	})
+	failed, _ := f.rec.wait(t, 0, StateFailed)
+	if failed.Err == nil || !strings.Contains(failed.Err.Error(), "no ready line within 200ms") || failed.Crashes != 2 {
+		t.Errorf("failed: %+v", failed)
+	}
+	if got := strings.Join(f.rec.kinds(), ","); got != "starting,restarting,failed" {
+		t.Errorf("states %s", got)
+	}
+}
+
+func TestRestartWithBackoffUntilReady(t *testing.T) {
+	f := start(t, []string{"FAKE_MODE=ok", "FAKE_FAIL_STARTS=3"}, nil)
+	ready, _ := f.rec.wait(t, 0, StateReady)
+	f.client(ready) // 清理时 Stop 需要有人读 stdout，否则回收进程要等两次 StopTimeout
+	if ready.Crashes != 3 {
+		t.Errorf("ready after %d crashes, want 3", ready.Crashes)
+	}
+	want := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+	if fmt.Sprint(f.delays) != fmt.Sprint(want) {
+		t.Errorf("backoff %v, want %v", f.delays, want)
+	}
+	for _, st := range f.rec.snapshot() {
+		if st.State == StateRestarting && st.Err != nil && !strings.Contains(st.Err.Error(), "exited before it was ready") {
+			t.Errorf("restart reason %v", st.Err)
+		}
+	}
+}
+
+func TestBackoffIsCapped(t *testing.T) {
+	sup, err := New(Config{Command: []string{"x"}, DataDir: t.TempDir(), BackoffInitial: time.Second, BackoffMax: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []time.Duration
+	for crashes := 1; crashes <= 6; crashes++ {
+		got = append(got, sup.backoff(crashes))
+	}
+	if fmt.Sprint(got) != "[1s 2s 4s 5s 5s 5s]" {
+		t.Errorf("backoff %v", got)
+	}
+}
+
+func TestCrashWhileReadyRestarts(t *testing.T) {
+	f := start(t, []string{"FAKE_MODE=ok"}, nil)
+	first, i := f.rec.wait(t, 0, StateReady)
+	c := f.client(first)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := c.Call(ctx, "crash", nil); !errors.Is(err, service.ErrClosed) {
+		t.Errorf("crash request: %v", err)
+	}
+	restarting, j := f.rec.wait(t, i, StateRestarting)
+	if restarting.Err == nil || !strings.Contains(restarting.Err.Error(), "exit status 2") {
+		t.Errorf("restart reason %v", restarting.Err)
+	}
+	second, _ := f.rec.wait(t, j, StateReady)
+	if second.PID == first.PID || second.Pipe == nil {
+		t.Errorf("same pipe/pid after restart: %+v", second)
+	}
+	health(t, f.client(second))
+}
+
+func TestCrashLimitFailsThenRetry(t *testing.T) {
+	f := start(t, []string{"FAKE_MODE=ok", "FAKE_FAIL_STARTS=3"}, func(c *Config) { c.CrashLimit = 3 })
+	failed, i := f.rec.wait(t, 0, StateFailed)
+	if failed.Crashes != 3 || !strings.Contains(failed.Err.Error(), "3 crashes within 2m0s") {
+		t.Errorf("failed: %+v", failed)
+	}
+	if got := strings.Join(f.rec.kinds(), ","); got != "starting,restarting,restarting,failed" {
+		t.Errorf("states %s", got)
+	}
+	f.sup.Retry()
+	starting, j := f.rec.wait(t, i, StateStarting)
+	if starting.Crashes != 0 {
+		t.Errorf("retry kept %d crashes", starting.Crashes)
+	}
+	ready, _ := f.rec.wait(t, j, StateReady) // 第四次启动成功
+	f.client(ready)                          // 清理时 Stop 需要有人读 stdout
+}
+
+func TestStopFallsBackToSigtermThenKill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no SIGTERM on Windows")
+	}
+	t.Run("sigterm", func(t *testing.T) {
+		f := start(t, []string{"FAKE_MODE=ignore-stdin"}, func(c *Config) { c.StopTimeout = 200 * time.Millisecond })
+		ready, _ := f.rec.wait(t, 0, StateReady)
+		f.client(ready) // 必须有人读 stdout，否则 cmd.Wait 回收不了进程
+		stop(t, f.sup)
+		if how, _ := os.ReadFile(f.stopped); string(how) != "sigterm" {
+			t.Errorf("stopped by %q, want sigterm", how)
+		}
+	})
+	t.Run("kill", func(t *testing.T) {
+		f := start(t, []string{"FAKE_MODE=ignore-all"}, func(c *Config) { c.StopTimeout = 200 * time.Millisecond })
+		ready, _ := f.rec.wait(t, 0, StateReady)
+		f.client(ready)
+		stop(t, f.sup)
+		if how, err := os.ReadFile(f.stopped); err == nil {
+			t.Errorf("stopped by %q, want a kill", how)
+		}
+		log, _ := os.ReadFile(f.sup.LogPath())
+		if !strings.Contains(string(log), "killed after 200ms") {
+			t.Errorf("log lacks the kill:\n%s", log)
+		}
+	})
+}
+
+func TestStopDuringBackoff(t *testing.T) {
+	f := start(t, []string{"FAKE_MODE=exit"}, func(c *Config) { c.CrashLimit = 100 })
+	f.rec.wait(t, 0, StateRestarting)
+	stop(t, f.sup)
+	f.rec.wait(t, 0, StateStopped)
+	if st := f.sup.Status(); st.State != StateStopped {
+		t.Errorf("status %v", st.State)
+	}
+}

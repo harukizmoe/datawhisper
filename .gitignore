@@ -1,5 +1,8 @@
 # ============================================================
-#  Business Analytics Agent — .gitignore
+#  DataWhisper — .gitignore
+#
+#  仓库结构：`desktop/`（Go + MyGo 桌面端）、`server/`（Bun/TS 服务）、
+#  `compute/`（Python 计算进程）、`Function/`（计算实现）、`static/vendor/`（图表 JS）。
 # ============================================================
 
 # ---- Python ----
@@ -14,170 +17,64 @@ env/
 ENV/
 .python-version
 
-# ---- Build / dist ----
+# ---- 构建产物 ----
 node_modules/
 build/
 dist/
-frontend/dist/
-# The Flask app serves Vite output directly from static/dist in source builds.
-# Keep generated runtime assets trackable so GitHub users do not load a 404 shell.
-static/dist/*
-!static/dist/
-!static/dist/*.js
-!static/dist/*.css
-!static/dist/chunks/
-!static/dist/chunks/**
-!static/dist/assets/
-!static/dist/assets/**
-!static/dist/.vite/
-!static/dist/.vite/**
 *.spec
-!packaging/business_agent.spec
 *.egg-info/
 .eggs/
 
-# ---- Runtime / cache ----
-.deps_installed
-.session_tmps/
+# 随包的可执行文件由 scripts/build/*.sh 生成，不入库（每个约 100 MB）。
+desktop/resources/*/bin/
+# 随包的图表静态库（plotly/echarts/d3）同样由 bundle-static.sh 复制，不入库。
+desktop/resources/*/static/
+
+# ---- 运行期数据与缓存 ----
 outputs/
-tmp/
 uploads/
+tmp/
 *.log
 .cache/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-auth.db
-auth.db-wal
-auth.db-shm
+.deps_installed
+.session_tmps/
 
-# ---- Regression tests ----
-# Version the shared runtime regressions; keep unrelated local experiments ignored.
-/tests/*
-!/tests/test_chart_selector.py
-!/tests/chat-bundle.test.mjs
-!/tests/markdown-stream.test.mjs
-!/tests/sse-retry.test.mjs
-!/tests/ui-registry.test.mjs
-!/tests/test_account_menu.py
-!/tests/test_admin_console.py
-!/tests/test_desktop_launcher.py
-!/tests/test_diagram_theme.py
-!/tests/test_feishu_bot.py
-!/tests/test_gpu_analysis_fallback.py
-!/tests/test_heatmap_generation.py
-!/tests/test_hosted_models.py
-!/tests/test_model_api_security.py
-!/tests/test_privacy_boundaries.py
-!/tests/test_developer_api_removed.py
-!/tests/test_quota_model_ledger.py
-!/tests/test_report_export_regressions.py
-!/tests/test_sql_shadow.py
-!/tests/test_table_ingest.py
-!/tests/test_tool_governance.py
-!/tests/test_workspace_artifact_cleanup.py
+# 本地凭据与配置（绝不入库）
+.env
+.env.local
+*.local
+secret_key
+config/hooks.json
+config/hooks-history.json
+config/feishu-bot.json
+*.sqlite-shm
+*.sqlite-wal
 
-# Keep the tests already tracked by Git for GitHub Actions, but do not add
-# newly created local tests to the repository.
-Test/*
-!Test/test_workflow_contracts.py
-!Test/test_workflows.py
-!Test/test_workflow_scheduler.py
-!Test/test_job_terminal_listeners.py
-!Test/test_workflow_runtime.py
-!Test/test_workspace_storage_workflow_refs.py
-!Test/test_workflow_frontend_panel.py
-!Test/test_workflow_sqlite_locking.py
-!Test/fixtures/
-!Test/fixtures/workflows/
-!Test/fixtures/workflows/operating_analysis_v1.json
-Test/local_*.py
-Test/test_workspace_storage_cleanup.py
+# ---- 文档与脚本 ----
+docs/*
+!/docs/refactor/
+docs/refactor/*.png
+# 打包与构建脚本显式保留（scripts/* 默认忽略）。
+scripts/*
+!scripts/build/
+!scripts/build/**
 
-# Keep all development tests local.
-Test/
-
-# ---- IDE / editor ----
+# ---- 编辑器与系统 ----
 .idea/
 .vscode/
 *.swp
 *.swo
 .DS_Store
 Thumbs.db
-.workbuddy
-
-# ---- OS ----
 desktop.ini
 
-# ---- Local secrets / config ----
-.env
-.env.local
-*.local
-LLM/llm_config.json
-LLM/mcp_config.json
-LLM/embedding_config.json
-data/datasource_config.json
-.playwright-mcp
-docs/*
-!docs/14-local-duckdb-concurrency-import-plan.md
-!docs/10-ai-team-workflow-optimization-plan.md
-!docs/11-ai-team-workflow-wf0-decisions.md
-!docs/21-edition-boundaries.md
-!docs/02-architecture.md
-!docs/03-conventions.md
-!docs/04-api-reference.md
-!docs/06-analysis-skills.md
-!docs/07-rag-rule.md
-!docs/12-d6-tool-discovery.md
-!docs/23-desktop-packaging.md
-!docs/feature-sync-1.4.md
-!docs/hosted-configuration.md
-test.bat
-01-notes-for-development.md
-
-
-# ---- Large assets that should not be tracked ----
-*.psd
-!Banner.psd
-
-# ---- Ongoing work / WIP (next-version, not ready to push) ----
-MCP/Flowchart
-MCP/mindmap
-MCP/playwright
-MCP/flowchart_server.py
-RAILWAY_DEPLOY.md
-config/hooks.json
-config/hooks-history.json
-config/feishu-bot.json
-package-lock.json
+# ---- 本地实验 ----
 .claude
 .agents/
 .uploads/
-memory/
-# Keep local maintenance scripts private, but version the three scripts required by
-# `pnpm run build` so release runners can build the chat bundle.
-scripts/*
-!scripts/build-chat.mjs
-!scripts/clean-chat-chunks.mjs
-!scripts/verify-chat-bundle.mjs
-!scripts/generate_tool_inventory.py
-# Untracked assets
-Information/assets/LOGO.png
-
-# Local package cache, runtime secrets, and business-canvas state
+/memory/
+Test/
 .pnpm-store/
-secret_key
-business_canvas/*.sqlite
-business_canvas/*.sqlite-journal
-*.sqlite-shm
-*.sqlite-wal
-
-# TimesFM optional-service regression tests and implementation plan
-!tests/test_timesfm_integration.py
-!tests/forecast-settings.test.mjs
-!tests/test_local_services.py
-!tests/local-services-settings.test.mjs
-!docs/24-specialist-model-compute-plan.md
-/.zvec-grep
-/docs
-/tests

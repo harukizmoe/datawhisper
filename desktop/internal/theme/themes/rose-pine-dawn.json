@@ -1,0 +1,30 @@
+{
+  "id": "rose-pine-dawn",
+  "name": "Rosé Pine Dawn",
+  "family": "rose-pine",
+  "appearance": "light",
+  "license": "MIT",
+  "source": "https://rosepinetheme.com/palette",
+  "palette": {
+    "nc": "#f8f0e7", "base": "#faf4ed", "surface": "#fffaf3", "overlay": "#f2e9e1",
+    "muted": "#9893a5", "subtle": "#797593", "text": "#464261", "love": "#b4637a",
+    "gold": "#ea9d34", "rose": "#d7827e", "pine": "#286983", "foam": "#56949f",
+    "iris": "#907aa9", "highlight-low": "#f4ede8", "highlight-med": "#dfdad9", "highlight-high": "#cecacd"
+  },
+  "accents": ["love", "gold", "rose", "pine", "foam", "iris"],
+  "roles": {
+    "background": "base", "sidebar": "nc", "inspector": "nc", "surface": "surface",
+    "surfaceHover": "overlay", "surfacePressed": "highlight-med", "border": "highlight-med", "text": "text",
+    "textMuted": "subtle", "accent": "iris", "link": "pine", "focus": "iris/0.6",
+    "selection": "highlight-med", "success": "pine", "warning": "gold", "danger": "love",
+    "userBubble": "overlay", "codeBackground": "nc", "card": "surface", "cardBorder": "highlight-med",
+    "canvas": "overlay"
+  },
+  "syntax": {
+    "keyword": "pine", "string": "gold", "number": "gold", "comment": "subtle",
+    "function": "rose", "type": "foam", "constant": "rose", "operator": "subtle",
+    "property": "foam", "tag": "foam", "attribute": "iris", "punctuation": "subtle",
+    "regexp": "iris", "escape": "pine", "variable": "text"
+  },
+  "chart": ["iris", "gold", "pine", "love", "foam", "rose"]
+}

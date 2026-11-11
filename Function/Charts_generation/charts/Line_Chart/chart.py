@@ -30,12 +30,20 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(时间/类别) + y列(数值，支持多列)；或宽格式(第一列维度 + 多个数值列)"
-_DESC = "展示数据随时间或有序类别的变化趋势，支持多条折线对比，适合连续数据。"
+def _data_fmt() -> str:
+    return say("x column (time/category) + y column (numeric, multiple allowed); or wide format (first column dimension + multiple numeric columns)", "x列(时间/类别) + y列(数值，支持多列)；或宽格式(第一列维度 + 多个数值列)")
+
+
+def _desc() -> str:
+    return say(
+        "Shows how data changes over time or ordered categories; supports comparing multiple lines and suits continuous data.",
+        "展示数据随时间或有序类别的变化趋势，支持多条折线对比，适合连续数据。",
+    )
 
 MCKINSEY_COLORS = [
     "#003D7A", "#0084D1", "#00A4EF", "#7FBA00", "#FFB81C",
@@ -133,7 +141,7 @@ def generate(
     excel_path: str = None,
     x: str = "x",
     y: Union[str, List[str]] = "y",
-    title: str = "折线图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings = []
@@ -146,9 +154,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
@@ -156,7 +164,7 @@ def generate(
     y_cols = y_cols if y_cols is not None else y
     series_col = mapping.get("series")
     series_col = series_col if series_col is not None else (mapping.get("color") if mapping.get("color") is not None else None)
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Line Chart", "折线图"))
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
     if y_cols == "y" or y_cols is None:
@@ -240,7 +248,7 @@ def generate(
                 hovermode="x unified" if not is_roc_like else "closest",
             )
             chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-            html = _build_html(title, "line_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+            html = _build_html(title, "line_chart", "plotly", _data_fmt(), _desc(), chart_html)
             return ChartResult(html=html, spec={}, warnings=warnings,
                                meta={"chart_id": "line_chart", "n_rows": len(df),
                                      "x_col": x_key, "y_cols": [y_key], "series_col": series_col})
@@ -252,7 +260,7 @@ def generate(
         _x = id_col
         # 宽表默认全量，避免上游传单列导致只出“中国”
         _y_cols = value_cols
-        warnings.append("检测到宽格式，已使用第一列为x、其余数值列为多条线")
+        warnings.append(say("Wide format detected; using the first column as x and the remaining numeric columns as multiple lines", "检测到宽格式，已使用第一列为x、其余数值列为多条线"))
     else:
         if x_col and x_col != "x" and x_col in df.columns:
             _x = x_col
@@ -260,7 +268,7 @@ def generate(
             _x = _auto_col(df, x_col, "x", "时间", "date", "月份", "年份", "日期", "period", "year")
 
         if _x is None or _x not in df.columns:
-            return ChartResult(warnings=["找不到 x 列（时间/类别）"])
+            return ChartResult(warnings=[say("x column (time/category) not found", "找不到 x 列（时间/类别）")])
 
         _y_cols = []
         if not y_cols:
@@ -284,10 +292,10 @@ def generate(
 
         _y_cols = [c for i, c in enumerate(_y_cols) if c != _x and c not in _y_cols[:i]]
         if not _y_cols:
-            return ChartResult(warnings=["找不到任何可用的 y 列（数值列）"])
+            return ChartResult(warnings=[say("No usable y column (numeric) found", "找不到任何可用的 y 列（数值列）")])
 
     if len(_y_cols) > 10:
-        warnings.append(f"数值列过多({len(_y_cols)}个)，只显示前10列")
+        warnings.append(say(f"Too many numeric columns ({len(_y_cols)}); showing only the first 10", f"数值列过多({len(_y_cols)}个)，只显示前10列"))
         _y_cols = _y_cols[:10]
 
     keep_cols = [_x] + [c for c in _y_cols if c in df.columns]
@@ -301,11 +309,11 @@ def generate(
 
     _y_cols = valid_y
     if not _y_cols:
-        return ChartResult(warnings=["所有 y 列都无法转换为数值"])
+        return ChartResult(warnings=[say("None of the y columns can be converted to numbers", "所有 y 列都无法转换为数值")])
 
     df_plot = df_plot.dropna(subset=_y_cols, how="all")
     if df_plot.empty:
-        return ChartResult(warnings=["无有效数据"])
+        return ChartResult(warnings=[say("No valid data", "无有效数据")])
 
     df_plot[_x] = df_plot[_x].astype(str)
 
@@ -323,7 +331,7 @@ def generate(
             name=yc,
             line=dict(color=color, width=3.2),
             marker=dict(size=7, color=color),
-            hovertemplate=f"<b>{yc}</b><br>%{{x}}<br>值: %{{y:.2f}}<extra></extra>"
+            hovertemplate=say(f"<b>{yc}</b><br>%{{x}}<br>Value: %{{y:.2f}}<extra></extra>", f"<b>{yc}</b><br>%{{x}}<br>值: %{{y:.2f}}<extra></extra>")
         ))
 
     fig.update_layout(
@@ -342,7 +350,7 @@ def generate(
             font=dict(size=11, color="#1F1F1F")
         ),
         xaxis_title=_x,
-        yaxis_title="值",
+        yaxis_title=say("Value", "值"),
     )
     fig.update_xaxes(
         showgrid=False,  # x方向网格去掉
@@ -355,7 +363,7 @@ def generate(
         zeroline=False
     )
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "line_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "line_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
     return ChartResult(
         html=html,

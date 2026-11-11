@@ -23,11 +23,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
 
-_DATA_FMT = "category列 + value列 [+ time列]"
-_DESC = "极坐标扇形面积表示数值，适合周期性数据。"
+
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -110,8 +110,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -123,7 +123,7 @@ def generate(
     excel_path: str = None,
     names: str = "name",
     values: str = "value",
-    title: str = "南丁格尔玫瑰图",
+    title: str = None,
     color_scheme: str = "mckinsey",
     **kwargs
 ) -> ChartResult:
@@ -145,9 +145,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 调度器把 aliases 归一化：labels→label、values→value（chart_generate.py:76-80）。
     # 同时保留旧别名 names/name/values 以兼容直接调用与旧 payload。
@@ -156,13 +156,15 @@ def generate(
     values_col = mapping.get("value")
     values_col = values_col if values_col is not None else (mapping.get("values") if mapping.get("values") is not None else values)
     title = options.get("title", title)
+    if title is None:
+        title = say("Nightingale Rose Chart", "南丁格尔玫瑰图")
 
     _names = _auto_col(df, names_col, "label", "name", "names", "月份", "类别", "category")
     _values = _auto_col(df, values_col, "value", "销售额", "销量", "amount", "num")
 
     for role, col_ in [("names", _names), ("values", _values)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _names not in df.columns or _values not in df.columns:
         return ChartResult(warnings=warnings)
@@ -171,11 +173,11 @@ def generate(
     # 1. 检查数据点数量
     n_rows = len(df)
     if n_rows < 4:
-        warnings.append(f"⚠️ 数据点过少（{n_rows}个）。建议至少4个数据点，否则建议用柱状图或饼图。")
+        warnings.append(say(f"⚠️ Too few data points ({n_rows}). At least 4 are recommended; otherwise use a bar chart or pie chart.", f"⚠️ 数据点过少（{n_rows}个）。建议至少4个数据点，否则建议用柱状图或饼图。"))
     
     # 2. 检查类别数量
     if n_rows > 12:
-        warnings.append(f"⚠️ 类别过多（{n_rows}个）。建议≤12个类别，否则会导致视觉混乱。建议用柱状图。")
+        warnings.append(say(f"⚠️ Too many categories ({n_rows}). Keep the category count ≤12 to avoid visual clutter; consider a bar chart.", f"⚠️ 类别过多（{n_rows}个）。建议≤12个类别，否则会导致视觉混乱。建议用柱状图。"))
     
     # 3. 检查负数 / NaN（先转数值再判断，避免把 NaN 误报成“负数”）
     try:
@@ -183,25 +185,25 @@ def generate(
         neg_mask = values_numeric < 0
         nan_mask = values_numeric.isna()
         if neg_mask.any():
-            warnings.append("⚠️ 数据中包含负数。南丁格尔玫瑰图不支持负数，请过滤或转换数据。")
+            warnings.append(say("⚠️ Data contains negative values. The Nightingale rose chart does not support negatives; please filter or transform the data.", "⚠️ 数据中包含负数。南丁格尔玫瑰图不支持负数，请过滤或转换数据。"))
         if nan_mask.any() and not neg_mask.any():
-            warnings.append(f"⚠️ 数据中包含 {int(nan_mask.sum())} 个无法解析为数值的空值，已自动删除。")
+            warnings.append(say(f"⚠️ Data contains {int(nan_mask.sum())} empty value(s) that could not be parsed as numbers; they were removed automatically.", f"⚠️ 数据中包含 {int(nan_mask.sum())} 个无法解析为数值的空值，已自动删除。"))
         # 过滤负数与 NaN
         keep = values_numeric.notna() & (values_numeric >= 0)
         if (~keep).any():
             df = df[keep].copy()
             if len(df) == 0:
-                return ChartResult(warnings=warnings + ["❌ 过滤后无有效数据"])
+                return ChartResult(warnings=warnings + [say("❌ No valid data after filtering", "❌ 过滤后无有效数据")])
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"⚠️ 数值转换失败: {e}")
+        warnings.append(say(f"⚠️ Numeric conversion failed: {e}", f"⚠️ 数值转换失败: {e}"))
     
     # 4. 检查空值
     if df[_names].isna().any() or df[_values].isna().any():
-        warnings.append("⚠️ 数据中包含空值，已自动删除。")
+        warnings.append(say("⚠️ Data contains empty values; they were removed automatically.", "⚠️ 数据中包含空值，已自动删除。"))
         df = df.dropna(subset=[_names, _values])
         if len(df) == 0:
-            return ChartResult(warnings=warnings + ["❌ 删除空值后无有效数据"])
+            return ChartResult(warnings=warnings + [say("❌ No valid data after removing empty values", "❌ 删除空值后无有效数据")])
 
     values_list = df[_values].astype(float).tolist()
     names_list = [str(v) for v in df[_names]]
@@ -227,7 +229,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "nightingale", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "nightingale", "plotly", say("category column + value column [+ time column]", "category列 + value列 [+ time列]"), say("Polar sector area represents values; suitable for periodic data.", "极坐标扇形面积表示数值，适合周期性数据。"), chart_html)
 
     meta = {
         "chart_id": "nightingale",

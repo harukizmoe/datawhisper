@@ -1,0 +1,111 @@
+{
+  "coverage": {
+    "generate_chart": [
+      "ok",
+      "ok"
+    ]
+  },
+  "covers": [
+    "generate_chart"
+  ],
+  "description": "generate_chart: monthly revenue line chart and revenue-by-region bar chart.",
+  "scenario": "chart",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:generate_chart",
+        "end:generate_chart",
+        "start:generate_chart",
+        "end:generate_chart"
+      ],
+      "final_text": "两张图表已生成。",
+      "message": "画一个月度销售额趋势折线图，再画一个各区域销售额柱状图。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 2
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "chart_type": "Line_Chart",
+            "field_mapping": {
+              "x": "month",
+              "y": "revenue"
+            },
+            "purpose": "月度销售趋势",
+            "sql": "SELECT SUBSTR(order_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY month ORDER BY month",
+            "title": "月度销售额趋势"
+          },
+          "content": "[TOOL_RESULT] generate_chart OK: Chart generated: 月度销售额趋势 (Line_Chart). It is displayed to the user.\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Chart generated: 月度销售额趋势 (Line_Chart). It is displayed to the user.\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT SUBSTR(order_date, 1, 7) AS month, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY month ORDER BY month\", \"rows\": null}], \"artifacts\": [{\"type\": \"chart\", \"name\": \"月度销售额趋势\", \"chart_type\": \"Line_Chart\"}, {\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"generate_chart evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "generate_chart",
+          "tool_call_id": "call_s0_t0_0"
+        },
+        {
+          "arguments": {
+            "chart_type": "Bar_Chart",
+            "field_mapping": {
+              "x": "region",
+              "y": "revenue"
+            },
+            "purpose": "区域对比",
+            "sql": "SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region",
+            "title": "各区域销售额"
+          },
+          "content": "[TOOL_RESULT] generate_chart OK: Chart generated: 各区域销售额 (Bar_Chart). It is displayed to the user.\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"Chart generated: 各区域销售额 (Bar_Chart). It is displayed to the user.\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT region, ROUND(SUM(revenue), 2) AS revenue FROM sales GROUP BY region ORDER BY region\", \"rows\": null}], \"artifacts\": [{\"type\": \"chart\", \"name\": \"各区域销售额\", \"chart_type\": \"Bar_Chart\"}, {\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"generate_chart evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "generate_chart",
+          "tool_call_id": "call_s0_t1_0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "coverage": {
+    "query_knowledge": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "query_knowledge"
+  ],
+  "description": "Model explicitly looks up a seeded metric definition.",
+  "scenario": "knowledge",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:query_knowledge",
+        "end:query_knowledge"
+      ],
+      "final_text": "已查到 GMV 的口径。",
+      "message": "GMV 指标的口径定义是什么？",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "question": "GMV"
+          },
+          "content": "[TOOL_RESULT] query_knowledge OK: [Metric] GMV Alias: 成交额 Definition: 订单成交总金额，等于 sales 表 revenue 字段求和（含折扣后金额）。 SQL template: SELECT SUM(revenue) FROM sales Notes: baseline fixture metric\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"[Metric] GMV\\n  Alias: 成交额\\n  Definition: 订单成交总金额，等于 sales 表 revenue 字段求和（含折扣后金额）。\\n  SQL template: SELECT SUM(revenue) FROM sales\\n  Notes: baseline fixture metric\", \"sources\": [{\"type\": \"指标\", \"title\": \"GMV\", \"source\": \"成交额\", \"snippet\": \"订单成交总金额，等于 sales 表 revenue 字段求和（含折扣后金额）。\", \"score\": \"\"}], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "query_knowledge",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

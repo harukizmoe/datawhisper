@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from compute.i18n import say
 from infrastructure.training_device import select_training_device
 
 
@@ -24,6 +25,6 @@ def select_training_target(
         if runner.get("runner_ready") and runner.get("id"):
             return {
                 "kind": "remote", "runner_id": runner["id"],
-                "reason": f"本机 CUDA 不可用；使用已就绪远程训练器 {runner.get('name') or runner['id']}",
+                "reason": say(f"Local CUDA is unavailable; using the ready remote trainer {runner.get('name') or runner['id']}", f"本机 CUDA 不可用；使用已就绪远程训练器 {runner.get('name') or runner['id']}"),
             }
     return {"kind": "cpu", "device": "cpu", "reason": local["reason"]}

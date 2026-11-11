@@ -12,6 +12,8 @@ from ._utils import (
     _clean_identifier, _dedup_columns, _list_tables, _new_conn,
     _preview_table_dict, _query, _register, _table_schema_str,
 )
+from compute.i18n import say
+
 from .base import DataSource
 
 log = logging.getLogger(__name__)
@@ -63,7 +65,7 @@ class HTTPAPIDataSource(DataSource):
         else:
             df = _flatten_json(resp.json())
         if df.empty:
-            raise ValueError("API 响应解析后为空，无法加载数据。")
+            raise ValueError(say("The API response is empty after parsing; no data to load.", "API 响应解析后为空，无法加载数据。"))
         df.columns = _dedup_columns([_clean_identifier(c) for c in df.columns])
         df = df.dropna(how="all")
         _register(self._conn, self._table, df)

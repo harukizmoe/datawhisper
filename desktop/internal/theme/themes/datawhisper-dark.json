@@ -1,0 +1,29 @@
+{
+  "id": "datawhisper-dark",
+  "name": "DataWhisper Dark",
+  "family": "datawhisper",
+  "appearance": "dark",
+  "palette": {
+    "crust": "#131419", "mantle": "#17181e", "base": "#1c1d24",
+    "surface0": "#25262f", "surface1": "#2e303a", "surface2": "#383a46",
+    "line": "#2b2d37", "overlay": "#6d7083",
+    "subtext": "#9b9eb0", "text": "#e4e5ee",
+    "blue": "#7aa2f7", "cyan": "#7dcfff", "green": "#73d18a", "yellow": "#e5c07b",
+    "orange": "#f5a97f", "red": "#f07178", "purple": "#c3a6ff", "pink": "#f5a3d0"
+  },
+  "accents": ["blue", "cyan", "green", "yellow", "orange", "red", "purple", "pink"],
+  "roles": {
+    "background": "base", "sidebar": "mantle", "inspector": "mantle",
+    "surface": "surface0", "surfaceHover": "surface1", "surfacePressed": "surface2",
+    "border": "line", "text": "text", "textMuted": "subtext",
+    "accent": "blue", "link": "blue", "focus": "blue/0.6", "selection": "blue/0.3",
+    "success": "green", "warning": "yellow", "danger": "red",
+    "userBubble": "surface0", "codeBackground": "mantle", "card": "mantle", "cardBorder": "line", "canvas": "crust"
+  },
+  "syntax": {
+    "keyword": "pink", "string": "green", "number": "orange", "comment": "overlay",
+    "function": "blue", "type": "yellow", "constant": "orange", "operator": "cyan",
+    "property": "cyan", "tag": "red", "attribute": "yellow"
+  },
+  "chart": ["blue", "orange", "green", "red", "purple", "cyan", "yellow", "pink"]
+}

@@ -24,11 +24,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
-
-_DATA_FMT = "category列 + value列"
-_DESC = "用单元格拼成比例方格图，适合直观展示各分类占整体比例。"
 
 # 麦肯锡配色方案（默认）
 MCKINSEY_COLORS = [
@@ -125,8 +123,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | plotly</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -138,13 +136,15 @@ def generate(
     excel_path: str = None,
     label: str = "label",
     value: str = "value",
-    title: str = "华夫格",
+    title: str = None,
     n_cells: int = 10,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
     options = options or {}
     mapping = mapping or {}
+    _data_fmt = say("category column + value column", "category列 + value列")
+    _desc = say("Tiles cells into a proportional grid, ideal for showing each category's share of the whole at a glance.", "用单元格拼成比例方格图，适合直观展示各分类占整体比例。")
 
     if df is None:
         if excel_path:
@@ -152,15 +152,15 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     label_col = mapping.get("label")
     label_col = label_col if label_col is not None else label
     value_col = mapping.get("value")
     value_col = value_col if value_col is not None else value
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Waffle Chart", "华夫格"))
     n_cells = options.get("n_cells", n_cells)
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
@@ -169,7 +169,7 @@ def generate(
 
     for role, col_ in [("label", _label), ("value", _value)]:
         if col_ is None or col_ not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field not found [{role}]", f"找不到必填字段 [{role}]"))
 
     if _label not in df.columns or _value not in df.columns:
         return ChartResult(warnings=warnings)
@@ -180,12 +180,12 @@ def generate(
         colors = color_scheme.get("colors", MCKINSEY_COLORS)
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}，使用默认配色")
+        warnings.append(say(f"Failed to load color scheme: {e}; using the default colors", f"配色方案加载失败: {e}，使用默认配色"))
         colors = MCKINSEY_COLORS
 
     # 类别数检查（1-6 为建议范围）
     if len(df) > 6:
-        warnings.append(f"类别数 {len(df)} > 6，可能影响可读性，建议使用柱状图")
+        warnings.append(say(f"Category count {len(df)} > 6, which may hurt readability; consider a bar chart", f"类别数 {len(df)} > 6，可能影响可读性，建议使用柱状图"))
 
     # 数值强制转换并过滤 NaN：原实现直接 float(row[_value])，遇到 NaN 时
     # int(round(nan)) 抛 ValueError: cannot convert float NaN to integer。
@@ -194,13 +194,13 @@ def generate(
     before = len(df_plot)
     df_plot = df_plot.dropna(subset=[_value])
     if before != len(df_plot):
-        warnings.append(f"已忽略 {before - len(df_plot)} 行无法解析为数值的数据")
+        warnings.append(say(f"Ignored {before - len(df_plot)} rows whose values could not be parsed as numbers", f"已忽略 {before - len(df_plot)} 行无法解析为数值的数据"))
     if df_plot.empty:
-        return ChartResult(warnings=warnings + ["数值列不含可用数据"])
+        return ChartResult(warnings=warnings + [say("The value column has no usable data", "数值列不含可用数据")])
 
     total = float(df_plot[_value].sum())
     if total <= 0:
-        return ChartResult(warnings=["数值总和为零或负数，无法生成华夫图"])
+        return ChartResult(warnings=[say("The sum of values is zero or negative; cannot generate a waffle chart", "数值总和为零或负数，无法生成华夫图")])
 
     n_total_cells = n_cells * n_cells  # 10x10 = 100 个单元格
     fig = go.Figure()
@@ -269,7 +269,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "waffle", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "waffle", "plotly", _data_fmt, _desc, chart_html)
 
     meta = {
         "chart_id": "waffle",

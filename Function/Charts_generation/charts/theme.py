@@ -26,6 +26,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+
+from compute.i18n import say
 from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
@@ -273,7 +275,7 @@ def apply_focus(fig: Dict[str, Any], highlight: Any,
                 t["opacity"] = 0.3
         if not matched:
             available = ", ".join(sorted({_norm_label(t.get("name")) for t in named}))
-            return f"highlight 未匹配任何系列（可用系列名: {available}）"
+            return say(f"highlight matched no series (available series names: {available})", f"highlight 未匹配任何系列（可用系列名: {available}）")
         return None
 
     # 单系列 → 按类别值匹配
@@ -284,7 +286,7 @@ def apply_focus(fig: Dict[str, Any], highlight: Any,
     hits = {i for i, c in enumerate(cats) if _norm_label(c) in names}
     if not hits:
         sample = ", ".join(_norm_label(c) for c in cats[:5])
-        return f"highlight 未匹配任何类别值（数据中的类别示例: {sample}）"
+        return say(f"highlight matched no category value (example categories in the data: {sample})", f"highlight 未匹配任何类别值（数据中的类别示例: {sample}）")
     marker = t.get("marker")
     if not isinstance(marker, dict):
         marker = {}
@@ -400,7 +402,7 @@ def parse_plotly_figures(html: str) -> Tuple[List[Dict[str, Any]], List[str]]:
         if parsed is None:
             # newPlot('id', fig.data, fig.layout) 引用字面量的形态不是解析失败
             if not _FIG_REF_RE.match(html, m.end()):
-                warnings.append("plotly figure 解析失败，已跳过（不影响渲染）")
+                warnings.append(say("Failed to parse the plotly figure; skipped (rendering is unaffected)", "plotly figure 解析失败，已跳过（不影响渲染）"))
             continue
         div_id, data, layout, _arg_end, _config = parsed
         figures.append(_fig_from_parts(data, layout))
@@ -433,17 +435,19 @@ def render_png_bytes(
     """
     figures, _warnings = parse_plotly_figures(html)
     if not figures:
-        raise ValueError("PNG 导出仅支持内嵌 Plotly 的图表，当前 HTML 未解析出 figure")
+        raise ValueError(say("PNG export only supports charts with embedded Plotly; no figure could be parsed from this HTML", "PNG 导出仅支持内嵌 Plotly 的图表，当前 HTML 未解析出 figure"))
     if len(figures) > 1:
-        raise ValueError(
-            f"图表包含 {len(figures)} 个子图（如迷你图表格），PNG 导出暂只支持单图"
-        )
+        raise ValueError(say(
+            f"The chart contains {len(figures)} subplots (e.g. a sparkline table); PNG export only supports a single plot for now",
+            f"图表包含 {len(figures)} 个子图（如迷你图表格），PNG 导出暂只支持单图",
+        ))
     try:
         import kaleido  # noqa: F401 —— plotly.io 的静态导出引擎
     except ImportError as exc:
-        raise ImportError(
-            "PNG 导出需要可选依赖 kaleido（pip install -U kaleido），图表本身不受影响"
-        ) from exc
+        raise ImportError(say(
+            "PNG export needs the optional dependency kaleido (pip install -U kaleido); the chart itself is unaffected",
+            "PNG 导出需要可选依赖 kaleido（pip install -U kaleido），图表本身不受影响",
+        )) from exc
     import plotly.io as pio
 
     fig = pio.from_json(_dump(figures[0]))
@@ -489,7 +493,7 @@ def postprocess_plotly_html(
             # newPlot('id', fig.data, fig.layout) 引用字面量的形态：调用本身
             # 原样保留，样式改写由下方 var fig 字面量通道完成
             if not _FIG_REF_RE.match(html, m.end()):
-                warnings.append("plotly figure 解析失败，已跳过主题后处理（不影响渲染）")
+                warnings.append(say("Failed to parse the plotly figure; theme post-processing skipped (rendering is unaffected)", "plotly figure 解析失败，已跳过主题后处理（不影响渲染）"))
             out.append(m.group(0))
             pos = m.end()
             continue

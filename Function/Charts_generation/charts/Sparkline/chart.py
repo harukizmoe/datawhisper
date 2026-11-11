@@ -23,6 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -36,8 +37,7 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "宽格式：首列为行标签，其余列为数值序列"
-_DESC = "为每一行数据生成一个极简趋势迷你图，适合嵌入表格。"
+
 
 # 麦肯锡配色方案（全局强制）
 _MCKINSEY_COLORS = [
@@ -125,7 +125,7 @@ def _build_sparkline_html(label: str, y_vals: list, trend_up: bool, up_color: st
         marker=dict(size=4, color=line_color),
         fill="tozeroy",
         fillcolor=fill_color,
-        hovertemplate="<b>值: %{y:.2f}</b><extra></extra>",
+        hovertemplate="<b>" + say("Value", "值") + ": %{y:.2f}</b><extra></extra>",
         showlegend=False
     ))
     
@@ -149,7 +149,7 @@ def _build_html(title: str, chart_name: str, library: str,
                 data_fmt: str, desc: str, table_html: str) -> str:
     esc = _html.escape
     return f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="{say('en', 'zh-CN')}"><head><meta charset="UTF-8">
 <title>{esc(title)}</title>
 <style>
 body{{font-family:"Heiti SC","Microsoft YaHei",sans-serif;margin:40px;background:#fafafa}}
@@ -167,8 +167,8 @@ td{{color:#666}}
 <h1>{esc(title)}</h1><div class="subtitle">{esc(chart_name)} | {esc(library)}</div>
 {table_html}
 </div><div class="desc">
-<strong>数据格式：</strong>{esc(data_fmt)}<br>
-<strong>说明：</strong>{esc(desc)}
+<strong>{say('Data format:', '数据格式：')}</strong>{esc(data_fmt)}<br>
+<strong>{say('Description:', '说明：')}</strong>{esc(desc)}
 </div></body></html>"""
 
 
@@ -179,7 +179,7 @@ def generate(
     # ── 向后兼容旧接口 ──────────────────────────────
     excel_path: str = None,
     label: str = None,
-    title: str = "迷你图表",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -192,11 +192,13 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     title = options.get("title", title)
+    if title is None:
+        title = say("Sparkline", "迷你图表")
 
     # 配色方案：优先用 options.color_scheme
     _scheme = get_color_scheme(options.get("color_scheme", "mckinsey"))
@@ -214,7 +216,7 @@ def generate(
     numeric_cols = [c for c in df.columns if c != label_col and pd.api.types.is_numeric_dtype(df[c])]
     
     if not numeric_cols:
-        warnings.append("找不到数值列")
+        warnings.append(say("No numeric columns found", "找不到数值列"))
         return ChartResult(warnings=warnings)
     
     # 数值列 coerce（处理对象 dtype 的字符串数字/缺失值），含 NaN 的行跳过
@@ -223,16 +225,16 @@ def generate(
         work[c] = pd.to_numeric(work[c], errors="coerce")
     n_nan = int(work[numeric_cols].isna().any(axis=1).sum())
     if n_nan:
-        warnings.append(f"检测到 {n_nan} 行含非数值/缺失单元格，已跳过")
+        warnings.append(say(f"Detected {n_nan} row(s) with non-numeric/missing cells, skipped", f"检测到 {n_nan} 行含非数值/缺失单元格，已跳过"))
         work = work.dropna(subset=numeric_cols)
     if work.empty:
-        return ChartResult(warnings=warnings + ["无有效数据行"])
+        return ChartResult(warnings=warnings + [say("No valid data rows", "无有效数据行")])
 
     # 生成表格 HTML（列名/标签值均转义，防注入）
-    table_html = "<table><thead><tr><th>标签</th>"
+    table_html = f"<table><thead><tr><th>{say('Label', '标签')}</th>"
     for col in numeric_cols:
         table_html += f"<th>{_html.escape(str(col))}</th>"
-    table_html += "<th class='sparkline-cell'>趋势</th></tr></thead><tbody>"
+    table_html += f"<th class='sparkline-cell'>{say('Trend', '趋势')}</th></tr></thead><tbody>"
 
     sparklines = []
     for idx, row in work.iterrows():
@@ -263,7 +265,7 @@ def generate(
     
     table_html += "</tbody></table>"
     
-    html = _build_html(title, "sparkline", "plotly", _DATA_FMT, _DESC, table_html)
+    html = _build_html(title, "sparkline", "plotly", say("Wide format: first column holds row labels, remaining columns are numeric series", "宽格式：首列为行标签，其余列为数值序列"), say("Generates a minimal trend sparkline for each row; suited to embedding in tables.", "为每一行数据生成一个极简趋势迷你图，适合嵌入表格。"), table_html)
 
     meta = {
         "chart_id": "sparkline",

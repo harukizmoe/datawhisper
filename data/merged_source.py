@@ -25,6 +25,8 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from compute.i18n import say
+
 from .sources._utils import (
     _new_conn,
     _table_schema_str,
@@ -48,7 +50,7 @@ class MergedDataSource(DataSource):
 
     def __init__(self, sources: List[DataSource]):
         if len(sources) < 2:
-            raise ValueError("MergedDataSource 至少需要 2 个数据源")
+            raise ValueError(say("MergedDataSource requires at least 2 data sources", "MergedDataSource 至少需要 2 个数据源"))
 
         self.name = "merged"
         self._sources = sources
@@ -121,8 +123,8 @@ class MergedDataSource(DataSource):
                     table_parts.append(f"Table: {prefixed}  (unavailable)")
             if table_parts:
                 header = (
-                    f"=== 数据源 {idx}: {getattr(src, 'name', '未命名')} ===\n"
-                    f"  [NOTE: use prefix src{idx}__ for all table names, "
+                    say(f"=== Data source {idx}: {getattr(src, 'name', 'Unnamed')} ===\n", f"=== 数据源 {idx}: {getattr(src, 'name', '未命名')} ===\n")
+                    + f"  [NOTE: use prefix src{idx}__ for all table names, "
                     f"e.g. SELECT * FROM \"src{idx}__<table_name>\"]"
                 )
                 parts.append(header + "\n" + "\n\n".join(table_parts))

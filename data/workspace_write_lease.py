@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from compute.i18n import say
+
 
 LEASE_SECONDS = max(10, int(os.environ.get("BAA_WORKSPACE_WRITE_LEASE_SECONDS", "120")))
 RETRY_SECONDS = max(0.1, float(os.environ.get("BAA_WORKSPACE_WRITE_LEASE_RETRY_SECONDS", "1")))
@@ -134,7 +136,7 @@ def acquire_workspace_write_lease(ctx, runtime) -> Iterator[WorkspaceWriteLease]
                 ctx.record_event("workspace_write_lease_acquired", workspace_id=runtime.workspace_id)
             break
         if not waiting_reported:
-            ctx.set_progress(1, "等待此工作区的 DuckDB 写入任务完成")
+            ctx.set_progress(1, say("Waiting for the DuckDB write task on this workspace to finish", "等待此工作区的 DuckDB 写入任务完成"))
             if hasattr(ctx, "record_event"):
                 ctx.record_event("workspace_write_lease_waiting", workspace_id=runtime.workspace_id)
             waiting_reported = True
@@ -158,7 +160,7 @@ def acquire_synchronous_workspace_write_lease(db_path: Path, owner_id: str) -> I
         if lease is not None:
             break
         if time.monotonic() >= deadline:
-            raise WorkspaceWriteLeaseUnavailable("该工作区正在执行其他 DuckDB 写入任务，请稍后重试。")
+            raise WorkspaceWriteLeaseUnavailable(say("Another DuckDB write task is running on this workspace; please retry later.", "该工作区正在执行其他 DuckDB 写入任务，请稍后重试。"))
         time.sleep(RETRY_SECONDS)
     try:
         yield lease

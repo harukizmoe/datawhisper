@@ -34,11 +34,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from charts.base import ChartResult
 from charts.color_schemes import get_color_scheme
+from compute.i18n import say
 
 __all__ = ["generate"]
 
-_DATA_FMT = "多个数值列 + 可选color列(分组)"
-_DESC = "展示多个变量之间的关系，用多条竖直轴表示不同变量，用线条连接各轴上的点。适合发现多变量间的相关性和模式。"
+
 
 # 维度颜色（用于标记不同的维度）
 DIM_COLORS = [
@@ -75,8 +75,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -87,7 +87,7 @@ def generate(
     excel_path: str = None,
     dimensions: List[str] = None,
     color_col: str = None,
-    title: str = "平行坐标图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     """
@@ -121,9 +121,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -135,12 +135,12 @@ def generate(
         dims = _auto_detect_dimensions(df)
     
     if not dims or len(dims) < 2:
-        return ChartResult(warnings=["至少需要2个数值维度"])
+        return ChartResult(warnings=[say("At least 2 numeric dimensions are required", "至少需要2个数值维度")])
 
     # 验证维度列存在
     dims = [d for d in dims if d in df.columns]
     if len(dims) < 2:
-        return ChartResult(warnings=["至少需要2个有效的数值维度"])
+        return ChartResult(warnings=[say("At least 2 valid numeric dimensions are required", "至少需要2个有效的数值维度")])
 
     # 获取分组列
     color_col_name = mapping.get("color")
@@ -150,6 +150,8 @@ def generate(
         _color = color_col_name
 
     title = options.get("title", title)
+    if title is None:
+        title = say("Parallel Coordinates Plot", "平行坐标图")
     color_scheme_name = options.get("color_scheme", "mckinsey")
     normalize = bool(options.get("normalize", True))
     opacity = float(options.get("opacity", 0.6))
@@ -161,12 +163,12 @@ def generate(
             df[dim] = pd.to_numeric(df[dim], errors="coerce")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"数据转换失败: {e}"])
+        return ChartResult(warnings=[say(f"Data conversion failed: {e}", f"数据转换失败: {e}")])
 
     # 删除包含NaN的行
     df_plot = df.dropna(subset=dims)
     if len(df_plot) < 1:
-        return ChartResult(warnings=["没有有效数据"])
+        return ChartResult(warnings=[say("No valid data", "没有有效数据")])
 
     # 获取配色
     try:
@@ -174,7 +176,7 @@ def generate(
         primary_color = color_scheme.get("primary", "#0084D1")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}")
+        warnings.append(say(f"Failed to load color scheme: {e}", f"配色方案加载失败: {e}"))
         primary_color = "#0084D1"
 
     # 生成图表
@@ -285,7 +287,7 @@ def generate(
                 zeroline=False
             ),
             yaxis=dict(
-                title="标准化值" if normalize else "值",
+                title=say("Normalized value", "标准化值") if normalize else say("Value", "值"),
                 showgrid=True,
                 gridwidth=1,
                 gridcolor="#E8E8E8",
@@ -312,13 +314,13 @@ def generate(
 
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
         if not chart_html or len(chart_html) < 100:
-            return ChartResult(warnings=["图表生成失败"])
+            return ChartResult(warnings=[say("Chart generation failed", "图表生成失败")])
 
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"图表生成失败: {e}"])
+        return ChartResult(warnings=[say(f"Chart generation failed: {e}", f"图表生成失败: {e}")])
 
-    html = _build_html(title, "parallel_coordinates_plot", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "parallel_coordinates_plot", "plotly", say("multiple numeric columns + optional color column (grouping)", "多个数值列 + 可选color列(分组)"), say("Shows relationships among multiple variables: vertical parallel axes represent different variables and lines connect the points across axes. Useful for discovering correlations and patterns among variables.", "展示多个变量之间的关系，用多条竖直轴表示不同变量，用线条连接各轴上的点。适合发现多变量间的相关性和模式。"), chart_html)
 
     meta = {
         "chart_id": "parallel_coordinates_plot",

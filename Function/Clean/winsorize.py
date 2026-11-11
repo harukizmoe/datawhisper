@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from typing import List, Optional, Tuple
 
+from compute.i18n import say
+
 
 def winsorize(
     df: pd.DataFrame,
@@ -23,16 +25,16 @@ def winsorize(
     (cleaned_df, markdown_summary)
     """
     if not (0 <= lower_pct < upper_pct <= 100):
-        return df.copy(), f"❌ 分位数范围无效：lower={lower_pct}, upper={upper_pct}（须 0 ≤ lower < upper ≤ 100）"
+        return df.copy(), say(f"❌ Invalid percentile range: lower={lower_pct}, upper={upper_pct} (must satisfy 0 ≤ lower < upper ≤ 100)", f"❌ 分位数范围无效：lower={lower_pct}, upper={upper_pct}（须 0 ≤ lower < upper ≤ 100）")
 
     numeric_all = df.select_dtypes(include=[np.number]).columns.tolist()
     target = [c for c in columns if c in numeric_all] if columns else numeric_all
 
     if not target:
-        return df.copy(), "⚠️ 未找到可处理的数值列。"
+        return df.copy(), say("⚠️ No numeric columns to process were found.", "⚠️ 未找到可处理的数值列。")
 
     cleaned = df.copy()
-    rows = ["| 列名 | 下限值 | 上限值 | 下截行数 | 上截行数 |",
+    rows = [say("| Column | Lower bound | Upper bound | Rows clipped low | Rows clipped high |", "| 列名 | 下限值 | 上限值 | 下截行数 | 上截行数 |"),
             "|------|--------|--------|----------|----------|"]
 
     for col in target:
@@ -44,7 +46,10 @@ def winsorize(
         rows.append(f"| {col} | {lo:.4g} | {hi:.4g} | {n_lo} | {n_hi} |")
 
     summary = (
-        f"## 缩尾处理完成（分位数 {lower_pct}% ~ {upper_pct}%）\n\n"
+        say(
+            f"## Winsorization complete (percentiles {lower_pct}% ~ {upper_pct}%)\n\n",
+            f"## 缩尾处理完成（分位数 {lower_pct}% ~ {upper_pct}%）\n\n",
+        )
         + "\n".join(rows)
     )
     return cleaned, summary

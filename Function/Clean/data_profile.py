@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from typing import List, Optional, Tuple
 
+from compute.i18n import say
+
 
 _PSEUDO_NULL_VALUES = {"", "null", "none", "nan", "n/a", "na", "-"}
 _DATE_NAME_RE = ("date", "time", "日期", "时间", "dt")
@@ -75,43 +77,46 @@ def profile(
 
     # ── Overview ───────────────────────────────────────────────────
     lines = [
-        "## 数据概况",
-        f"- 总行数：**{n_rows:,}**",
-        f"- 总列数：**{n_cols}**",
-        f"- 数值列：**{len(numeric_cols)}** 个",
-        f"- 含缺失值的列：**{int((missing > 0).sum())}** 个",
-        f"- 含伪缺失字符串的列：**{len(pseudo_missing_cols)}** 个",
-        f"- 含零值的数值列：**{len(zero_cols)}** 个",
+        say("## Data overview", "## 数据概况"),
+        say(f"- Total rows: **{n_rows:,}**", f"- 总行数：**{n_rows:,}**"),
+        say(f"- Total columns: **{n_cols}**", f"- 总列数：**{n_cols}**"),
+        say(f"- Numeric columns: **{len(numeric_cols)}**", f"- 数值列：**{len(numeric_cols)}** 个"),
+        say(f"- Columns with missing values: **{int((missing > 0).sum())}**", f"- 含缺失值的列：**{int((missing > 0).sum())}** 个"),
+        say(f"- Columns with pseudo-missing strings: **{len(pseudo_missing_cols)}**", f"- 含伪缺失字符串的列：**{len(pseudo_missing_cols)}** 个"),
+        say(f"- Numeric columns with zero values: **{len(zero_cols)}**", f"- 含零值的数值列：**{len(zero_cols)}** 个"),
         "",
     ]
 
     quality_warnings = []
     if pseudo_missing_cols:
         quality_warnings.append(
-            "检测到字符串型伪缺失值，建分析样本前必须先清洗或确认导入规则。"
+            say(
+                "String-type pseudo-missing values detected; clean them or confirm the import rules before building the analysis sample.",
+                "检测到字符串型伪缺失值，建分析样本前必须先清洗或确认导入规则。",
+            )
         )
     for col in zero_cols:
         if n_rows > 0 and zero_counts[col] / n_rows > 0.5:
             quality_warnings.append(
-                f"数值字段 `{col}` 零值占比超过 50%，需先确认零值语义（真实零还是缺失）。"
+                say(f"Numeric field `{col}` is over 50% zeros; confirm the meaning of zero first (a real zero or missing).", f"数值字段 `{col}` 零值占比超过 50%，需先确认零值语义（真实零还是缺失）。")
             )
     for col, rate in date_parse_rates.items():
         if rate is not None and rate < 95:
-            quality_warnings.append(f"日期字段 `{col}` 可解析率仅 {rate}%，需先检查格式。")
+            quality_warnings.append(say(f"Only {rate}% of date field `{col}` can be parsed; check the format first.", f"日期字段 `{col}` 可解析率仅 {rate}%，需先检查格式。"))
     if quality_warnings:
         lines += [
-            "## 数据质量闸口",
-            "| 风险 | 处理要求 |",
+            say("## Data quality gate", "## 数据质量闸口"),
+            say("| Risk | Required action |", "| 风险 | 处理要求 |"),
             "|------|----------|",
         ]
         for warning in quality_warnings:
-            lines.append(f"| {warning} | 修复后再计算关键指标 |")
+            lines.append(say(f"| {warning} | Fix before computing key metrics |", f"| {warning} | 修复后再计算关键指标 |"))
         lines.append("")
 
     # ── Missing value table ────────────────────────────────────────
     lines += [
-        "## 缺失值统计",
-        "| 列名 | 类型 | 缺失数 | 缺失占比 |",
+        say("## Missing value statistics", "## 缺失值统计"),
+        say("| Column | Type | Missing | Missing % |", "| 列名 | 类型 | 缺失数 | 缺失占比 |"),
         "|------|------|--------|----------|",
     ]
     for col in df.columns:
@@ -121,8 +126,8 @@ def profile(
     if pseudo_missing_cols:
         lines += [
             "",
-            "## 伪缺失字符串统计",
-            "| 列名 | 伪缺失数 | 伪缺失占比 |",
+            say("## Pseudo-missing string statistics", "## 伪缺失字符串统计"),
+            say("| Column | Pseudo-missing | Pseudo-missing % |", "| 列名 | 伪缺失数 | 伪缺失占比 |"),
             "|------|----------|------------|",
         ]
         for col in pseudo_missing_cols:
@@ -132,8 +137,8 @@ def profile(
     if zero_cols:
         lines += [
             "",
-            "## 数值列零值统计",
-            "| 列名 | 零值数 | 零值占比 |",
+            say("## Numeric column zero-value statistics", "## 数值列零值统计"),
+            say("| Column | Zeros | Zero % |", "| 列名 | 零值数 | 零值占比 |"),
             "|------|--------|----------|",
         ]
         for col in zero_cols:
@@ -143,8 +148,8 @@ def profile(
     if date_parse_rates:
         lines += [
             "",
-            "## 日期字段可解析率",
-            "| 列名 | 可解析率 |",
+            say("## Date field parse rate", "## 日期字段可解析率"),
+            say("| Column | Parse rate |", "| 列名 | 可解析率 |"),
             "|------|----------|",
         ]
         for col, rate in date_parse_rates.items():
@@ -155,8 +160,8 @@ def profile(
     if numeric_cols:
         lines += [
             "",
-            "## 数值列统计",
-            "| 列名 | 均值 | 标准差 | 最小值 | Q1 (25%) | 中位数 | Q3 (75%) | 最大值 |",
+            say("## Numeric column statistics", "## 数值列统计"),
+            say("| Column | Mean | Std dev | Min | Q1 (25%) | Median | Q3 (75%) | Max |", "| 列名 | 均值 | 标准差 | 最小值 | Q1 (25%) | 中位数 | Q3 (75%) | 最大值 |"),
             "|------|------|--------|--------|----------|--------|----------|--------|",
         ]
         for col in numeric_cols:
@@ -214,7 +219,7 @@ def profile(
                 )
 
             fig.update_layout(
-                title_text="数值列分布图",
+                title_text=say("Numeric column distributions", "数值列分布图"),
                 template="plotly_white",
                 height=height,
                 margin=dict(l=40, r=20, t=60, b=40),

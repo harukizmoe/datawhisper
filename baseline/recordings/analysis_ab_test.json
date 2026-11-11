@@ -1,0 +1,80 @@
+{
+  "coverage": {
+    "run_analysis": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "run_analysis"
+  ],
+  "description": "run_analysis AB_Test_Analysis on converted by variant (A = control).",
+  "scenario": "analysis_ab_test",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:run_analysis",
+        "end:run_analysis"
+      ],
+      "final_text": "A/B 测试分析完成。",
+      "message": "做一个 A/B 测试分析，比较 A、B 两组的转化人数。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "analysis_name": "AB_Test_Analysis",
+            "analysis_options": {
+              "control_group": "A",
+              "metric_type": "continuous"
+            },
+            "groupby_column": "variant",
+            "purpose": "比较 AB 两组转化",
+            "sql": "SELECT variant, converted FROM sales",
+            "target_column": "converted"
+          },
+          "content": "[TOOL_RESULT] run_analysis OK: ## 🧪 A/B 实验分析 - 指标类型：**continuous**；对照组：`A`；实验组：`B`。 - 均值：对照组 **52.5400**，实验组 **67.2600**。 - 均值差：**14.7200**；相对提升：**28.02%**。 - p 值：**9.801e-19**；95% CI：**[11.7717, 17.6683]**。 - 结论：**实验组在主指标上有统计证据优于对照组**。 - SRM 检查未发现显著样...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## 🧪 A/B 实验分析\\n- 指标类型：**continuous**；对照组：`A`；实验组：`B`。\\n- 均值：对照组 **52.5400**，实验组 **67.2600**。\\n- 均值差：**14.7200**；相对提升：**28.02%**。\\n- p 值：**9.801e-19**；95% CI：**[11.7717, 17.6683]**。\\n- 结论：**实验组在主指标上有统计证据优于对照组**。\\n- SRM 检查未发现显著样本比例失衡。\\n- 结果不替代护栏指标、长期指标、多重比较和最小业务效果评估。\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT variant, converted FROM sales\", \"rows\": null}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"run_analysis evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "run_analysis",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

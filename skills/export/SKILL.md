@@ -18,6 +18,6 @@ allowedTools: [get_schema, query_data, propose_excel_export]
 
 ## Implementation reference
 
-- Proposal tool entry: `agent/tools/business/export.py::_tool_propose_excel_export`
-- Export tool entry: `agent/tools/business/export.py::_tool_export_excel`
+- Proposal tool entry: `compute/tools/export.py::_tool_propose_excel_export`
+- Export tool entry: `compute/tools/export.py::_tool_export_excel`
 - Export implementation: `Function/Output/excel_export.py`

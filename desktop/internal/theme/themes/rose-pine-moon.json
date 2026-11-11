@@ -1,0 +1,30 @@
+{
+  "id": "rose-pine-moon",
+  "name": "Rosé Pine Moon",
+  "family": "rose-pine",
+  "appearance": "dark",
+  "license": "MIT",
+  "source": "https://rosepinetheme.com/palette",
+  "palette": {
+    "nc": "#1f1d30", "base": "#232136", "surface": "#2a273f", "overlay": "#393552",
+    "muted": "#6e6a86", "subtle": "#908caa", "text": "#e0def4", "love": "#eb6f92",
+    "gold": "#f6c177", "rose": "#ea9a97", "pine": "#3e8fb0", "foam": "#9ccfd8",
+    "iris": "#c4a7e7", "highlight-low": "#2a283e", "highlight-med": "#44415a", "highlight-high": "#56526e"
+  },
+  "accents": ["love", "gold", "rose", "pine", "foam", "iris"],
+  "roles": {
+    "background": "base", "sidebar": "nc", "inspector": "nc", "surface": "overlay",
+    "surfaceHover": "highlight-med", "surfacePressed": "highlight-high", "border": "highlight-med/0.6", "text": "text",
+    "textMuted": "subtle", "accent": "iris", "link": "foam", "focus": "iris/0.6",
+    "selection": "highlight-med", "success": "foam", "warning": "gold", "danger": "love",
+    "userBubble": "overlay", "codeBackground": "surface", "card": "surface", "cardBorder": "highlight-med/0.6",
+    "canvas": "nc"
+  },
+  "syntax": {
+    "keyword": "pine", "string": "gold", "number": "gold", "comment": "subtle",
+    "function": "rose", "type": "foam", "constant": "rose", "operator": "subtle",
+    "property": "foam", "tag": "foam", "attribute": "iris", "punctuation": "subtle",
+    "regexp": "iris", "escape": "pine", "variable": "text"
+  },
+  "chart": ["iris", "gold", "foam", "love", "pine", "rose"]
+}

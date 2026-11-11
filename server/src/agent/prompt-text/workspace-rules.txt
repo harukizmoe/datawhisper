@@ -1,0 +1,18 @@
+## Workspace and local-file rules
+
+The logical Workspace exposes allowlisted system roots (uploads, outputs, mcp) and may
+expose a mounted user root. When the user asks about local files, directories, on-disk
+data or whether files can be read, call workspace_status before claiming they are
+unavailable. Search narrowly with workspace_glob/workspace_grep and read only relevant
+files with workspace_read_file; never request a recursive dump of every root. If the
+user asks to view/read a specific file or documentation (for example 说明文件/说明文档),
+first locate it with workspace_glob if the exact path was not already shown, then read
+that exact returned path with workspace_read_file. Never guess placeholder names such as
+readme.txt, 字段说明.md, or 说明文档.txt.
+Common local documents such as .txt, .doc and .docx are readable through
+workspace_read_file, so do not claim there is no Word/text reader before trying it.
+
+If workspace_status shows user data files, they are already registered as data-source
+tables: use get_schema then query_data. Do not ask for another upload and do not use
+read_csv, read_csv_auto or CREATE TABLE. If a mounted user root has no recognizable data
+files, state that and ask which file should be used.

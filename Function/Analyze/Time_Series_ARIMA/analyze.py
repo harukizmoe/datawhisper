@@ -22,21 +22,28 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Optional, Tuple
 
+from compute.i18n import say
+
 warnings.filterwarnings("ignore")
 
 # ── 模块元数据 ──────────────────────────────────────────────────────────────
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
 ANALYSIS_ID   = "Time_Series_ARIMA"
-ANALYSIS_NAME = "ARIMA 时间序列预测"
-ANALYSIS_DESC = (
+ANALYSIS_NAME = say("ARIMA time series forecasting", "ARIMA 时间序列预测")
+ANALYSIS_DESC = say(
+    "Models and forecasts a univariate time series with ARIMA. "
+    "pmdarima auto_arima stepwise searches for the best orders on the full data and outputs forecasts, confidence intervals, and residual diagnostics. "
+    "Use groupby_column to specify the time column name (or 'p,d,q' to set the orders manually); "
+    "use n_deciles to specify the number of forecast steps (default 12).",
     "使用 ARIMA 模型对单变量时间序列进行建模与预测。"
     "pmdarima auto_arima stepwise 在全量数据上搜索最优阶数，输出预测值、置信区间与残差诊断。"
     "通过 groupby_column 指定时间列名（或 'p,d,q' 手动设阶）；"
-    "通过 n_deciles 指定预测步数（默认 12）。"
+    "通过 n_deciles 指定预测步数（默认 12）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
-    "groupby_column (时间列名，或手动阶数 'p,d,q'，默认自动)",
-    "n_deciles (预测步数，默认 12)",
+    say("groupby_column (time column name, or manual orders 'p,d,q'; automatic by default)", "groupby_column (时间列名，或手动阶数 'p,d,q'，默认自动)"),
+    say("n_deciles (number of forecast steps, default 12)", "n_deciles (预测步数，默认 12)"),
 ]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
 
@@ -238,14 +245,14 @@ def _build_metrics_df(
            if nonzero.any() else float("nan")
 
     rows = [
-        {"metric": "模型阶数 (p,d,q)",   "value": str(order)},
-        {"metric": "ADF p值（原始序列）", "value": round(adf_pval, 4)},
+        {"metric": say("Model order (p,d,q)", "模型阶数 (p,d,q)"),   "value": str(order)},
+        {"metric": say("ADF p-value (original series)", "ADF p值（原始序列）"), "value": round(adf_pval, 4)},
         {"metric": "AIC",              "value": round(result.aic,  4)},
         {"metric": "BIC",              "value": round(result.bic,  4)},
-        {"metric": "MAE（训练集）",     "value": round(mae,  4)},
-        {"metric": "RMSE（训练集）",    "value": round(rmse, 4)},
-        {"metric": "MAPE %（训练集）",  "value": round(mape, 2) if not np.isnan(mape) else "N/A"},
-        {"metric": "训练样本数",         "value": len(series)},
+        {"metric": say("MAE (train)", "MAE（训练集）"),     "value": round(mae,  4)},
+        {"metric": say("RMSE (train)", "RMSE（训练集）"),    "value": round(rmse, 4)},
+        {"metric": say("MAPE % (train)", "MAPE %（训练集）"),  "value": round(mape, 2) if not np.isnan(mape) else "N/A"},
+        {"metric": say("Training samples", "训练样本数"),         "value": len(series)},
     ]
     return pd.DataFrame(rows)
 
@@ -269,25 +276,25 @@ def _build_md(
     model_type = "ARMA" if d == 0 else "ARIMA"
 
     L = [
-        f"## {model_type} 时间序列预测 — `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        f"| 模型类型 | {model_type}({p},{d},{q}) |",
-        "| 选阶方法 | auto_arima stepwise（AIC，全量数据） |",
-        f"| 时间列 | `{time_col or '（行序号）'}` |",
-        f"| 训练样本数 | {len(series)} |",
-        f"| 预测步数 | {steps} |",
-        f"| ADF 检验 p值 | {adf_pval:.4f}（{'平稳 ✓' if stationary else '非平稳，已差分'}） |",
+        say(f"## {model_type} time series forecast — `{target_col}`\n", f"## {model_type} 时间序列预测 — `{target_col}`\n"),
+        say("### Model overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say(f"| Model type | {model_type}({p},{d},{q}) |", f"| 模型类型 | {model_type}({p},{d},{q}) |"),
+        say("| Order selection | auto_arima stepwise (AIC, full data) |", "| 选阶方法 | auto_arima stepwise（AIC，全量数据） |"),
+        say(f"| Time column | `{time_col or '(row index)'}` |", f"| 时间列 | `{time_col or '（行序号）'}` |"),
+        say(f"| Training samples | {len(series)} |", f"| 训练样本数 | {len(series)} |"),
+        say(f"| Forecast steps | {steps} |", f"| 预测步数 | {steps} |"),
+        say(f"| ADF test p-value | {adf_pval:.4f} ({'stationary ✓' if stationary else 'non-stationary, differenced'}) |", f"| ADF 检验 p值 | {adf_pval:.4f}（{'平稳 ✓' if stationary else '非平稳，已差分'}） |"),
         "",
-        "### 模型评估",
-        "| 指标 | 值 |", "|------|-----|",
+        say("### Model evaluation", "### 模型评估"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
     ]
     for _, row in metrics_df.iterrows():
         L.append(f"| {row['metric']} | {row['value']} |")
     L.append("")
 
-    L += ["### 预测摘要（未来数据点）",
-          "| 时间点 | 预测值 | 95% 置信区间 |",
+    L += [say("### Forecast summary (future points)", "### 预测摘要（未来数据点）"),
+          say("| Time | Forecast | 95% CI |", "| 时间点 | 预测值 | 95% 置信区间 |"),
           "|--------|-------:|-------------|"]
     for i, (idx, row) in enumerate(forecast_df.iterrows()):
         if i >= 10:
@@ -298,26 +305,28 @@ def _build_md(
 
     last_actual = float(series.iloc[-1])
     last_pred   = float(forecast_df["mean"].iloc[-1])
-    direction   = "上升" if last_pred > last_actual else "下降"
+    direction   = say("up", "上升") if last_pred > last_actual else say("down", "下降")
     chg_pct     = abs(last_pred - last_actual) / abs(last_actual) * 100 if last_actual != 0 else 0
 
     L += [
-        "### 核心洞察",
-        f"- **趋势方向**：预测期末值（{last_pred:.4f}）较历史末值（{last_actual:.4f}）{direction}"
-        f"，变化幅度约 **{chg_pct:.1f}%**。",
+        say("### Key insights", "### 核心洞察"),
+        say(f"- **Trend direction**: the end-of-forecast value ({last_pred:.4f}) is {direction} vs. the last historical value ({last_actual:.4f})"
+            f", a change of about **{chg_pct:.1f}%**.",
+            f"- **趋势方向**：预测期末值（{last_pred:.4f}）较历史末值（{last_actual:.4f}）{direction}"
+            f"，变化幅度约 **{chg_pct:.1f}%**。"),
     ]
     if d == 0:
-        L.append("- 序列原始平稳（d=0），使用 ARMA 模型直接拟合。")
+        L.append(say("- The series is stationary as-is (d=0); fitted directly with an ARMA model.", "- 序列原始平稳（d=0），使用 ARMA 模型直接拟合。"))
     else:
-        L.append(f"- 序列经过 {d} 阶差分后达到平稳，ARIMA 差分项 d={d}。")
+        L.append(say(f"- The series became stationary after {d} order(s) of differencing; ARIMA differencing term d={d}.", f"- 序列经过 {d} 阶差分后达到平稳，ARIMA 差分项 d={d}。"))
 
     L += [
         "",
-        "> **图表建议**",
-        "> - Line_Chart(analysis_result)：x=ds，y=[y_actual, y_pred]，展示历史拟合与未来预测",
-        "> - Scatter_Plot(analysis_breakdown)：x=row_num，y=std_residual — 检查残差随机性",
-        ">   （analysis_breakdown 含列：ds, row_num, residual, std_residual；row_num 为整数序号，必须用它作 x 轴）",
-        "> - analysis_metrics 表直接展示模型指标",
+        say("> **Chart suggestions**", "> **图表建议**"),
+        say("> - Line_Chart(analysis_result): x=ds, y=[y_actual, y_pred], showing the historical fit and future forecast", "> - Line_Chart(analysis_result)：x=ds，y=[y_actual, y_pred]，展示历史拟合与未来预测"),
+        say("> - Scatter_Plot(analysis_breakdown): x=row_num, y=std_residual — check residual randomness", "> - Scatter_Plot(analysis_breakdown)：x=row_num，y=std_residual — 检查残差随机性"),
+        say(">   (analysis_breakdown has columns: ds, row_num, residual, std_residual; row_num is an integer index and must be used as the x axis)", ">   （analysis_breakdown 含列：ds, row_num, residual, std_residual；row_num 为整数序号，必须用它作 x 轴）"),
+        say("> - The analysis_metrics table shows model metrics directly", "> - analysis_metrics 表直接展示模型指标"),
     ]
     return "\n".join(L)
 
@@ -349,14 +358,14 @@ def run(
     markdown     : Markdown 分析报告
     """
     progress = progress_callback or (lambda _pct, _message="": None)
-    progress(5, "正在校验 ARIMA 输入")
+    progress(5, say("Validating ARIMA inputs", "正在校验 ARIMA 输入"))
     try:
         import pmdarima  # noqa — 提前检测依赖
     except ImportError:
-        raise ImportError("pmdarima 未安装。请运行：pip install pmdarima")
+        raise ImportError(say("pmdarima is not installed. Please run: pip install pmdarima", "pmdarima 未安装。请运行：pip install pmdarima"))
 
     if target_column not in df.columns:
-        raise ValueError(f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}")
+        raise ValueError(say(f"Target column '{target_column}' does not exist. Available columns: {', '.join(df.columns[:20])}", f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}"))
 
     try:
         steps = int(n_deciles)
@@ -379,25 +388,25 @@ def run(
     time_col = _detect_time_col(df, time_col_hint)
     series   = _prepare_series(df, time_col, target_column)
     if len(series) < 8:
-        raise ValueError(f"有效数据点不足（{len(series)} 个），ARIMA 至少需要 8 个数据点。")
+        raise ValueError(say(f"Not enough valid data points ({len(series)}); ARIMA needs at least 8.", f"有效数据点不足（{len(series)} 个），ARIMA 至少需要 8 个数据点。"))
 
     # ── 平稳性检验 ─────────────────────────────────────────────────────────
-    progress(20, "正在检验序列平稳性")
+    progress(20, say("Testing series stationarity", "正在检验序列平稳性"))
     stationary, adf_pval = _adf_test(series)
 
     # ── 确定阶数 ───────────────────────────────────────────────────────────
-    progress(35, "正在选择 ARIMA 阶数")
+    progress(35, say("Selecting ARIMA orders", "正在选择 ARIMA 阶数"))
     if manual_order is not None:
         order = manual_order
     else:
         order = _auto_order(series)   # stepwise，全量数据，AIC 最优
 
     # ── 拟合 & 预测 ────────────────────────────────────────────────────────
-    progress(65, "正在拟合 ARIMA 并预测")
+    progress(65, say("Fitting ARIMA and forecasting", "正在拟合 ARIMA 并预测"))
     fitted, forecast_df, residuals, model_result = _fit_predict(series, order, steps)
 
     # ── 结果表 ─────────────────────────────────────────────────────────────
-    progress(88, "正在整理预测结果")
+    progress(88, say("Assembling forecast results", "正在整理预测结果"))
     result_df    = _build_result_df(series, fitted, forecast_df)
     breakdown_df = _build_breakdown_df(residuals)
     metrics_df   = _build_metrics_df(series, fitted, model_result, order, adf_pval)
@@ -415,5 +424,5 @@ def run(
         series      = series,
     )
 
-    progress(98, "ARIMA 分析计算完成")
+    progress(98, say("ARIMA analysis complete", "ARIMA 分析计算完成"))
     return result_df, breakdown_df, metrics_df, markdown

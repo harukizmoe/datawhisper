@@ -1,0 +1,67 @@
+{
+  "blocked_reason": "agent/tools/web.py:_reject_private_host rejects localhost/127.0.0.1/private IPs with no override; a public URL would make the baseline network-dependent and nondeterministic, so the compute path (data/table_extract.fetch_url_tables + source registration) is not exercised.",
+  "coverage": {
+    "fetch_table": [
+      "error"
+    ]
+  },
+  "covers": [
+    "fetch_table"
+  ],
+  "description": "Skill 'web-table' fetches the local fixture page. The old app's SSRF filter rejects loopback hosts, so the recorded output is the rejection, not parsed tables.",
+  "scenario": "fetch_table",
+  "status": "blocked",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:fetch_table",
+        "end:fetch_table"
+      ],
+      "final_text": "网页表格处理结束。",
+      "message": "抓取这个网页表格：http://127.0.0.1:<PORT>/stores.html",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "query_data",
+            "generate_chart",
+            "fetch_table",
+            "browser_extract_tables"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "query_data",
+            "generate_chart",
+            "fetch_table",
+            "browser_extract_tables"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {
+        "skill": "web-table"
+      },
+      "tool_results": [
+        {
+          "arguments": {
+            "source_name": "stores_web",
+            "timeout": 10,
+            "url": "http://127.0.0.1:<PORT>/stores.html"
+          },
+          "content": "[TOOL_RESULT] fetch_table OK: {\"ok\": false, \"error_code\": \"FETCH-001\", \"message\": \"链接不可用: local/private network URLs are not allowed\"}\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"{\\\"ok\\\": false, \\\"error_code\\\": \\\"FETCH-001\\\", \\\"message\\\": \\\"链接不可用: local/private network URLs are not allowed\\\"}\", \"sources\": [], \"artifacts\": []}",
+          "status": "error",
+          "tool": "fetch_table",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

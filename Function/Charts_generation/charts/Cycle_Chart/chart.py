@@ -24,6 +24,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -37,8 +38,12 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "宽格式: 行=周期(年份), 列=时间相位(月份) | 长格式: time列 + value列 + group列"
-_DESC = "展示多个周期的数据模式，支持宽格式(多年月度)和长格式(小倍数)两种布局。"
+def _data_fmt() -> str:
+    return say("Wide format: rows = periods (years), columns = time phases (months) | Long format: time column + value column + group column", "宽格式: 行=周期(年份), 列=时间相位(月份) | 长格式: time列 + value列 + group列")
+
+
+def _desc() -> str:
+    return say("Shows data patterns across multiple cycles; supports wide format (multi-year monthly) and long format (small multiples) layouts.", "展示多个周期的数据模式，支持宽格式(多年月度)和长格式(小倍数)两种布局。")
 
 
 def _build_html(title: str, chart_name: str, library: str, data_fmt: str, desc: str, embed: str) -> str:
@@ -56,8 +61,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 def _clean_numeric_like(df: pd.DataFrame) -> pd.DataFrame:
@@ -104,7 +109,7 @@ def generate(
     time: str = "time",
     value: str = "value",
     group: Optional[str] = None,
-    title: str = "周期图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings = []
@@ -117,16 +122,16 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     if df.empty:
-        return ChartResult(warnings=["输入数据为空"])
+        return ChartResult(warnings=[say("Input data is empty", "输入数据为空")])
 
     df = _clean_numeric_like(df)  # 放到这里，确保所有非空数据都清洗
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Cycle Chart", "周期图"))
     fmt = _detect_format(df)
 
     # 配色方案：优先用 options.color_scheme
@@ -160,7 +165,7 @@ def _generate_wide_format(df: pd.DataFrame, title: str, warnings: list, palette:
 
     y_hover_fmt = ".1%" if is_ratio else ",.2f"
     y_tick_fmt = ".0%" if is_ratio else ",.2f"
-    y_axis_title = "占比" if is_ratio else "数值"
+    y_axis_title = say("Share", "占比") if is_ratio else say("Value", "数值")
 
     fig = go.Figure()
 
@@ -207,7 +212,7 @@ def _generate_wide_format(df: pd.DataFrame, title: str, warnings: list, palette:
                 name=f"{year}_end",
                 marker=dict(color=color, size=7),
                 showlegend=False,
-                hovertemplate=f"<b>{phases[last_i]}</b><br>{year} 末端: %{{y:{y_hover_fmt}}}<extra></extra>"
+                hovertemplate=f"<b>{phases[last_i]}</b><br>{say(f'{year} end', f'{year} 末端')}: %{{y:{y_hover_fmt}}}<extra></extra>"
             ))
 
     # 均值线（强调橙 + 虚线）
@@ -215,15 +220,15 @@ def _generate_wide_format(df: pd.DataFrame, title: str, warnings: list, palette:
         x=phases,
         y=avg_values,
         mode='lines',
-        name='平均值',
+        name=say('Average', '平均值'),
         line=dict(color=avg_color, width=3, dash='dash'),
-        hovertemplate=f"<b>%{{x}}</b><br>平均: %{{y:{y_hover_fmt}}}<extra></extra>"
+        hovertemplate=f"<b>%{{x}}</b><br>{say('Average', '平均')}: %{{y:{y_hover_fmt}}}<extra></extra>"
     ))
 
     # McKinsey 风格版式：白底、浅灰网格、深灰文字、克制边框
     fig.update_layout(
         title=title,
-        xaxis_title='月份/时间相位',
+        xaxis_title=say('Month / time phase', '月份/时间相位'),
         yaxis_title=y_axis_title,
         hovermode='x unified',
         plot_bgcolor='white',
@@ -267,8 +272,8 @@ def _generate_wide_format(df: pd.DataFrame, title: str, warnings: list, palette:
         title,
         "cycle_chart",
         "plotly",
-        _DATA_FMT,
-        "宽格式：多周期数据（麦肯锡风配色，自动识别比例/绝对值）",
+        _data_fmt(),
+        say("Wide format: multi-cycle data (McKinsey-style palette, ratio/absolute values detected automatically)", "宽格式：多周期数据（麦肯锡风配色，自动识别比例/绝对值）"),
         chart_html
     )
 
@@ -298,7 +303,7 @@ def _generate_long_format(df: pd.DataFrame, mapping: Dict[str, str], title: str,
     if group_col is None and len(cols) > 2: group_col = cols[2]
 
     if value_col is None:
-        return ChartResult(warnings=["无法找到数值列"])
+        return ChartResult(warnings=[say("Cannot find the value column", "无法找到数值列")])
 
     d = df.copy()
     d[value_col] = pd.to_numeric(d[value_col], errors="coerce")
@@ -314,7 +319,7 @@ def _generate_long_format(df: pd.DataFrame, mapping: Dict[str, str], title: str,
         pivot = d.pivot_table(index="_year", columns="_phase", values=value_col, aggfunc="mean")
         pivot = pivot.reindex(columns=month_order)
         pivot = pivot.reset_index().rename(columns={"_year": "year"})
-        pivot.columns = ["year"] + [f"{m}月" for m in month_order]
+        pivot.columns = ["year"] + [say(f"M{m}", f"{m}月") for m in month_order]
         return _generate_wide_format(pivot, title, warnings, palette)
 
     # 若 time 本身是月份，group 是年份，也可 pivot
@@ -337,8 +342,8 @@ def _generate_long_format(df: pd.DataFrame, mapping: Dict[str, str], title: str,
         line=dict(color=_fallback_palette[0], width=2),
         marker=dict(size=6)
     ))
-    fig.update_layout(title=title, xaxis_title='时间', yaxis_title='数值', height=500)
+    fig.update_layout(title=title, xaxis_title=say('Time', '时间'), yaxis_title=say('Value', '数值'), height=500)
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "cycle_chart", "plotly", _DATA_FMT, "长格式：自动识别失败，回退单线图", chart_html)
-    return ChartResult(html=html, spec={}, warnings=warnings + ["未识别出周期结构，已回退单线图"], meta={"format": "long_fallback"})
+    html = _build_html(title, "cycle_chart", "plotly", _data_fmt(), say("Long format: auto-detection failed; fell back to a single line chart", "长格式：自动识别失败，回退单线图"), chart_html)
+    return ChartResult(html=html, spec={}, warnings=warnings + [say("No cycle structure recognized; fell back to a single line chart", "未识别出周期结构，已回退单线图")], meta={"format": "long_fallback"})

@@ -22,12 +22,17 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "y列(数值) + [可选: x列(分类)]"
-_DESC = "展示中位数、四分位数和异常值，适合比较多个组别的分布。"
+def _data_fmt() -> str:
+    return say("y column (numeric) + [optional: x column (category)]", "y列(数值) + [可选: x列(分类)]")
+
+
+def _desc() -> str:
+    return say("Shows median, quartiles and outliers; good for comparing distributions across groups.", "展示中位数、四分位数和异常值，适合比较多个组别的分布。")
 
 # 麦肯锡配色（默认）
 _MCKINSEY_COLORS = [
@@ -124,8 +129,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -137,7 +142,7 @@ def generate(
     excel_path: str = None,
     x: str = None,
     y: str = "y",
-    title: str = "箱线图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -150,15 +155,17 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
     y_col = mapping.get("y")
     y_col = y_col if y_col is not None else y
     title = options.get("title", title)
+    if title is None:
+        title = say("Box Plot", "箱线图")
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
     # 检测宽格式数据（仅在用户未显式指定 x/y 映射时才自动检测，
@@ -190,7 +197,7 @@ def generate(
         plot_df = df
 
     if _y is None or _y not in plot_df.columns:
-        warnings.append("找不到必填字段 [y]")
+        warnings.append(say("Required field [y] not found", "找不到必填字段 [y]"))
         return ChartResult(warnings=warnings)
 
     if _x and _x not in plot_df.columns:
@@ -202,7 +209,7 @@ def generate(
         primary_color = color_scheme.get("primary", "#003D7A")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}，使用默认配色")
+        warnings.append(say(f"Failed to load color scheme: {e}; using default colors", f"配色方案加载失败: {e}，使用默认配色"))
         primary_color = "#003D7A"
 
     # 生成箱线图
@@ -241,7 +248,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "boxplot_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "boxplot_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
     meta = {
         "chart_id": "boxplot_chart",
@@ -256,6 +263,6 @@ def generate(
     
     # 验证结果有效性
     if not result.is_valid():
-        warnings.append("图表生成可能不完整")
+        warnings.append(say("Chart generation may be incomplete", "图表生成可能不完整"))
     
     return result

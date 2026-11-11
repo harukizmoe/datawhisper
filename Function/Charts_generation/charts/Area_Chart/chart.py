@@ -33,12 +33,17 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(时间/类别) + y列(数值，支持多列) + 可选series列(分组)"
-_DESC = "在折线图基础上用填充区域展示数值，适合累积趋势。支持多列展示和麦肯锡配色。"
+def _data_fmt() -> str:
+    return say("x column (time/category) + y column (numeric, multiple allowed) + optional series column (grouping)", "x列(时间/类别) + y列(数值，支持多列) + 可选series列(分组)")
+
+
+def _desc() -> str:
+    return say("Shows values with filled areas on top of a line chart; good for cumulative trends. Supports multiple series and McKinsey colors.", "在折线图基础上用填充区域展示数值，适合累积趋势。支持多列展示和麦肯锡配色。")
 
 # 麦肯锡配色方案
 MCKINSEY_COLORS = [
@@ -133,8 +138,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -146,7 +151,7 @@ def generate(
     excel_path: str = None,
     x: str = "x",
     y: Union[str, List[str]] = "y",
-    title: str = "面积图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -159,15 +164,17 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
     y_cols = mapping.get("y")
     y_cols = y_cols if y_cols is not None else y
     title = options.get("title", title)
+    if title is None:
+        title = say("Area Chart", "面积图")
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
     # 规范化 y_cols：默认值 "y" 代表未指定
@@ -186,10 +193,10 @@ def generate(
     
     # 检查 x 列
     if _x is None:
-        warnings.append("找不到x列（时间/类别）")
+        warnings.append(say("x column (time/category) not found", "找不到x列（时间/类别）"))
         return ChartResult(warnings=warnings)
     if _x not in df.columns:
-        warnings.append(f"x列 '{_x}' 不存在")
+        warnings.append(say(f"x column '{_x}' does not exist", f"x列 '{_x}' 不存在"))
         return ChartResult(warnings=warnings)
 
     # 处理 y 列：支持多列或自动检测
@@ -202,7 +209,7 @@ def generate(
             if y_col in df.columns:
                 _y_cols.append(y_col)
             else:
-                warnings.append(f"y列 '{y_col}' 不存在")
+                warnings.append(say(f"y column '{y_col}' does not exist", f"y列 '{y_col}' 不存在"))
         else:
             # 自动检测数值列
             auto_y = _auto_col(df, "y", exclude_for_y)
@@ -216,11 +223,11 @@ def generate(
         if all_nums:
             _y_cols = all_nums[:5]  # 最多 5 列
         else:
-            warnings.append("找不到任何数值列")
+            warnings.append(say("No numeric column found", "找不到任何数值列"))
             return ChartResult(warnings=warnings)
     
     if len(_y_cols) > 5:
-        warnings.append(f"数值列过多({len(_y_cols)}个)，只显示前5列")
+        warnings.append(say(f"Too many numeric columns ({len(_y_cols)}); showing only the first 5", f"数值列过多({len(_y_cols)}个)，只显示前5列"))
         _y_cols = _y_cols[:5]
 
     try:
@@ -243,7 +250,7 @@ def generate(
         
         df_plot = df_plot.dropna()
         if df_plot.empty:
-            warnings.append("无有效数据")
+            warnings.append(say("No valid data", "无有效数据"))
             return ChartResult(warnings=warnings)
         
         # 创建图表
@@ -251,7 +258,7 @@ def generate(
             # 分组模式：每个 series 值对应一个子图或颜色
             n_series = df_plot[series_col].nunique()
             if n_series > 3:
-                warnings.append(f"分组数过多({n_series}个)，建议 ≤3")
+                warnings.append(say(f"Too many groups ({n_series}); ≤3 recommended", f"分组数过多({n_series}个)，建议 ≤3"))
             
             # 使用 facet_col 创建分组面积图
             fig = px.area(
@@ -301,7 +308,7 @@ def generate(
             margin=dict(l=50, r=50, t=70, b=50),
             hovermode="x unified",
             xaxis_title=_x,
-            yaxis_title="数值" if len(_y_cols) > 1 else _y_cols[0],
+            yaxis_title=say("Value", "数值") if len(_y_cols) > 1 else _y_cols[0],
             title_font_size=16,
             showlegend=True,
             legend=dict(
@@ -319,15 +326,15 @@ def generate(
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
         if not chart_html or len(chart_html) < 100:
             fig_empty = go.Figure()
-            fig_empty.add_annotation(text="无有效数据", showarrow=False)
+            fig_empty.add_annotation(text=say("No valid data", "无有效数据"), showarrow=False)
             chart_html = pio.to_html(fig_empty, full_html=False, include_plotlyjs=False)
-            warnings.append("图表数据为空")
+            warnings.append(say("Chart data is empty", "图表数据为空"))
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"图表生成失败: {e}")
+        warnings.append(say(f"Chart generation failed: {e}", f"图表生成失败: {e}"))
         return ChartResult(warnings=warnings)
     
-    html = _build_html(title, "area_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "area_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
 
     meta = {

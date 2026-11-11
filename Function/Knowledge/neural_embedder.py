@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 
 import numpy as np
 
+from compute.i18n import say
 from infrastructure.paths import runtime_config_path
 
 log = logging.getLogger(__name__)
@@ -328,10 +329,10 @@ def configure_cloud(
     normalized_url = str(url or "").strip().rstrip("/")
     parsed = urlsplit(normalized_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("云端 URL 必须是有效的 http/https 地址")
+        raise ValueError(say("The cloud URL must be a valid http/https address", "云端 URL 必须是有效的 http/https 地址"))
     normalized_model = str(model or "").strip()
     if not normalized_model:
-        raise ValueError("云端模型名不能为空")
+        raise ValueError(say("The cloud model name must not be empty", "云端模型名不能为空"))
     previous = (_CLOUD_URL, _CLOUD_MODEL, _CLOUD_TOKEN)
     try:
         _CLOUD_URL = normalized_url
@@ -358,12 +359,12 @@ def configure_cloud(
 def test_cloud_connection() -> dict:
     global _cloud_available
     if not _CLOUD_TOKEN:
-        raise ValueError("请先配置 Bearer Token")
+        raise ValueError(say("Please configure the Bearer Token first", "请先配置 Bearer Token"))
     try:
         vectors = _cloud_embed_batch(["连接测试"])
         if not vectors or len(vectors[0]) != _CLOUD_DIM:
             actual = len(vectors[0]) if vectors else 0
-            raise ValueError(f"云端向量维度异常：期望 {_CLOUD_DIM}，实际 {actual}")
+            raise ValueError(say(f"Unexpected cloud vector dimension: expected {_CLOUD_DIM}, got {actual}", f"云端向量维度异常：期望 {_CLOUD_DIM}，实际 {actual}"))
     except Exception:
         _cloud_available = False
         raise
@@ -402,7 +403,7 @@ def get_embed_info(probe: bool = False) -> dict:
     else:
         active = "hash"
         dim = 384
-        model = "基础关键词匹配（Hash 384维）"
+        model = say("Basic keyword matching (Hash, 384 dims)", "基础关键词匹配（Hash 384维）")
     return {
         "mode": _embed_mode,
         "active": active,

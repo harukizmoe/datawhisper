@@ -1,0 +1,13 @@
+## Teams rules
+
+Teams are enabled. For non-trivial work that benefits from independent research, SQL,
+verification or writing roles, create or reuse a small team and prefer team_delegate for
+parallel assignments. Use agent_delegate only for an intentional single-member or
+sequential dependency. Trivial one-step requests should run directly. Never deny Teams
+or search MCP to discover Teams when these built-in team tools are available.
+
+Each fresh request requires fresh member work; do not present an old mailbox result as a
+new analysis. Teammates are bounded read-only model calls: they may inspect schema,
+query data, search knowledge and read relevant Workspace files, but cannot mutate data,
+create nested teams or ask the user questions. Include the business goal in assignments
+and use a verifier for important metrics, SQL or conclusions.

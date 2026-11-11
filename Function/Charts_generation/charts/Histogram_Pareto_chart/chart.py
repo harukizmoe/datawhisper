@@ -27,12 +27,20 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "单列数据（频率分布）或双列数据（类别 + 数值，自动生成帕累托图）"
-_DESC = "展示数值分布。单列数据显示频率分布直方图；双列数据显示帕累托图（柱子 + 累积曲线）。"
+def _data_fmt() -> str:
+    return say("Single column (frequency distribution) or two columns (category + value, Pareto chart generated automatically)", "单列数据（频率分布）或双列数据（类别 + 数值，自动生成帕累托图）")
+
+
+def _desc() -> str:
+    return say(
+        "Shows the distribution of values. A single column renders a frequency histogram; two columns render a Pareto chart (bars + cumulative curve).",
+        "展示数值分布。单列数据显示频率分布直方图；双列数据显示帕累托图（柱子 + 累积曲线）。",
+    )
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -117,7 +125,7 @@ def generate(
     # ── 向后兼容旧接口 ──────────────────────────────
     excel_path: str = None,
     x: str = "x",
-    title: str = "直方图",
+    title: Optional[str] = None,
     nbins: int = 30,
     color: str = None,
     **kwargs
@@ -132,11 +140,11 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Histogram", "直方图"))
     nbins = options.get("nbins", nbins)
 
     # 获取配色方案
@@ -147,7 +155,7 @@ def generate(
         secondary_color = color_scheme.get("secondary", "#0084D1")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}，使用默认麦肯锡蓝")
+        warnings.append(say(f"Failed to load color scheme: {e}; using default McKinsey blue", f"配色方案加载失败: {e}，使用默认麦肯锡蓝"))
         primary_color = "#003D7A"
         secondary_color = "#0084D1"
 
@@ -177,11 +185,11 @@ def generate(
         
         # 优化悬停提示
         fig.update_traces(
-            hovertemplate="<b>%{x}</b><br>频次: %{y}<extra></extra>"
+            hovertemplate=say("<b>%{x}</b><br>Frequency: %{y}<extra></extra>", "<b>%{x}</b><br>频次: %{y}<extra></extra>")
         )
 
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-        html = _build_html(title, "histogram_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+        html = _build_html(title, "histogram_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
         meta = {
             "chart_id": "histogram_chart",
@@ -217,7 +225,7 @@ def generate(
         # 计算累积百分比
         total = grouped[_y].sum()
         if total <= 0:
-            return ChartResult(warnings=warnings + ["数值列总和为 0，无法计算帕累托累积百分比"])
+            return ChartResult(warnings=warnings + [say("The sum of the value column is 0; cannot compute Pareto cumulative percentage", "数值列总和为 0，无法计算帕累托累积百分比")])
         grouped['cumulative'] = grouped[_y].cumsum()
         grouped['cumulative_pct'] = (grouped['cumulative'] / total * 100).round(2)
 
@@ -228,22 +236,22 @@ def generate(
         fig.add_trace(go.Bar(
             x=grouped[_x],
             y=grouped[_y],
-            name="频次",
+            name=say("Frequency", "频次"),
             marker=dict(color=primary_color),
             yaxis="y1",
-            hovertemplate="<b>%{x}</b><br>频次: %{y}<extra></extra>"
+            hovertemplate=say("<b>%{x}</b><br>Frequency: %{y}<extra></extra>", "<b>%{x}</b><br>频次: %{y}<extra></extra>")
         ))
 
         # 添加累积曲线
         fig.add_trace(go.Scatter(
             x=grouped[_x],
             y=grouped['cumulative_pct'],
-            name="累积百分比",
+            name=say("Cumulative %", "累积百分比"),
             mode='lines+markers',
             line=dict(color=secondary_color, width=2.5),
             marker=dict(size=6),
             yaxis="y2",
-            hovertemplate="<b>%{x}</b><br>累积: %{y}%<extra></extra>"
+            hovertemplate=say("<b>%{x}</b><br>Cumulative: %{y}%<extra></extra>", "<b>%{x}</b><br>累积: %{y}%<extra></extra>")
         ))
 
         # 配置双 y 轴（坐标轴和文字颜色保持默认，不受配色影响）
@@ -255,12 +263,12 @@ def generate(
                 tickfont=dict(size=11)
             ),
             yaxis=dict(
-                title=dict(text="频次", font=dict(size=12)),
+                title=dict(text=say("Frequency", "频次"), font=dict(size=12)),
                 tickfont=dict(size=11),
                 side="left"
             ),
             yaxis2=dict(
-                title=dict(text="累积百分比 (%)", font=dict(size=12)),
+                title=dict(text=say("Cumulative % (%)", "累积百分比 (%)"), font=dict(size=12)),
                 tickfont=dict(size=11),
                 overlaying="y",
                 side="right",
@@ -282,7 +290,7 @@ def generate(
         )
 
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-        html = _build_html(title, "histogram_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+        html = _build_html(title, "histogram_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
         meta = {
             "chart_id": "histogram_chart",
@@ -296,4 +304,4 @@ def generate(
         return ChartResult(html=html, spec={}, warnings=warnings, meta=meta)
     
     else:
-        return ChartResult(warnings=["数据列数不足"])
+        return ChartResult(warnings=[say("Not enough data columns", "数据列数不足")])

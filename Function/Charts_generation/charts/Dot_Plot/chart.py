@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,15 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "category列 + 两个数值列（起点、终点）"
-_DESC = "用圆点和箭头展示两个数据点之间的范围或差异，箭头清晰指向终点，起点和终点用不同蓝色区分。"
+def _data_fmt() -> str:
+    return say("category column + two numeric columns (start, end)", "category列 + 两个数值列（起点、终点）")
+
+
+def _desc() -> str:
+    return say(
+        "Shows the range or difference between two data points with dots and an arrow; the arrow points clearly to the end point, and start and end use different blues.",
+        "用圆点和箭头展示两个数据点之间的范围或差异，箭头清晰指向终点，起点和终点用不同蓝色区分。",
+    )
 
 # 麦肯锡配色方案
 MCKINSEY_COLORS = [
@@ -152,7 +160,7 @@ def generate(
     y: str = None,
     start: str = None,
     end: str = None,
-    title: str = "点图",
+    title: Optional[str] = None,
     color: str = None,
     **kwargs
 ) -> ChartResult:
@@ -166,12 +174,12 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 参数提取
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Dot Plot", "点图"))
     # 配色方案：优先用 options.color_scheme
     _scheme = get_color_scheme(options.get("color_scheme", "mckinsey"))
     _palette = _scheme.get("colors") or MCKINSEY_COLORS
@@ -192,14 +200,14 @@ def generate(
     _y = _auto_col(df, _y, "category", "类别", "产品", "国家", "name", "label")
     
     if _y is None or _y not in df.columns:
-        warnings.append("找不到必填字段 [y/category]")
+        warnings.append(say("Required field [y/category] not found", "找不到必填字段 [y/category]"))
         return ChartResult(warnings=warnings)
     
     # 获取数值列
     num_cols = _get_numeric_cols(df, exclude={_y})
     
     if len(num_cols) < 2:
-        warnings.append(f"需要至少2个数值列，当前仅有 {len(num_cols)} 个")
+        warnings.append(say(f"At least 2 numeric columns required; only {len(num_cols)} found", f"需要至少2个数值列，当前仅有 {len(num_cols)} 个"))
         return ChartResult(warnings=warnings)
     
     # 自动检测起点和终点列
@@ -209,16 +217,16 @@ def generate(
     _end = _end if _end is not None else (end if end is not None else num_cols[1])
     
     if _start not in df.columns:
-        warnings.append(f"找不到起点列 [{_start}]")
+        warnings.append(say(f"Start column [{_start}] not found", f"找不到起点列 [{_start}]"))
         return ChartResult(warnings=warnings)
     if _end not in df.columns:
-        warnings.append(f"找不到终点列 [{_end}]")
+        warnings.append(say(f"End column [{_end}] not found", f"找不到终点列 [{_end}]"))
         return ChartResult(warnings=warnings)
     
     # 数据验证
     n_categories = df[_y].nunique()
     if n_categories > max_categories:
-        warnings.append(f"类别数 {n_categories} 超过上限 {max_categories}，建议分组展示")
+        warnings.append(say(f"Category count {n_categories} exceeds limit {max_categories}; consider grouping", f"类别数 {n_categories} 超过上限 {max_categories}，建议分组展示"))
     
     # 数据准备
     plot_df = df[[_y, _start, _end]].copy()
@@ -285,7 +293,7 @@ def generate(
             opacity=1.0,
             line=dict(width=1.5, color="white")
         ),
-        text=[f"<b>{row[_y]}</b><br>{_end}: {row[_end]:.2f}<br>变化: {row['_change']:+.2f}" 
+        text=[say(f"<b>{row[_y]}</b><br>{_end}: {row[_end]:.2f}<br>Change: {row['_change']:+.2f}", f"<b>{row[_y]}</b><br>{_end}: {row[_end]:.2f}<br>变化: {row['_change']:+.2f}") 
               for _, row in plot_df.iterrows()],
         hovertemplate="%{text}<extra></extra>",
         name=_end,
@@ -371,7 +379,7 @@ def generate(
             xanchor="center"
         ),
         xaxis=dict(
-            title="数值",
+            title=say("Value", "数值"),
             title_font=dict(size=12, color="#555555"),
             tickfont=dict(size=11, color="#666666"),
             showgrid=True,
@@ -403,7 +411,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "dot_plot", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "dot_plot", "plotly", _data_fmt(), _desc(), chart_html)
 
     meta = {
         "chart_id": "dot_plot",

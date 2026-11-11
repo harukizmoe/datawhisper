@@ -1,0 +1,75 @@
+{
+  "coverage": {
+    "clean_data": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "clean_data"
+  ],
+  "description": "clean_data trimming: drop rows with revenue outside [0, 6000].",
+  "scenario": "clean_trimming",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:clean_data",
+        "end:clean_data"
+      ],
+      "final_text": "异常值已剔除。",
+      "message": "清洗数据：剔除 revenue 异常值（只保留 0 到 6000 之间的行）。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "max_val": 6000,
+            "min_val": 0,
+            "operation": "trimming",
+            "output_table": "sales_trimmed",
+            "table_name": "sales",
+            "trim_column": "revenue"
+          },
+          "content": "[TOOL_RESULT] clean_data OK: ## 截尾处理完成 - 列：**revenue** - 保留范围：**[0.0, 6000.0]** - 原始行数：200 - 移除行数：**3**（1.5%） - 保留行数：**197** ✅ 清洗结果已保存为表 `sales_trimmed`，可直接用于后续分析和图表生成。\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## 截尾处理完成\\n- 列：**revenue**\\n- 保留范围：**[0.0, 6000.0]**\\n- 原始行数：200\\n- 移除行数：**3**（1.5%）\\n- 保留行数：**197**\\n\\n\\n✅ 清洗结果已保存为表 `sales_trimmed`，可直接用于后续分析和图表生成。\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "clean_data",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

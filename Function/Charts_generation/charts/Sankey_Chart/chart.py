@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -36,8 +37,7 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "source列 + target列 + value列"
-_DESC = "用带宽度箭头表示从起点到终点的流量/转移，适合能源/资金/用户流动分析。"
+
 
 # 配色：专业蓝系 + 绿系 + 紫系 + 中性色（避免黄色刺眼）
 _DISTINCT_COLORS = [
@@ -113,7 +113,7 @@ def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
 
 def _build_html(title: str, chart_name: str, library: str, data_fmt: str, desc: str, embed: str) -> str:
     return f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="{say('en', 'zh-CN')}"><head><meta charset="UTF-8">
 <title>{title}</title>
 <style>
 body{{font-family:"Heiti SC","Microsoft YaHei",sans-serif;margin:40px;background:#fafafa}}
@@ -126,8 +126,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -137,20 +137,20 @@ def _validate_sankey_data(df: pd.DataFrame, src_col: str, tgt_col: str, val_col:
 
     self_loops = df[df[src_col] == df[tgt_col]]
     if len(self_loops) > 0:
-        warnings.append(f"检测到 {len(self_loops)} 条自环（source=target），已保留")
+        warnings.append(say(f"Detected {len(self_loops)} self-loop(s) (source=target), kept", f"检测到 {len(self_loops)} 条自环（source=target），已保留"))
 
     edge_counts = df.groupby([src_col, tgt_col]).size()
     duplicates = edge_counts[edge_counts > 1]
     if len(duplicates) > 0:
-        warnings.append(f"检测到 {len(duplicates)} 条重复边，已自动合并")
+        warnings.append(say(f"Detected {len(duplicates)} duplicate edge(s), merged automatically", f"检测到 {len(duplicates)} 条重复边，已自动合并"))
 
     zero_vals = df[df[val_col] <= 0]
     if len(zero_vals) > 0:
-        warnings.append(f"检测到 {len(zero_vals)} 条零值或负值流量，已过滤")
+        warnings.append(say(f"Detected {len(zero_vals)} zero or negative flow value(s), filtered out", f"检测到 {len(zero_vals)} 条零值或负值流量，已过滤"))
 
     all_nodes = set(df[src_col].unique()) | set(df[tgt_col].unique())
     if len(all_nodes) > 30:
-        warnings.append(f"节点数过多（{len(all_nodes)} 个），可能导致图表混乱，建议简化数据")
+        warnings.append(say(f"Too many nodes ({len(all_nodes)}), which may make the chart cluttered; consider simplifying the data", f"节点数过多（{len(all_nodes)} 个），可能导致图表混乱，建议简化数据"))
 
     return warnings
 
@@ -259,7 +259,7 @@ def generate(
     source: str = "source",
     target: str = "target",
     value: str = "value",
-    title: str = "桑基图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -272,9 +272,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     src_col = mapping.get("source")
     src_col = src_col if src_col is not None else source
@@ -283,6 +283,8 @@ def generate(
     val_col = mapping.get("value")
     val_col = val_col if val_col is not None else value
     title = options.get("title", title)
+    if title is None:
+        title = say("Sankey Diagram", "桑基图")
 
     _src = _auto_col(df, src_col, "source", "起点", "from", "origin")
     _tgt = _auto_col(df, tgt_col, "target", "终点", "to", "destination")
@@ -290,7 +292,7 @@ def generate(
 
     for role, col in [("source", _src), ("target", _tgt), ("value", _val)]:
         if col is None or col not in df.columns:
-            warnings.append(f"找不到必填字段 [{role}]")
+            warnings.append(say(f"Required field [{role}] not found", f"找不到必填字段 [{role}]"))
 
     if _src not in df.columns or _tgt not in df.columns or _val not in df.columns:
         return ChartResult(warnings=warnings)
@@ -305,7 +307,7 @@ def generate(
     d = d.groupby([_src, _tgt], as_index=False)[_val].sum()
 
     if len(d) == 0:
-        return ChartResult(warnings=warnings + ["处理后无有效数据"])
+        return ChartResult(warnings=warnings + [say("No valid data after processing", "处理后无有效数据")])
 
     all_nodes = _build_node_order(d, _src, _tgt, _val)
     node_map = {n: i for i, n in enumerate(all_nodes)}
@@ -352,10 +354,10 @@ def generate(
                     customdata=node_custom,
                     hovertemplate=(
                         "<b>%{label}</b><br>"
-                        "入流: %{customdata[0]:,.2f}<br>"
-                        "出流: %{customdata[1]:,.2f}<br>"
-                        "吞吐: %{customdata[2]:,.2f}<br>"
-                        "占总流: %{customdata[3]:.1f}%"
+                        + say("Inflow", "入流") + ": %{customdata[0]:,.2f}<br>"
+                        + say("Outflow", "出流") + ": %{customdata[1]:,.2f}<br>"
+                        + say("Throughput", "吞吐") + ": %{customdata[2]:,.2f}<br>"
+                        + say("Share of total flow", "占总流") + ": %{customdata[3]:.1f}%"
                         "<extra></extra>"
                     ),
                 ),
@@ -367,8 +369,8 @@ def generate(
                     customdata=link_pct,
                     hovertemplate=(
                         "<b>%{source.label}</b> → <b>%{target.label}</b><br>"
-                        "流量: %{value:,.2f}<br>"
-                        "占总流: %{customdata}"
+                        + say("Flow", "流量") + ": %{value:,.2f}<br>"
+                        + say("Share of total flow", "占总流") + ": %{customdata}"
                         "<extra></extra>"
                     ),
                 ),
@@ -385,7 +387,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "sankey", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "sankey", "plotly", say("source column + target column + value column", "source列 + target列 + value列"), say("Uses width-scaled bands to show flow/transfer from origin to destination; suited to energy, fund and user flow analysis.", "用带宽度箭头表示从起点到终点的流量/转移，适合能源/资金/用户流动分析。"), chart_html)
 
 
     meta = {

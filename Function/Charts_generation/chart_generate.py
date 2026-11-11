@@ -456,7 +456,7 @@ def _load_chart_registry() -> Dict[str, dict]:
     if _CHART_REGISTRY is not None:
         return _CHART_REGISTRY
     try:
-        from LLM.chart_selector import _CHARTS
+        from compute.chart_selector import _CHARTS
         entries = {}
         for c in _CHARTS:
             cid = _chart_key(c.get("chart_id"))

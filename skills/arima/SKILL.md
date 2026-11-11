@@ -18,7 +18,7 @@ allowedTools: [get_schema, query_data, run_analysis, generate_chart]
 
 ## Implementation reference
 
-- Tool entry: `agent/tools/business/data.py::_tool_run_analysis`
+- Tool entry: `compute/tools/data.py::_tool_run_analysis`
 - Analysis registry: `Function/Analyze/registry.py`
 - Analysis implementation: `Function/Analyze/Time_Series_ARIMA/analyze.py`
 - Chart implementation: `Function/Charts_generation/chart_generate.py`

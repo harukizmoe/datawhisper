@@ -33,12 +33,17 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(数值) + y列(数值) + order列(排序/时间) + 可选size列(气泡大小)"
-_DESC = "在散点基础上用线段连接各点，展示数据的演变过程或轨迹。适合展示有序路径、时间序列或因果关系。"
+def _data_fmt() -> str:
+    return say("x column (numeric) + y column (numeric) + order column (sort/time) + optional size column (bubble size)", "x列(数值) + y列(数值) + order列(排序/时间) + 可选size列(气泡大小)")
+
+
+def _desc() -> str:
+    return say("Connects points of a scatter plot with line segments to show how data evolves or traces a path. Suited to ordered paths, time series or causal relationships.", "在散点基础上用线段连接各点，展示数据的演变过程或轨迹。适合展示有序路径、时间序列或因果关系。")
 
 
 def _norm(s: str) -> str:
@@ -128,8 +133,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -142,7 +147,7 @@ def generate(
     y: str = "y",
     order: str = None,
     size: str = None,
-    title: str = "连线散点图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     """
@@ -166,9 +171,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -182,7 +187,7 @@ def generate(
     order_col = order_col if order_col is not None else order
     size_col = mapping.get("size")
     size_col = size_col if size_col is not None else size
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Connected Scatter Plot", "连线散点图"))
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
     # 自动检测列
@@ -191,13 +196,13 @@ def generate(
     if _x:
         exclude_set.add(_x)
     else:
-        return ChartResult(warnings=["无法找到x列"])
+        return ChartResult(warnings=[say("Cannot find x column", "无法找到x列")])
 
     _y = y_col if y_col and y_col != "y" and y_col in df.columns else _auto_col(df, "y", exclude_set)
     if _y:
         exclude_set.add(_y)
     else:
-        return ChartResult(warnings=["无法找到y列"])
+        return ChartResult(warnings=[say("Cannot find y column", "无法找到y列")])
 
     _order = order_col if order_col and order_col in df.columns else _auto_col(df, "order", exclude_set)
     if _order:
@@ -212,10 +217,10 @@ def generate(
         df[_x] = pd.to_numeric(df[_x], errors="coerce")
         df[_y] = pd.to_numeric(df[_y], errors="coerce")
         if df[_x].isna().all() or df[_y].isna().all():
-            return ChartResult(warnings=["x或y列包含非数值数据"])
+            return ChartResult(warnings=[say("x or y column contains non-numeric data", "x或y列包含非数值数据")])
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"数据转换失败: {e}"])
+        return ChartResult(warnings=[say(f"Data conversion failed: {e}", f"数据转换失败: {e}")])
 
     # 按order排序
     if _order:
@@ -230,7 +235,7 @@ def generate(
                 df_plot = df.sort_values(_order)
         except Exception as e:
             log.warning("[chart] 图表生成异常: %s", e)
-            warnings.append(f"排序失败: {e}")
+            warnings.append(say(f"Sorting failed: {e}", f"排序失败: {e}"))
             df_plot = df
     else:
         df_plot = df
@@ -238,7 +243,7 @@ def generate(
     # 删除NaN行
     df_plot = df_plot.dropna(subset=[_x, _y])
     if len(df_plot) < 2:
-        return ChartResult(warnings=["有效数据点少于2个"])
+        return ChartResult(warnings=[say("Fewer than 2 valid data points", "有效数据点少于2个")])
 
     # 处理气泡大小
     marker_sizes = [15] * len(df_plot)  # 默认大小
@@ -255,7 +260,7 @@ def generate(
                     marker_sizes = [15] * len(df_plot)
         except Exception as e:
             log.warning("[chart] 图表生成异常: %s", e)
-            warnings.append(f"气泡大小处理失败: {e}")
+            warnings.append(say(f"Bubble size processing failed: {e}", f"气泡大小处理失败: {e}"))
 
     # 获取配色
     try:
@@ -263,7 +268,7 @@ def generate(
         primary_color = color_scheme.get("primary", "#0084D1")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}")
+        warnings.append(say(f"Failed to load color scheme: {e}", f"配色方案加载失败: {e}"))
         primary_color = "#0084D1"
 
     # 生成图表
@@ -368,13 +373,13 @@ def generate(
 
         chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
         if not chart_html or len(chart_html) < 100:
-            return ChartResult(warnings=["图表生成失败"])
+            return ChartResult(warnings=[say("Chart generation failed", "图表生成失败")])
 
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"图表生成失败: {e}"])
+        return ChartResult(warnings=[say(f"Chart generation failed: {e}", f"图表生成失败: {e}")])
 
-    html = _build_html(title, "connected_scatter", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "connected_scatter", "plotly", _data_fmt(), _desc(), chart_html)
 
     meta = {
         "chart_id": "connected_scatter",

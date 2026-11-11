@@ -1,0 +1,35 @@
+{
+  "id": "gruvbox-dark",
+  "name": "Gruvbox Dark",
+  "family": "gruvbox",
+  "appearance": "dark",
+  "license": "MIT",
+  "source": "https://github.com/morhetz/gruvbox",
+  "palette": {
+    "dark0-hard": "#1d2021", "dark0": "#282828", "dark0-soft": "#32302f", "dark1": "#3c3836",
+    "dark2": "#504945", "dark3": "#665c54", "dark4": "#7c6f64", "gray": "#928374",
+    "light0-hard": "#f9f5d7", "light0": "#fbf1c7", "light0-soft": "#f2e5bc", "light1": "#ebdbb2",
+    "light2": "#d5c4a1", "light3": "#bdae93", "light4": "#a89984", "bright-red": "#fb4934",
+    "bright-green": "#b8bb26", "bright-yellow": "#fabd2f", "bright-blue": "#83a598", "bright-purple": "#d3869b",
+    "bright-aqua": "#8ec07c", "bright-orange": "#fe8019", "neutral-red": "#cc241d", "neutral-green": "#98971a",
+    "neutral-yellow": "#d79921", "neutral-blue": "#458588", "neutral-purple": "#b16286", "neutral-aqua": "#689d6a",
+    "neutral-orange": "#d65d0e", "faded-red": "#9d0006", "faded-green": "#79740e", "faded-yellow": "#b57614",
+    "faded-blue": "#076678", "faded-purple": "#8f3f71", "faded-aqua": "#427b58", "faded-orange": "#af3a03"
+  },
+  "accents": ["bright-red", "bright-green", "bright-yellow", "bright-blue", "bright-purple", "bright-aqua", "bright-orange"],
+  "roles": {
+    "background": "dark0", "sidebar": "dark0-hard", "inspector": "dark0-hard", "surface": "dark1",
+    "surfaceHover": "dark2", "surfacePressed": "dark3", "border": "dark2", "text": "light1",
+    "textMuted": "light4", "accent": "bright-orange", "link": "bright-blue", "focus": "bright-orange/0.6",
+    "selection": "bright-yellow/0.25", "success": "bright-green", "warning": "bright-yellow", "danger": "bright-red",
+    "userBubble": "dark1", "codeBackground": "dark0-hard", "card": "dark0-hard", "cardBorder": "dark2",
+    "canvas": "dark0-hard"
+  },
+  "syntax": {
+    "keyword": "bright-red", "string": "bright-green", "number": "bright-purple", "comment": "gray",
+    "function": "bright-green", "type": "bright-yellow", "constant": "bright-purple", "operator": "bright-orange",
+    "property": "bright-blue", "tag": "bright-aqua", "attribute": "bright-yellow", "punctuation": "light4",
+    "regexp": "bright-aqua", "escape": "bright-red"
+  },
+  "chart": ["bright-blue", "bright-orange", "bright-green", "bright-red", "bright-purple", "bright-aqua", "bright-yellow"]
+}

@@ -1,0 +1,38 @@
+{
+  "coverage": {},
+  "covers": [],
+  "description": "General chat with no data intent; the stub only answers.",
+  "scenario": "plain_general_chat",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [],
+      "final_text": "你好。",
+      "message": "你好，你能做什么？",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "select_chart",
+            "generate_chart",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {},
+      "tool_results": []
+    }
+  ]
+}

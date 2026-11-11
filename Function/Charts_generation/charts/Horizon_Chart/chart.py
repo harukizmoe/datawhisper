@@ -22,6 +22,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -35,8 +36,15 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
 
 __all__ = ["generate"]
 
-_DATA_FMT = "时间列 + 一个或多个数值列"
-_DESC = "将时间序列分层着色并进行平移折叠（standard horizon），通过颜色深浅表示幅度层级，适合紧凑展示多指标长期趋势和异常识别。"
+def _data_fmt() -> str:
+    return say("Time column + one or more numeric columns", "时间列 + 一个或多个数值列")
+
+
+def _desc() -> str:
+    return say(
+        "Layers and folds a time series by color band (standard horizon); color intensity shows magnitude level, suited to compactly showing long-term trends of many metrics and spotting anomalies.",
+        "将时间序列分层着色并进行平移折叠（standard horizon），通过颜色深浅表示幅度层级，适合紧凑展示多指标长期趋势和异常识别。",
+    )
 
 MCKINSEY_COLORS = [
     "#003D7A", "#0084D1", "#00A4EF", "#7FBA00", "#FFB81C",
@@ -127,7 +135,7 @@ def generate(
     excel_path: str = None,
     x: str = "x",
     y: str = "y",
-    title: str = "地平线图（标准平移折叠）",
+    title: Optional[str] = None,
     bands: int = 3,
     **kwargs
 ) -> ChartResult:
@@ -143,9 +151,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     is_wide, id_col, value_cols = _detect_wide_format(df)
 
@@ -165,7 +173,7 @@ def generate(
         x_col = id_col
         y_cols = ["value"]
         series_col = "_series"
-        warnings.append("检测到宽格式数据，已自动转换")
+        warnings.append(say("Wide-format data detected and converted automatically", "检测到宽格式数据，已自动转换"))
     else:
         x_col = mapping.get("x")
         x_col = x_col if x_col is not None else x
@@ -174,7 +182,7 @@ def generate(
         series_col = mapping.get("series")
         series_col = series_col if series_col is not None else options.get("series")
 
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Horizon Chart (standard fold)", "地平线图（标准平移折叠）"))
     bands = max(1, int(options.get("bands", bands)))
 
     if y_cols == "y" or y_cols is None:
@@ -186,7 +194,7 @@ def generate(
 
     _x = _auto_col(df, x_col, "x", "日期", "时间", "date", "time", "year")
     if _x is None or _x not in df.columns:
-        return ChartResult(warnings=["找不到必填字段 [x]"])
+        return ChartResult(warnings=[say("Required field [x] not found", "找不到必填字段 [x]")])
 
     s_raw = df[_x]
     s_num = pd.to_numeric(s_raw, errors="coerce")
@@ -228,7 +236,7 @@ def generate(
                 if nums:
                     y_candidate = nums[0]
             if y_candidate is None:
-                return ChartResult(warnings=["找不到必填字段 [y]"])
+                return ChartResult(warnings=[say("Required field [y] not found", "找不到必填字段 [y]")])
 
             tmp = df[[_x, series_col, y_candidate]].copy()
             tmp[y_candidate] = pd.to_numeric(tmp[y_candidate], errors="coerce")
@@ -245,7 +253,7 @@ def generate(
                         _y_cols.append(auto_y)
             _y_cols = [c for c in dict.fromkeys(_y_cols) if c in df.columns]
             if not _y_cols:
-                return ChartResult(warnings=["找不到必填字段 [y]"])
+                return ChartResult(warnings=[say("Required field [y] not found", "找不到必填字段 [y]")])
 
             long_df = df.melt(
                 id_vars=[_x],
@@ -257,19 +265,19 @@ def generate(
             long_df = long_df.dropna(subset=[_x, "_series", "_value"])
 
     if long_df is None or long_df.empty:
-        return ChartResult(warnings=["数据为空或无法构建地平线图"])
+        return ChartResult(warnings=[say("Data is empty or the horizon chart cannot be built", "数据为空或无法构建地平线图")])
 
     long_df = long_df.sort_values(["_series", _x])
     series_list = list(long_df["_series"].dropna().unique())
 
     vals = pd.to_numeric(long_df["_value"], errors="coerce").dropna()
     if vals.empty:
-        return ChartResult(warnings=["数值列为空，无法计算地平线图"])
+        return ChartResult(warnings=[say("The value column is empty; cannot compute the horizon chart", "数值列为空，无法计算地平线图")])
 
     max_abs = float(max(vals.max(), -vals.min()))
     if max_abs == 0:
         max_abs = 1.0
-        warnings.append("数值全为0，已使用默认尺度")
+        warnings.append(say("All values are 0; using the default scale", "数值全为0，已使用默认尺度"))
 
     # 标准 horizon：统一线性 band 宽度（不是分位数）
     band_size = max_abs / bands if bands > 0 else max_abs
@@ -370,7 +378,7 @@ def generate(
                 line=dict(width=0, color="rgba(0,0,0,0)"),
                 showlegend=False,
                 customdata=v,
-                hovertemplate=f"<b>{s}</b><br>%{{x}}<br>值: %{{customdata:.3f}}<extra></extra>",
+                hovertemplate=say(f"<b>{s}</b><br>%{{x}}<br>Value: %{{customdata:.3f}}<extra></extra>", f"<b>{s}</b><br>%{{x}}<br>值: %{{customdata:.3f}}<extra></extra>"),
             ),
             row=r, col=1
         )
@@ -405,7 +413,7 @@ def generate(
                 coloraxis="coloraxis",
                 showscale=True,
                 colorbar=dict(
-                    title="原始数值范围",
+                    title=say("Raw value range", "原始数值范围"),
                     x=1.02, y=0.5, len=0.9, thickness=14,
                     tickmode="array",
                     tickvals=[legend_min, 0, legend_max],
@@ -437,7 +445,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "horizon_chart_standard_fold", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "horizon_chart_standard_fold", "plotly", _data_fmt(), _desc(), chart_html)
 
     meta = {
         "chart_id": "horizon_chart_standard_fold",

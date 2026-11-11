@@ -26,6 +26,7 @@ import math
 import os
 import re
 from pathlib import Path
+from compute.i18n import say
 from infrastructure.paths import content_data_path
 import jieba
 from Function.Knowledge.neural_embedder import (
@@ -59,10 +60,6 @@ def knowledge_scope_dir(
     """Resolve an isolated storage directory without mixing scope contents."""
     if workspace_id:
         root = Path(workspace_root).resolve() if workspace_root else None
-        if root is None:
-            from data.workspace import workspace_manager
-            resolved = workspace_manager.root_for_workspace(str(workspace_id))
-            root = Path(resolved).resolve() if resolved else None
         if root is None:
             raise ValueError("Knowledge Workspace is not available")
         return root / ".zhixi" / "knowledge"
@@ -175,8 +172,10 @@ def _init_db(conn: sqlite3.Connection) -> None:
     """)
     now = time.time()
     if not had_categories_table:
+        # 用 OR IGNORE：界面侧会并行聚合多个知识类型，两条连接同时打开新库时都会看到
+        # 「表是刚建的」，普通 INSERT 会撞 UNIQUE(id) 把整个聚合请求打成 500。
         conn.execute(
-            "INSERT INTO knowledge_categories (id, name, enabled, updated_at) VALUES (1, ?, 1, ?)",
+            "INSERT OR IGNORE INTO knowledge_categories (id, name, enabled, updated_at) VALUES (1, ?, 1, ?)",
             (DEFAULT_CATEGORY_NAME, now),
         )
     # Add enabled/category columns to existing tables if upgrading from old schema
@@ -203,6 +202,14 @@ def _init_db(conn: sqlite3.Connection) -> None:
             log.debug("[knowledge_base] 列已存在，跳过 DDL: %s", e)
     conn.execute("UPDATE rag_chunks SET category_id=1 WHERE category_id IS NULL")
     conn.commit()
+    # 复核默认分类：并行打开时另一条连接可能刚建表还没提交，本连接就会因为「表已存在」而跳过插入，
+    # 于是它读到的分类列表是空的。这里在提交后补一次，保证任何一条连接收尾时默认分类都在。
+    if conn.execute("SELECT 1 FROM knowledge_categories WHERE id=1").fetchone() is None:
+        conn.execute(
+            "INSERT OR IGNORE INTO knowledge_categories (id, name, enabled, updated_at) VALUES (1, ?, 1, ?)",
+            (DEFAULT_CATEGORY_NAME, now),
+        )
+        conn.commit()
 
 
 # ── Local vectorizer ──────────────────────────────────────────────────────────
@@ -388,9 +395,16 @@ class KnowledgeBase:
         )
         scope_dir.mkdir(parents=True, exist_ok=True)
         self._path = Path(db_path) if db_path is not None else scope_dir / "knowledge.db"
-        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            # 另一个连接还持有读事务时，切换 journal mode 会立刻返回 BUSY —— busy_timeout 对这种情况
+            # 不生效（SQLITE_BUSY_SNAPSHOT）。库在第一次打开时已经切成 WAL，所以这里失败可以忽略；
+            # 真降级成 rollback journal 也能正常读写，只是并发写会串行。
+            logging.getLogger(__name__).debug("[knowledge_base] journal_mode 切换被占用，沿用现有模式")
         _init_db(self._conn)
 
     def close(self) -> None:
@@ -560,7 +574,7 @@ class KnowledgeBase:
             "SELECT id FROM knowledge_categories ORDER BY id LIMIT 1"
         ).fetchone()
         if not fallback:
-            raise ValueError("请先创建业务分类")
+            raise ValueError(say("Please create a business category first", "请先创建业务分类"))
         return int(fallback["id"])
 
     def list_categories(self) -> list[dict]:
@@ -571,7 +585,7 @@ class KnowledgeBase:
     def add_category(self, name: str, enabled: int = 1) -> dict:
         name = (name or "").strip()
         if not name:
-            raise ValueError("分类名称不能为空")
+            raise ValueError(say("The category name must not be empty", "分类名称不能为空"))
         cur = self._conn.execute(
             """INSERT INTO knowledge_categories (name, enabled, updated_at)
                VALUES (?, ?, ?)
@@ -598,7 +612,7 @@ class KnowledgeBase:
         if "name" in updates:
             updates["name"] = str(updates["name"] or "").strip()
             if not updates["name"]:
-                raise ValueError("分类名称不能为空")
+                raise ValueError(say("The category name must not be empty", "分类名称不能为空"))
         if not updates:
             return self.get_category_by_id(cid)
         updates["updated_at"] = self._now()
@@ -614,7 +628,7 @@ class KnowledgeBase:
         """Delete a non-default category and all of its indexed knowledge."""
         cid = int(cid)
         if not self.get_category_by_id(cid):
-            raise LookupError("业务分类不存在")
+            raise LookupError(say("The business category does not exist", "业务分类不存在"))
 
         tables = {
             "metrics": "metrics",
@@ -661,7 +675,7 @@ class KnowledgeBase:
         blobs, so they are intentionally cleared here.
         """
         if not isinstance(snapshot, dict):
-            raise ValueError("知识库快照格式无效")
+            raise ValueError(say("The knowledge base snapshot format is invalid", "知识库快照格式无效"))
 
         raw_categories = snapshot.get("categories") or []
         category_rows = []
@@ -677,7 +691,7 @@ class KnowledgeBase:
         if not category_rows:
             category_rows.append((DEFAULT_CATEGORY_NAME, 1))
         if len(category_rows) > 100:
-            raise ValueError("业务分类数量超过上限")
+            raise ValueError(say("The number of business categories exceeds the limit", "业务分类数量超过上限"))
 
         records_by_kind = {
             "metrics": snapshot.get("metrics") or [],
@@ -686,7 +700,7 @@ class KnowledgeBase:
         }
         if any(not isinstance(rows, list) or len(rows) > 2000
                for rows in records_by_kind.values()):
-            raise ValueError("知识库条目数量超过上限或格式无效")
+            raise ValueError(say("The number of knowledge base entries exceeds the limit or the format is invalid", "知识库条目数量超过上限或格式无效"))
 
         try:
             self._conn.execute("BEGIN")

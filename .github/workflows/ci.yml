@@ -1,0 +1,100 @@
+name: CI
+
+# 三部分各自独立：Bun 服务、Python compute、Go 桌面应用。都不连外网模型，也不需要 API key。
+on:
+  push:
+    branches: [refactor/pi-durable, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server (typecheck + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: compute/requirements.txt
+      - name: Create the compute virtualenv
+        # 服务端默认到仓库根的 .venv 找 compute 的 Python；真实 compute 的测试要用它。
+        working-directory: .
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r compute/requirements.txt
+      - name: Typecheck
+        run: bunx tsc --noEmit -p .
+      - name: Test
+        # 超时兜底：单元测试里有子进程与订阅，挂住时不能让 runner 一直等。
+        run: timeout 900 bun test --timeout 60000
+
+  compute:
+    name: Compute (unittest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: compute/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r compute/requirements.txt
+      - name: Test
+        # 与 docs/refactor/pi-durable-plan.md 记录的三个测试文件一致；用 timeout 防止 RPC 测试挂住。
+        run: |
+          timeout 1800 python -m unittest \
+            compute.tests.test_rpc \
+            compute.tests.test_tools \
+            compute.tests.test_ui_methods
+        env:
+          PYTHONHASHSEED: "0"
+          TZ: UTC
+
+  desktop:
+    name: Desktop (gofmt + vet + race tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.sum
+      - name: Install GTK and WebKitGTK
+        # mygo 用 purego 在运行期加载 GTK/WebKitGTK（不参与编译），测试需要一个可用的会话。
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libwebkit2gtk-4.1-0 xvfb xauth dbus-x11
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        # live 测试需要 bun 与 server/node_modules，缺少时会自行 skip。
+        run: timeout 900 xvfb-run -a go test -race -count=1 -timeout 600s ./...

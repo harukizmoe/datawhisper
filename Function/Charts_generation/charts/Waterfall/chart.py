@@ -16,6 +16,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 
 try:
     from charts.color_schemes import get_color_scheme
@@ -29,9 +30,6 @@ except ImportError as e:  # pragma: no cover - 兜底，保证独立调用可用
         ]}
 
 __all__ = ["generate"]
-
-_DATA_FMT = "x列(阶段名称) + y列(数值) + 可选type列(initial/increase/decrease/total)"
-_DESC = "展示数值从起点经过增减变化到终点的过程，通过柱子的堆叠展示累积效果。"
 
 MCKINSEY_COLORS = {
     "increase": "#7FBA00",
@@ -81,7 +79,7 @@ def generate(
     x: str = "x",
     y: str = "y",
     type_col: str = None,
-    title: str = "瀑布图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     options = options or {}
@@ -93,9 +91,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
@@ -103,7 +101,7 @@ def generate(
     y_col = y_col if y_col is not None else y
     type_col_name = mapping.get("type")
     type_col_name = type_col_name if type_col_name is not None else type_col
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Waterfall Chart", "瀑布图"))
 
     exclude_set = set()
     _x = (x_col if x_col != "x" and x_col in df.columns else _auto_col(df, "x", exclude_set))
@@ -119,9 +117,9 @@ def generate(
     _type = type_col_name if type_col_name and type_col_name in df.columns and type_col_name not in {_x, _y} else None
 
     if not _x or _x not in df.columns:
-        return ChartResult(warnings=["找不到x列"])
+        return ChartResult(warnings=[say("x column not found", "找不到x列")])
     if not _y or _y not in df.columns:
-        return ChartResult(warnings=["找不到y列"])
+        return ChartResult(warnings=[say("y column not found", "找不到y列")])
 
     try:
         cols_to_use = [_x, _y]
@@ -139,14 +137,14 @@ def generate(
         df_plot = df_plot.dropna(subset=[_x, _y])
 
         if df_plot.empty:
-            return ChartResult(warnings=["无有效数据"])
+            return ChartResult(warnings=[say("No valid data", "无有效数据")])
 
         x_vals = list(df_plot[_x].astype(str))
         y_vals = list(df_plot[_y].astype(float))
         n = len(x_vals)
 
         if n < 2:
-            return ChartResult(warnings=["瀑布图至少需要2行数据（起点+终点）"])
+            return ChartResult(warnings=[say("A waterfall chart needs at least 2 rows of data (start + end)", "瀑布图至少需要2行数据（起点+终点）")])
 
         # 1) 构造 measure：首行 absolute，中间 relative，末行 total
         measures = ["relative"] * n
@@ -195,7 +193,7 @@ def generate(
             totals=dict(marker=dict(color=_total_color, line=dict(color="white", width=1))),
             connector=dict(visible=True, line=dict(color="#cccccc", width=1)),
             customdata=customdata,
-            hovertemplate="<b>%{x}</b><br>变动: %{customdata[0]:,.0f}<br>当前: %{customdata[1]:,.0f}<extra></extra>",
+            hovertemplate="<b>%{x}</b><br>" + say("Change", "变动") + ": %{customdata[0]:,.0f}<br>" + say("Current", "当前") + ": %{customdata[1]:,.0f}<extra></extra>",
             **kwargs
         ))
 
@@ -218,11 +216,11 @@ def generate(
         chart_html = '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>' + chart_html
 
         if not chart_html or len(chart_html) < 100:
-            return ChartResult(warnings=["图表生成失败"])
+            return ChartResult(warnings=[say("Chart generation failed", "图表生成失败")])
 
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        return ChartResult(warnings=[f"图表生成失败: {e}"])
+        return ChartResult(warnings=[say(f"Chart generation failed: {e}", f"图表生成失败: {e}")])
 
     html = _build_html(title, chart_html)
     meta = {
@@ -233,7 +231,7 @@ def generate(
         "type_col": _type,
         "measures": dict(zip(x_vals, measures)),
         "running_totals": dict(zip(x_vals, running_totals)),
-        "data_format": _DATA_FMT,
-        "description": _DESC,
+        "data_format": say("x column (stage names) + y column (numeric) + optional type column (initial/increase/decrease/total)", "x列(阶段名称) + y列(数值) + 可选type列(initial/increase/decrease/total)"),
+        "description": say("Shows how a value moves from a starting point through increases and decreases to an end point, with stacked bars showing the cumulative effect.", "展示数值从起点经过增减变化到终点的过程，通过柱子的堆叠展示累积效果。"),
     }
     return ChartResult(html=html, spec={}, warnings=[], meta=meta)

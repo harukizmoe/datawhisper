@@ -1,0 +1,30 @@
+{
+  "id": "dracula",
+  "name": "Dracula",
+  "family": "dracula",
+  "appearance": "dark",
+  "license": "MIT",
+  "source": "https://draculatheme.com/spec",
+  "palette": {
+    "background": "#282a36", "background-darker": "#191a21", "background-dark": "#21222c", "background-light": "#343746",
+    "background-lighter": "#424450", "selection": "#44475a", "foreground": "#f8f8f2", "comment": "#6272a4",
+    "red": "#ff5555", "orange": "#ffb86c", "yellow": "#f1fa8c", "green": "#50fa7b",
+    "cyan": "#8be9fd", "purple": "#bd93f9", "pink": "#ff79c6"
+  },
+  "accents": ["red", "orange", "yellow", "green", "cyan", "purple", "pink"],
+  "roles": {
+    "background": "background", "sidebar": "background-dark", "inspector": "background-dark", "surface": "background-light",
+    "surfaceHover": "background-lighter", "surfacePressed": "selection", "border": "background-light", "text": "foreground",
+    "textMuted": "foreground/0.65", "accent": "purple", "link": "cyan", "focus": "purple/0.6",
+    "selection": "selection", "success": "green", "warning": "orange", "danger": "red",
+    "userBubble": "background-light", "codeBackground": "background-dark", "card": "background-dark", "cardBorder": "background-light",
+    "canvas": "background-darker"
+  },
+  "syntax": {
+    "keyword": "pink", "string": "yellow", "number": "orange", "comment": "comment",
+    "function": "green", "type": "cyan", "constant": "purple", "operator": "pink",
+    "property": "foreground", "tag": "pink", "attribute": "green", "punctuation": "foreground",
+    "regexp": "red", "escape": "pink"
+  },
+  "chart": ["purple", "orange", "green", "pink", "cyan", "yellow", "red"]
+}

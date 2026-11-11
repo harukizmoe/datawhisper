@@ -1,0 +1,77 @@
+{
+  "coverage": {
+    "clean_data": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "clean_data"
+  ],
+  "description": "clean_data winsorize revenue at the 5th/95th percentiles.",
+  "scenario": "clean_winsorize",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:clean_data",
+        "end:clean_data"
+      ],
+      "final_text": "缩尾处理完成。",
+      "message": "清洗数据：对 revenue 的异常值做 winsorize 缩尾处理。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "columns": [
+              "revenue"
+            ],
+            "lower_pct": 5,
+            "operation": "winsorize",
+            "output_table": "sales_winsorized",
+            "table_name": "sales",
+            "upper_pct": 95
+          },
+          "content": "[TOOL_RESULT] clean_data OK: ## 缩尾处理完成（分位数 5.0% ~ 95.0%） | 列名 | 下限值 | 上限值 | 下截行数 | 上截行数 | |------|--------|--------|----------|----------| | revenue | 949 | 3001 | 10 | 10 | ✅ 清洗结果已保存为表 `sales_winsorized`，可直接用于后续分析和图表生成。\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## 缩尾处理完成（分位数 5.0% ~ 95.0%）\\n\\n| 列名 | 下限值 | 上限值 | 下截行数 | 上截行数 |\\n|------|--------|--------|----------|----------|\\n| revenue | 949 | 3001 | 10 | 10 |\\n\\n✅ 清洗结果已保存为表 `sales_winsorized`，可直接用于后续分析和图表生成。\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "clean_data",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

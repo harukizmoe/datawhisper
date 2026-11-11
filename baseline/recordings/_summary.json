@@ -1,0 +1,201 @@
+{
+  "analysis_ab_test": {
+    "coverage": {
+      "run_analysis": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "analysis_arima": {
+    "coverage": {
+      "run_analysis": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "analysis_kmeans": {
+    "coverage": {
+      "run_analysis": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "analysis_regression": {
+    "coverage": {
+      "run_analysis": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "analysis_tables": {
+    "coverage": {
+      "create_analysis_table": [
+        "ok"
+      ],
+      "delete_analysis_tables": [
+        "ok"
+      ],
+      "get_table_detail": [
+        "ok"
+      ],
+      "query_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "chart": {
+    "coverage": {
+      "generate_chart": [
+        "ok",
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "clean_fill_na": {
+    "coverage": {
+      "clean_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "clean_trimming": {
+    "coverage": {
+      "clean_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "clean_winsorize": {
+    "coverage": {
+      "clean_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "export_excel": {
+    "coverage": {
+      "export_excel": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "export_report": {
+    "coverage": {
+      "export_report": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "fetch_table": {
+    "blocked_reason": "agent/tools/web.py:_reject_private_host rejects localhost/127.0.0.1/private IPs with no override; a public URL would make the baseline network-dependent and nondeterministic, so the compute path (data/table_extract.fetch_url_tables + source registration) is not exercised.",
+    "coverage": {
+      "fetch_table": [
+        "error"
+      ]
+    },
+    "status": "blocked"
+  },
+  "generate_dashboard": {
+    "coverage": {
+      "generate_dashboard": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "generate_ppt": {
+    "coverage": {
+      "generate_ppt": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "knowledge": {
+    "coverage": {
+      "query_knowledge": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "load_feishu_bitable": {
+    "blocked_reason": "Needs a configured Feishu application bot (app_id/app_secret) and a reachable Feishu OpenAPI with a real Bitable; none is available locally, so the compute path (data/sources/feishu_bitable.py DuckDB registration) is not exercised.",
+    "coverage": {
+      "load_feishu_bitable": [
+        "error"
+      ]
+    },
+    "status": "blocked"
+  },
+  "plain_chart_request": {
+    "coverage": {},
+    "status": "recorded"
+  },
+  "plain_data_question": {
+    "coverage": {},
+    "status": "recorded"
+  },
+  "plain_export_request": {
+    "coverage": {},
+    "status": "recorded"
+  },
+  "plain_general_chat": {
+    "coverage": {},
+    "status": "recorded"
+  },
+  "profile": {
+    "coverage": {
+      "profile_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "schema_query": {
+    "coverage": {
+      "get_schema": [
+        "ok"
+      ],
+      "get_table_detail": [
+        "ok"
+      ],
+      "query_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  },
+  "sql_source_tables": {
+    "coverage": {
+      "create_analysis_table": [
+        "ok"
+      ],
+      "delete_analysis_tables": [
+        "ok"
+      ],
+      "get_schema": [
+        "ok"
+      ],
+      "get_table_detail": [
+        "ok",
+        "ok"
+      ],
+      "query_data": [
+        "ok"
+      ]
+    },
+    "status": "recorded"
+  }
+}

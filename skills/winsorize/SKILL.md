@@ -18,6 +18,6 @@ allowedTools: [get_schema, profile_data, clean_data, query_data]
 
 ## Implementation reference
 
-- Tool entries: `agent/tools/business/data.py::_tool_profile_data`, `agent/tools/business/data.py::_tool_clean_data`
+- Tool entries: `compute/tools/data.py::_tool_profile_data`, `compute/tools/data.py::_tool_clean_data`
 - Profiling implementation: `Function/Clean/data_profile.py`
 - Winsorization implementation: `Function/Clean/winsorize.py`

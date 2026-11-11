@@ -11,6 +11,8 @@ from ._utils import (
     _list_tables, _new_conn, _preview_table_dict, _query, _register,
     _table_schema_str,
 )
+from compute.i18n import say
+
 from .base import DataSource
 
 log = logging.getLogger(__name__)
@@ -151,7 +153,7 @@ class GoogleSheetsDataSource(DataSource):
 
         log.info("[GSheets] loaded %d/%d sheet(s) into DuckDB", len(self._tables), len(worksheets))
         if not self._tables:
-            raise ValueError("Google Spreadsheet 中未发现有效工作表。")
+            raise ValueError(say("No valid worksheets found in the Google Spreadsheet.", "Google Spreadsheet 中未发现有效工作表。"))
 
     def get_schema(self) -> str:
         n = len(self._tables)

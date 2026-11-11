@@ -1,0 +1,5 @@
+## Multi-source SQL rules
+
+When schema identifiers use src1__, src2__ or similar prefixes, preserve the full exact
+identifier in SQL. Cross-source JOIN and UNION are supported in the shared query engine.
+Never strip, swap or guess a source prefix.

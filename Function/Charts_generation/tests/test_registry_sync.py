@@ -26,7 +26,7 @@ _REPO = _PROJECT.parent.parent                              # 仓库根目录
 sys.path.insert(0, str(_PROJECT))
 sys.path.insert(0, str(_REPO))
 
-from LLM.chart_selector import (  # noqa: E402
+from compute.chart_selector import (  # noqa: E402
     _BOOST_TABLE,
     _CHARTS,
     _CHART_INDEX,

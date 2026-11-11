@@ -5,6 +5,8 @@ import re
 import pandas as pd
 from typing import List
 
+from compute.i18n import say
+
 
 def _safe_sheet_name(name: str, used: set[str]) -> str:
     """Build an openpyxl-compliant unique sheet name (≤31 chars, no banned chars,
@@ -76,7 +78,7 @@ def write_excel_from_frames(frames: List[tuple], filepath: str) -> tuple:
                 continue
 
     if written == 0:
-        raise ValueError("没有可导出的表格数据，请确认表名正确且数据不为空。")
+        raise ValueError(say("No table data to export; check that the table names are correct and the data is not empty.", "没有可导出的表格数据，请确认表名正确且数据不为空。"))
 
     return filepath, skipped
 
@@ -93,7 +95,7 @@ def export_to_excel(datasource, tables: List[str], filepath: str) -> tuple:
     Raises ValueError if no table could be exported.
     """
     if not tables:
-        raise ValueError("没有可导出的表，请确认表名正确且数据不为空。")
+        raise ValueError(say("No tables to export; check that the table names are correct and the data is not empty.", "没有可导出的表，请确认表名正确且数据不为空。"))
 
     frames = prefetch_excel_frames(datasource, tables)
     return write_excel_from_frames(frames, filepath)

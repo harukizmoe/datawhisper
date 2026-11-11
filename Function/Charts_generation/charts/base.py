@@ -9,6 +9,8 @@ import html as _html
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from compute.i18n import say
+
 
 @dataclass
 class ChartResult:
@@ -104,7 +106,7 @@ def build_chart_html(
     """
     esc = _html.escape
     return f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="{say('en', 'zh-CN')}"><head><meta charset="UTF-8">
 <title>{esc(title)}</title>
 <style>
 {_DEFAULT_CSS}
@@ -113,6 +115,6 @@ def build_chart_html(
 <h1>{esc(title)}</h1><div class="subtitle">{esc(chart_name)} | {esc(library)}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{esc(data_fmt)}<br>
-<strong>说明：</strong>{esc(desc)}
+<strong>{say("Data format:", "数据格式：")}</strong>{esc(data_fmt)}<br>
+<strong>{say("Notes:", "说明：")}</strong>{esc(desc)}
 </div></body></html>"""

@@ -1,0 +1,37 @@
+{
+  "coverage": {},
+  "covers": [],
+  "description": "Typical data question; the stub only answers.",
+  "scenario": "plain_data_question",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge"
+      ],
+      "final_text": "好的。",
+      "message": "哪个门店的销售额最高？",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {},
+      "tool_results": []
+    }
+  ]
+}

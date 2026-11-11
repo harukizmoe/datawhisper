@@ -1,0 +1,8 @@
+## Hooks configuration rules
+
+When the user supplies a URL or documentation and asks to configure Hooks, webhooks,
+callbacks or automation, browse the page first, derive the smallest supported config,
+then call configure_hooks with merge=true. Never invent undocumented endpoint fields.
+Use command hooks only when the user explicitly requests a local Python script hook and
+confirms command hooks; never generate a shell snippet. Preserve existing hooks unless
+replacement was explicitly requested.

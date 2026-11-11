@@ -19,6 +19,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
@@ -89,7 +90,7 @@ def generate(
     y: str = None,
     size: str = None,
     color: str = None,
-    title: str = "气泡图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     """
@@ -116,12 +117,12 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["需要 df 或 excel_path"])
+            return ChartResult(warnings=[say("df or excel_path is required", "需要 df 或 excel_path")])
 
     if df.empty:
-        return ChartResult(warnings=["数据为空"])
+        return ChartResult(warnings=[say("Data is empty", "数据为空")])
 
     # 确保列名全部为字符串
     df.columns = df.columns.astype(str)
@@ -135,6 +136,8 @@ def generate(
     ch = mapping.get("color")
     ch = ch if ch is not None else color
     title = options.get("title", title)
+    if title is None:
+        title = say("Bubble Chart", "气泡图")
     color_scheme_name = options.get("color_scheme", "mckinsey")
     
     # 获取配色方案
@@ -147,7 +150,7 @@ def generate(
         negative_color = color_scheme.get("negative", "#DA3B01")
     except Exception as e:
         log.warning("[chart] 图表生成异常: %s", e)
-        warnings.append(f"配色方案加载失败: {e}，使用默认配色")
+        warnings.append(say(f"Failed to load color scheme: {e}; using default colors", f"配色方案加载失败: {e}，使用默认配色"))
         scheme_colors = MCKINSEY_COLORS
         primary_color = MCK_PRIMARY
         secondary_color = "#0084D1"
@@ -182,15 +185,15 @@ def generate(
     if _c: used.add(_c)
 
     if not _x:
-        return ChartResult(warnings=["找不到 x 列"])
+        return ChartResult(warnings=[say("x column not found", "找不到 x 列")])
     if not _y:
-        return ChartResult(warnings=["找不到 y 列"])
+        return ChartResult(warnings=[say("y column not found", "找不到 y 列")])
 
     dfx = pd.to_numeric(df[_x], errors="coerce")
     dfy = pd.to_numeric(df[_y], errors="coerce")
     valid_xy = dfx.notna() & dfy.notna()
     if valid_xy.sum() == 0:
-        return ChartResult(warnings=["x/y 列无有效数值"])
+        return ChartResult(warnings=[say("x/y columns have no valid numeric values", "x/y 列无有效数值")])
 
     xn = dfx[valid_xy]
     yn = dfy[valid_xy]
@@ -301,7 +304,7 @@ def generate(
         rows.append(point)
 
     if not rows:
-        return ChartResult(warnings=["无有效数据点"])
+        return ChartResult(warnings=[say("No valid data points", "无有效数据点")])
 
     # ── 象限线（x_mid / y_mid）─────────────────────────
     # markLine 画在 xAxis/yAxis 层（不是 series 层），这样可以跨所有系列
@@ -355,7 +358,7 @@ def generate(
     show_label = len(rows) <= 20  # 气泡数 > 20 时隐藏标签避免重叠
     series_list = [{
         "type": "scatter",
-        "name": "数据点",
+        "name": say("Data points", "数据点"),
         "data": rows,
         # symbolSize 可以是函数，d[2] 就是 value[2]（气泡直径 px）
         "symbolSize": "function(d){return d[2] || 40;}",
@@ -521,7 +524,7 @@ def generate(
         "<div id='chart'></div>"
         "<script src='/static/vendor/echarts.min.js'></script>"
         "<script>(function(){"
-        "if(!window.echarts){document.getElementById('chart').innerHTML='ECharts加载失败';return;}"
+        "if(!window.echarts){document.getElementById('chart').innerHTML='" + say("ECharts failed to load", "ECharts加载失败") + "';return;}"
         "var chart=echarts.init(document.getElementById('chart'),'white',{renderer:'canvas',locale:'ZH'});"
         f"var option={opt_json};"
         f"option.xAxis.axisLabel.formatter=function(v){{return {x_f};}};"

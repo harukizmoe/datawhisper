@@ -1,0 +1,30 @@
+{
+  "id": "nord",
+  "name": "Nord",
+  "family": "nord",
+  "appearance": "dark",
+  "license": "MIT",
+  "source": "https://www.nordtheme.com/docs/colors-and-palettes",
+  "palette": {
+    "nord0": "#2e3440", "nord1": "#3b4252", "nord2": "#434c5e", "nord3": "#4c566a",
+    "nord4": "#d8dee9", "nord5": "#e5e9f0", "nord6": "#eceff4", "nord7": "#8fbcbb",
+    "nord8": "#88c0d0", "nord9": "#81a1c1", "nord10": "#5e81ac", "nord11": "#bf616a",
+    "nord12": "#d08770", "nord13": "#ebcb8b", "nord14": "#a3be8c", "nord15": "#b48ead"
+  },
+  "accents": ["nord7", "nord8", "nord9", "nord10", "nord11", "nord12", "nord13", "nord14", "nord15"],
+  "roles": {
+    "background": "nord1", "sidebar": "nord0", "inspector": "nord0", "surface": "nord2",
+    "surfaceHover": "nord3", "surfacePressed": "nord3", "border": "nord2", "text": "nord6",
+    "textMuted": "nord4/0.7", "accent": "nord8", "link": "nord8", "focus": "nord8/0.6",
+    "selection": "nord8/0.3", "success": "nord14", "warning": "nord13", "danger": "nord11",
+    "userBubble": "nord2", "codeBackground": "nord0", "card": "nord0", "cardBorder": "nord2",
+    "canvas": "nord0"
+  },
+  "syntax": {
+    "keyword": "nord9", "string": "nord14", "number": "nord15", "comment": "nord4/0.5",
+    "function": "nord8", "type": "nord7", "constant": "nord15", "operator": "nord9",
+    "property": "nord4", "tag": "nord9", "attribute": "nord7", "punctuation": "nord6",
+    "regexp": "nord13", "escape": "nord13"
+  },
+  "chart": ["nord8", "nord12", "nord14", "nord11", "nord15", "nord13", "nord10", "nord7"]
+}

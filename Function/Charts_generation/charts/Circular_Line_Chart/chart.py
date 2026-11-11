@@ -32,12 +32,17 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "x列(周期/类别) + y列(数值，支持多列)；或宽格式(第一列维度 + 多个数值列)"
-_DESC = "将折线图卷成圆形，适合展示周期性数据（如一年52周、12个月）。相比标准折线图更紧凑，但精度略低。"
+def _data_fmt() -> str:
+    return say("x column (period/category) + y column (values, multiple columns supported); or wide format (first column as dimension + several value columns)", "x列(周期/类别) + y列(数值，支持多列)；或宽格式(第一列维度 + 多个数值列)")
+
+
+def _desc() -> str:
+    return say("Wraps a line chart into a circle; suited to cyclical data (e.g. 52 weeks in a year, 12 months). More compact than a standard line chart, but slightly less precise.", "将折线图卷成圆形，适合展示周期性数据（如一年52周、12个月）。相比标准折线图更紧凑，但精度略低。")
 
 MCKINSEY_COLORS = [
     "#003D7A", "#0084D1", "#00A4EF", "#7FBA00", "#FFB81C",
@@ -135,8 +140,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say("Data format:", "数据格式：")}</strong>{data_fmt}<br>
+<strong>{say("Description:", "说明：")}</strong>{desc}
 </div></body></html>"""
 
 
@@ -147,7 +152,7 @@ def generate(
     excel_path: str = None,
     x: str = "x",
     y: Union[str, List[str]] = "y",
-    title: str = "圆形折线图",
+    title: Optional[str] = None,
     **kwargs
 ) -> ChartResult:
     warnings = []
@@ -160,15 +165,15 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Please provide df or excel_path", "请提供 df 或 excel_path")])
 
     x_col = mapping.get("x")
     x_col = x_col if x_col is not None else x
     y_cols = mapping.get("y")
     y_cols = y_cols if y_cols is not None else y
-    title = options.get("title", title)
+    title = options.get("title", title if title is not None else say("Circular Line Chart", "圆形折线图"))
     color_scheme_name = options.get("color_scheme", "mckinsey")
 
     # 规范化 y_cols
@@ -188,7 +193,7 @@ def generate(
     if is_wide and not strict_y:
         _x = id_col
         _y_cols = value_cols
-        warnings.append("检测到宽格式，已使用第一列为周期、其余列为多条线")
+        warnings.append(say("Wide format detected; using the first column as the period and the remaining columns as multiple lines", "检测到宽格式，已使用第一列为周期、其余列为多条线"))
     else:
         # 查找 x 列
         if x_col and x_col != "x" and x_col in df.columns:
@@ -197,7 +202,7 @@ def generate(
             _x = _auto_col(df, x_col, "x", "周", "周次", "月", "月份", "week", "month", "period")
 
         if _x is None or _x not in df.columns:
-            return ChartResult(warnings=["找不到 x 列（周期/类别）"])
+            return ChartResult(warnings=[say("Cannot find x column (period/category)", "找不到 x 列（周期/类别）")])
 
         # 查找 y 列
         _y_cols = []
@@ -222,10 +227,10 @@ def generate(
 
         _y_cols = [c for i, c in enumerate(_y_cols) if c != _x and c not in _y_cols[:i]]
         if not _y_cols:
-            return ChartResult(warnings=["找不到任何可用的 y 列（数值列）"])
+            return ChartResult(warnings=[say("Cannot find any usable y column (numeric column)", "找不到任何可用的 y 列（数值列）")])
 
     if len(_y_cols) > 10:
-        warnings.append(f"数值列过多({len(_y_cols)}个)，只显示前10列")
+        warnings.append(say(f"Too many value columns ({len(_y_cols)}); showing only the first 10", f"数值列过多({len(_y_cols)}个)，只显示前10列"))
         _y_cols = _y_cols[:10]
 
     # 准备数据
@@ -241,12 +246,12 @@ def generate(
 
     _y_cols = valid_y
     if not _y_cols:
-        return ChartResult(warnings=["所有 y 列都无法转换为数值"])
+        return ChartResult(warnings=[say("None of the y columns can be converted to numbers", "所有 y 列都无法转换为数值")])
 
     # 至少保留有一列 y 非空的行
     df_plot = df_plot.dropna(subset=_y_cols, how="all")
     if df_plot.empty:
-        return ChartResult(warnings=["无有效数据"])
+        return ChartResult(warnings=[say("No valid data", "无有效数据")])
 
     # 排序：x 多数可转数字时按数字排序，否则按字符串排序
     month_order = {
@@ -263,7 +268,7 @@ def generate(
     period_labels = df_plot[_x].astype(str).tolist()
     n_periods = len(period_labels)
     if n_periods < 3:
-        return ChartResult(warnings=["数据点过少（< 3），无法绘制圆形折线图"])
+        return ChartResult(warnings=[say("Too few data points (< 3) to draw a circular line chart", "数据点过少（< 3），无法绘制圆形折线图")])
 
     # 用数值角度严格控制起点位置（第一个周期在12点）
     theta_vals = np.linspace(0, 360, n_periods, endpoint=False).tolist()
@@ -278,7 +283,7 @@ def generate(
         s = pd.Series(df_plot[yc].tolist(), dtype="float64").interpolate(limit_direction="both")
 
         if s.notna().sum() == 0:
-            warnings.append(f"{yc} 全为空，已跳过")
+            warnings.append(say(f"{yc} is entirely empty; skipped", f"{yc} 全为空，已跳过"))
             continue
 
         values = s.tolist()
@@ -293,12 +298,12 @@ def generate(
             line=dict(color=color, width=3),
             marker=dict(size=5, color=color),
             customdata=period_labels + [period_labels[0]],
-            hovertemplate=f"<b>{yc}</b><br>周期: %{{customdata}}<br>值: %{{r:.2f}}<extra></extra>"
+            hovertemplate=f"<b>{yc}</b><br>{say('Period', '周期')}: %{{customdata}}<br>{say('Value', '值')}: %{{r:.2f}}<extra></extra>"
         ))
         plotted_cols.append(yc)
 
     if not plotted_cols:
-        return ChartResult(warnings=["没有可绘制的 y 列（可能全为空）"])
+        return ChartResult(warnings=[say("No y column can be plotted (possibly all empty)", "没有可绘制的 y 列（可能全为空）")])
 
     fig.update_layout(
         title=dict(
@@ -349,7 +354,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "circular_line_chart", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "circular_line_chart", "plotly", _data_fmt(), _desc(), chart_html)
 
     return ChartResult(
         html=html,

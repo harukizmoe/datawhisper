@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 from typing import Callable, Optional, Tuple, List
 
+from compute.i18n import say
+
 
 def _try_cuda_torch_gru(
     df: pd.DataFrame,
@@ -47,29 +49,34 @@ def _try_cuda_torch_gru(
         from Function.Analyze.Torch_RNN.analyze import run as run_torch_rnn
 
         if progress_callback:
-            progress_callback(20, f"检测到 {choice['device']}，切换到 PyTorch GRU 加速")
+            progress_callback(20, say(f"Detected {choice['device']}; switching to accelerated PyTorch GRU", f"检测到 {choice['device']}，切换到 PyTorch GRU 加速"))
         return run_torch_rnn(
             df, target_column, groupby_column, n_deciles, progress_callback,
         )
     except (ImportError, RuntimeError):
         # Optional Torch/CUDA failures must retain the original CPU capability.
         if progress_callback:
-            progress_callback(20, "PyTorch CUDA 不可用，回退到 NumPy CPU GRU")
+            progress_callback(20, say("PyTorch CUDA unavailable; falling back to NumPy CPU GRU", "PyTorch CUDA 不可用，回退到 NumPy CPU GRU"))
         return None
 
 # ── 模块元数据 ──────────────────────────────────────────────────────────────
 ANALYSIS_ID   = "Time_Series_GRU"
-ANALYSIS_NAME = "GRU 时间序列预测（深度学习）"
-ANALYSIS_DESC = (
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("GRU time-series forecast (deep learning)", "GRU 时间序列预测（深度学习）")
+ANALYSIS_DESC = say(
+    "Forecasts a time series with a gated recurrent unit (GRU) neural network, implemented from scratch in pure numpy with no keras/tensorflow required. "
+    "Supports multi-step rolling forecasts and confidence-interval estimation (Monte Carlo dropout approximation). "
+    "Use groupby_column to specify the time column name; "
+    "use n_deciles to specify the number of forecast steps (default 12).",
     "使用门控循环单元（GRU）神经网络预测时间序列，纯 numpy 从零实现，无需 keras/tensorflow。"
     "支持多步滚动预测与置信区间估计（蒙特卡洛 dropout 近似）。"
     "通过 groupby_column 指定时间列名；"
-    "通过 n_deciles 指定预测步数（默认 12）。"
+    "通过 n_deciles 指定预测步数（默认 12）。",
 )
 REQUIRED_PARAMS = ["target_column"]
 OPTIONAL_PARAMS = [
-    "groupby_column (时间列名，默认自动探测)",
-    "n_deciles (预测步数，默认 12)",
+    say("groupby_column (time column name, auto-detected by default)", "groupby_column (时间列名，默认自动探测)"),
+    say("n_deciles (forecast steps, default 12)", "n_deciles (预测步数，默认 12)"),
 ]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
 
@@ -308,7 +315,7 @@ def _train(
         if progress_callback is not None and (
             epoch == 0 or epoch == epochs - 1 or epoch % max(1, epochs // 10) == 0
         ):
-            progress_callback(epoch, f"GRU 训练轮次 {epoch + 1}/{epochs}")
+            progress_callback(epoch, say(f"GRU training epoch {epoch + 1}/{epochs}", f"GRU 训练轮次 {epoch + 1}/{epochs}"))
         # shuffle
         idx = rng.permutation(n)
         X_sh, y_sh = X_train[idx], y_train[idx]
@@ -452,16 +459,16 @@ def _build_metrics_df(
     r2   = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
     rows = [
-        {"metric": "模型类型",         "value": f"GRU（隐层 {hidden_size} 维）"},
-        {"metric": "窗口大小（lookback）", "value": window},
-        {"metric": "训练轮数（epochs）",  "value": epochs},
-        {"metric": "训练样本数",          "value": len(series)},
-        {"metric": "最终训练 MSE Loss",   "value": round(train_losses[-1], 6)},
-        {"metric": "最终验证 MSE Loss",   "value": round(val_losses[-1], 6) if not np.isnan(val_losses[-1]) else "N/A"},
-        {"metric": "R²（训练集）",        "value": round(r2,   4)},
-        {"metric": "MAE（训练集）",       "value": round(mae,  4)},
-        {"metric": "RMSE（训练集）",      "value": round(rmse, 4)},
-        {"metric": "MAPE %（训练集）",    "value": round(mape, 2) if not np.isnan(mape) else "N/A"},
+        {"metric": say("Model type", "模型类型"),         "value": say(f"GRU ({hidden_size} hidden units)", f"GRU（隐层 {hidden_size} 维）")},
+        {"metric": say("Window size (lookback)", "窗口大小（lookback）"), "value": window},
+        {"metric": say("Training epochs", "训练轮数（epochs）"),  "value": epochs},
+        {"metric": say("Training samples", "训练样本数"),          "value": len(series)},
+        {"metric": say("Final training MSE loss", "最终训练 MSE Loss"),   "value": round(train_losses[-1], 6)},
+        {"metric": say("Final validation MSE loss", "最终验证 MSE Loss"),   "value": round(val_losses[-1], 6) if not np.isnan(val_losses[-1]) else "N/A"},
+        {"metric": say("R² (training set)", "R²（训练集）"),        "value": round(r2,   4)},
+        {"metric": say("MAE (training set)", "MAE（训练集）"),       "value": round(mae,  4)},
+        {"metric": say("RMSE (training set)", "RMSE（训练集）"),      "value": round(rmse, 4)},
+        {"metric": say("MAPE % (training set)", "MAPE %（训练集）"),    "value": round(mape, 2) if not np.isnan(mape) else "N/A"},
     ]
     return pd.DataFrame(rows)
 
@@ -474,24 +481,24 @@ def _build_md(target_col, time_col, steps, series, metrics_df, result_df, train_
     forecast_rows = result_df[result_df["segment"] == "forecast"].head(10)
 
     L = [
-        f"## GRU 时间序列预测 — `{target_col}`\n",
-        "### 模型概况",
-        "| 指标 | 值 |", "|------|-----|",
-        "| 模型类型 | GRU（门控循环单元，纯 numpy 实现） |",
-        f"| 时间列 | `{time_col or '（行序号）'}` |",
-        f"| 训练样本数 | {len(series)} |",
-        f"| 预测步数 | {steps} |",
-        f"| 置信区间 | 95%（{_MC_SAMPLES} 次 MC Dropout 采样） |",
+        say(f"## GRU time-series forecast — `{target_col}`\n", f"## GRU 时间序列预测 — `{target_col}`\n"),
+        say("### Model overview", "### 模型概况"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
+        say("| Model type | GRU (gated recurrent unit, pure numpy implementation) |", "| 模型类型 | GRU（门控循环单元，纯 numpy 实现） |"),
+        say(f"| Time column | `{time_col or '(row index)'}` |", f"| 时间列 | `{time_col or '（行序号）'}` |"),
+        say(f"| Training samples | {len(series)} |", f"| 训练样本数 | {len(series)} |"),
+        say(f"| Forecast steps | {steps} |", f"| 预测步数 | {steps} |"),
+        say(f"| Confidence interval | 95% ({_MC_SAMPLES} MC Dropout samples) |", f"| 置信区间 | 95%（{_MC_SAMPLES} 次 MC Dropout 采样） |"),
         "",
-        "### 模型评估",
-        "| 指标 | 值 |", "|------|-----|",
+        say("### Model evaluation", "### 模型评估"),
+        say("| Metric | Value |", "| 指标 | 值 |"), "|------|-----|",
     ]
     for _, row in metrics_df.iterrows():
         L.append(f"| {row['metric']} | {row['value']} |")
     L.append("")
 
-    L += ["### 预测摘要（未来数据点）",
-          "| 时间点 | 预测值 | 95% 置信区间 |",
+    L += [say("### Forecast summary (future points)", "### 预测摘要（未来数据点）"),
+          say("| Time | Forecast | 95% CI |", "| 时间点 | 预测值 | 95% 置信区间 |"),
           "|--------|-------:|-------------|"]
     for _, row in forecast_rows.iterrows():
         lo = f"{row['lower_ci']:.4f}" if not pd.isna(row["lower_ci"]) else "—"
@@ -501,24 +508,30 @@ def _build_md(target_col, time_col, steps, series, metrics_df, result_df, train_
 
     last_actual = float(series.iloc[-1])
     last_pred   = float(result_df[result_df["segment"] == "forecast"].iloc[-1]["y_pred"])
-    direction   = "上升" if last_pred > last_actual else "下降"
+    direction   = say("up", "上升") if last_pred > last_actual else say("down", "下降")
     chg_pct     = abs(last_pred - last_actual) / abs(last_actual) * 100 if last_actual != 0 else 0
 
     loss_drop = (train_losses[0] - train_losses[-1]) / (train_losses[0] + 1e-9) * 100
 
     L += [
-        "### 核心洞察",
-        f"- **预测趋势**：预测期末值（{last_pred:.4f}）"
-        f"较历史末值（{last_actual:.4f}）{direction}，幅度约 **{chg_pct:.1f}%**。",
-        f"- **训练收敛**：Loss 从 {train_losses[0]:.6f} 降至 {train_losses[-1]:.6f}"
-        f"（下降 {loss_drop:.1f}%）。",
-        f"- **不确定性**：置信区间由 {_MC_SAMPLES} 次 MC Dropout 近似，"
-        f"宽区间表示该时间点预测不确定性较高。",
+        say("### Key insights", "### 核心洞察"),
+        say(f"- **Forecast trend**: the end-of-horizon value ({last_pred:.4f}) "
+            f"is {direction} about **{chg_pct:.1f}%** vs the last observed value ({last_actual:.4f}).",
+            f"- **预测趋势**：预测期末值（{last_pred:.4f}）"
+            f"较历史末值（{last_actual:.4f}）{direction}，幅度约 **{chg_pct:.1f}%**。"),
+        say(f"- **Training convergence**: loss fell from {train_losses[0]:.6f} to {train_losses[-1]:.6f} "
+            f"({loss_drop:.1f}% reduction).",
+            f"- **训练收敛**：Loss 从 {train_losses[0]:.6f} 降至 {train_losses[-1]:.6f}"
+            f"（下降 {loss_drop:.1f}%）。"),
+        say(f"- **Uncertainty**: the confidence interval is approximated with {_MC_SAMPLES} MC Dropout samples; "
+            f"a wide interval means higher forecast uncertainty at that point.",
+            f"- **不确定性**：置信区间由 {_MC_SAMPLES} 次 MC Dropout 近似，"
+            f"宽区间表示该时间点预测不确定性较高。"),
         "",
-        "> **图表建议**",
-        "> - Line_Chart(analysis_result)：x=ds，y=y_pred + y_actual，按 segment 着色",
-        "> - Line_Chart(analysis_breakdown)：x=epoch，y=train_loss + val_loss — 训练曲线",
-        "> - analysis_metrics 表直接展示 R²/MAE/RMSE",
+        say("> **Chart suggestions**", "> **图表建议**"),
+        say("> - Line_Chart(analysis_result): x=ds, y=y_pred + y_actual, colored by segment", "> - Line_Chart(analysis_result)：x=ds，y=y_pred + y_actual，按 segment 着色"),
+        say("> - Line_Chart(analysis_breakdown): x=epoch, y=train_loss + val_loss — training curve", "> - Line_Chart(analysis_breakdown)：x=epoch，y=train_loss + val_loss — 训练曲线"),
+        say("> - Show the analysis_metrics table directly for R²/MAE/RMSE", "> - analysis_metrics 表直接展示 R²/MAE/RMSE"),
     ]
     return "\n".join(L)
 
@@ -543,11 +556,11 @@ def run(
     n_deciles      : 预测步数（默认 12）
     """
     progress = progress_callback or (lambda _pct, _message="": None)
-    progress(5, "正在校验 GRU 输入")
+    progress(5, say("Validating GRU input", "正在校验 GRU 输入"))
     if target_column not in df.columns:
-        raise ValueError(f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}")
+        raise ValueError(say(f"Target column '{target_column}' does not exist. Available columns: {', '.join(df.columns[:20])}", f"目标列 '{target_column}' 不存在。可用列：{', '.join(df.columns[:20])}"))
     if not pd.api.types.is_numeric_dtype(df[target_column]):
-        raise ValueError(f"目标列 '{target_column}' 不是数值类型。")
+        raise ValueError(say(f"Target column '{target_column}' is not numeric.", f"目标列 '{target_column}' 不是数值类型。"))
 
     steps    = int(n_deciles) if int(n_deciles) > 0 else _DEFAULT_STEPS
     time_col = _detect_time_col(df, groupby_column or "")
@@ -555,7 +568,8 @@ def run(
 
     if len(series) < _WINDOW + 4:
         raise ValueError(
-            f"有效数据点不足（{len(series)} 个），GRU 至少需要 {_WINDOW + 4} 个数据点。"
+            say(f"Not enough valid data points ({len(series)}); GRU needs at least {_WINDOW + 4}.",
+                f"有效数据点不足（{len(series)} 个），GRU 至少需要 {_WINDOW + 4} 个数据点。")
         )
 
     accelerated_result = _try_cuda_torch_gru(
@@ -565,7 +579,7 @@ def run(
         return accelerated_result
 
     # ── 归一化 ────────────────────────────────────────────────────────────
-    progress(18, "正在构建 GRU 训练样本")
+    progress(18, say("Building GRU training samples", "正在构建 GRU 训练样本"))
     values_norm, mu, std = _normalize(series.values)
 
     # ── 构建窗口样本 ───────────────────────────────────────────────────────
@@ -596,13 +610,13 @@ def run(
 
     # ── 多步滚动预测 + MC Dropout 置信区间 ────────────────────────────────
     last_window = values_norm[-_WINDOW:]
-    progress(80, "正在生成 GRU 滚动预测")
+    progress(80, say("Generating GRU rolling forecast", "正在生成 GRU 滚动预测"))
     y_pred, lower, upper = _rolling_forecast(
         model, last_window, steps, _MC_SAMPLES, _DROPOUT_RATE, mu, std
     )
 
     # ── 结果表 ────────────────────────────────────────────────────────────
-    progress(90, "正在整理 GRU 结果")
+    progress(90, say("Assembling GRU results", "正在整理 GRU 结果"))
     result_df   = _build_result_df(series, fitted_norm, mu, std, _WINDOW,
                                     y_pred, lower, upper, steps)
     loss_df     = _build_loss_df(train_losses, val_losses)
@@ -619,5 +633,5 @@ def run(
         train_losses = train_losses,
     )
 
-    progress(98, "GRU 分析计算完成")
+    progress(98, say("GRU analysis completed", "GRU 分析计算完成"))
     return result_df, loss_df, metrics_df, markdown

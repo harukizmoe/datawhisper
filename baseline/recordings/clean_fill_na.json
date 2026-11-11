@@ -1,0 +1,76 @@
+{
+  "coverage": {
+    "clean_data": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "clean_data"
+  ],
+  "description": "clean_data fill_na (median) on discount.",
+  "scenario": "clean_fill_na",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:clean_data",
+        "end:clean_data"
+      ],
+      "final_text": "缺失值已填充。",
+      "message": "清洗数据：用中位数填充 discount 的缺失值。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "columns": [
+              "discount"
+            ],
+            "fill_method": "median",
+            "operation": "fill_na",
+            "output_table": "sales_filled",
+            "table_name": "sales"
+          },
+          "content": "[TOOL_RESULT] clean_data OK: ## 缺失值处理完成（填中位数） - 处理列数：1 - 共填充 10 个单元格 | 列名 | 处理前缺失 | 处理后缺失 | 填充数 | |------|-----------|-----------|--------| | discount | 10 | 0 | 10 | ✅ 清洗结果已保存为表 `sales_filled`，可直接用于后续分析和图表生成。\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## 缺失值处理完成（填中位数）\\n- 处理列数：1\\n- 共填充 10 个单元格\\n\\n| 列名 | 处理前缺失 | 处理后缺失 | 填充数 |\\n|------|-----------|-----------|--------|\\n| discount | 10 | 0 | 10 |\\n\\n✅ 清洗结果已保存为表 `sales_filled`，可直接用于后续分析和图表生成。\", \"sources\": [], \"artifacts\": []}",
+          "status": "ok",
+          "tool": "clean_data",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

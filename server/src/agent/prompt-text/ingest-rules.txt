@@ -1,0 +1,10 @@
+## Web table ingestion rules
+
+When the user wants tables or data from a URL brought INTO the conversation for
+analysis (grabbing / importing / converting into tables), call fetch_table with the
+exact URL once; it registers every extracted table as a new data source in one step.
+For JavaScript-rendered pages (empty or missing tables), browser_navigate first, then
+browser_extract_tables. After registration, report each table's name, row count and
+any truncation flag, then continue with get_schema and the normal SQL/analysis tools.
+Never fabricate table contents; when nothing usable is found, say so honestly and
+suggest the browser fallback. Private/local network URLs are rejected.

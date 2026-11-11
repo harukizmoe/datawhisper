@@ -1,0 +1,77 @@
+{
+  "coverage": {
+    "run_analysis": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "run_analysis"
+  ],
+  "description": "run_analysis K_Means with K=3 on daily numeric features.",
+  "scenario": "analysis_kmeans",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:run_analysis",
+        "end:run_analysis"
+      ],
+      "final_text": "聚类分析完成。",
+      "message": "用 K-Means 把每天的销售情况聚成三类。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "query_data",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 0
+        },
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "workspace_status",
+            "get_schema",
+            "get_table_detail",
+            "create_analysis_table",
+            "query_data",
+            "run_analysis",
+            "ask_user",
+            "load_analysis_skill",
+            "read_tool_result",
+            "search_mcp_tools"
+          ],
+          "turn_index": 1
+        }
+      ],
+      "options": {},
+      "tool_results": [
+        {
+          "arguments": {
+            "analysis_name": "K_Means",
+            "groupby_column": "region",
+            "n_deciles": 3,
+            "purpose": "按日销售特征聚类",
+            "sql": "SELECT revenue, ad_spend, visitors, region FROM sales",
+            "target_column": "revenue"
+          },
+          "content": "[TOOL_RESULT] run_analysis OK: ## K-Means 聚类分析 — K=3，特征：revenue, ad_spend, visitors ### 模型概况 | 指标 | 值 | |------|-----| | 样本数 | 200 | | 特征数 | 3 | | 计算设备 | CPU（NumPy 回退） | | 簇数 K | 3 | | 总惯性（SSE，标准化空间） | 111.6113 | | 轮廓系数 | **0.6119** | | 推荐 K（肘部法则+轮廓系数...\n{\"type\": \"tool_result\", \"ok\": true, \"error\": \"\", \"data\": \"## K-Means 聚类分析 — K=3，特征：revenue, ad_spend, visitors\\n\\n### 模型概况\\n| 指标 | 值 |\\n|------|-----|\\n| 样本数 | 200 |\\n| 特征数 | 3 |\\n| 计算设备 | CPU（NumPy 回退） |\\n| 簇数 K | 3 |\\n| 总惯性（SSE，标准化空间） | 111.6113 |\\n| 轮廓系数 | **0.6119** |\\n| 推荐 K（肘部法则+轮廓系数） | **3** |\\n\\n### 各簇摘要\\n| 簇 | 样本量 | 占比 | avg_revenue | avg_ad_spend | avg_visitors | 主标签 | 纯度% |\\n|:--:|------:|-----:|-----: | -----: | -----: | --- | ---: |\\n| **C0** | 113 | 56.5% | 1,867.326 | 361.432 | 589.646 | East | 42% |\\n| **C1** | 84 | 42.0% | 1,451.295 | 166.340 | 432.786 | East | 39% |\\n| **C2** | 3 | 1.5% | 13,962.090 | 119.453 | 392.667 | South | 33% |\\n\\n### 肘部法则 & 轮廓系数\\n| K | 惯性（SSE） | 轮廓系数 | 备注 |\\n|:--:|----------:|--------:|------|\\n| 1 | 604.0141 | nan |  |\\n| 2 | 286.6534 | 0.5811 |  |\\n| 3 | 111.6113 | 0.6119 | 当前 K = 推荐 K |\\n| 4 | 68.5853 | 0.4920 |  |\\n| 5 | 53.6424 | 0.4088 |  |\\n\\n### 核心洞察\\n- **最大簇**：C0，占 **56.5%**（113 条）\\n- **最小簇**：C2，占 1.5%（3 条）\\n- 轮廓系数 **0.6119**：簇间分离合理。\\n- C0：revenue=1867.33，ad_spend=361.43，visitors=589.65\\n- C1：revenue=1451.29，ad_spend=166.34，visitors=432.79\\n- C2：revenue=13962.09，ad_spend=119.45，visitors=392.67\\n\\n### 可视化建议\\n> 以下三张表已写入数据源，可直接用于 generate_chart：\\n\\n| 图表 | 数据源 | 字段映射 |\\n|------|--------|---------|\\n| Bar_Chart（簇大小） | analysis_result | x=cluster, y=count |\\n| Scatter_Plot（簇分布） | analysis_breakdown | x=revenue, y=ad_spend, color=cluster |\\n| Line_Chart（肘部曲线） | analysis_elbow | x=k, y=inertia |\\n| Line_Chart（轮廓系数） | analysis_elbow | x=k, y=silhouette |\\n\\n\\n---\\n### 📌 数据标签表 `cluster_labels`\\n已将聚类结果（cluster 列）回写到原始数据，生成包含所有原始字段的标签表：\\n\\n**列：** `order_date, store_id, region, category, variant, units, unit_price, discount, ...`\\n\\n可直接用于后续分析，例如：\\n```sql\\n-- 查看各簇的详细记录\\nSELECT * FROM cluster_labels WHERE cluster = 0 LIMIT 20\\n\\n-- 统计各簇某字段的均值\\nSELECT cluster, AVG(target_col) AS avg_val FROM cluster_labels GROUP BY cluster\\n```\", \"sources\": [{\"type\": \"数据查询\", \"title\": \"sales\", \"source\": \"baseline.xlsx\", \"snippet\": \"SELECT revenue, ad_spend, visitors, region FROM sales\", \"rows\": null}], \"artifacts\": [{\"type\": \"evidence_claim\", \"claim_id\": \"ec_<ID>\", \"name\": \"run_analysis evidence claim\", \"uri\": \"artifact://evidence-claim/ec_<ID>\", \"sql_hash\": \"<SHA256>\", \"result_sha256\": \"<SHA256>\", \"workspace_id\": \"\", \"session_id\": \"<SID>\"}]}",
+          "status": "ok",
+          "tool": "run_analysis",
+          "tool_call_id": "call_s0_t0_0"
+        }
+      ]
+    }
+  ]
+}

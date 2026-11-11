@@ -9,9 +9,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from compute.i18n import say
+
 ANALYSIS_ID = "AB_Test_Analysis"
-ANALYSIS_NAME = "A/B 实验分析（AB Test Analysis）"
-ANALYSIS_DESC = "比较两组单位级实验数据，输出 SRM、显著性检验、95% 置信区间与提升幅度。"
+# registry 每次调用都会重新加载模块，因此模块级 say 随请求语言取值
+ANALYSIS_NAME = say("A/B Experiment Analysis (AB Test Analysis)", "A/B 实验分析（AB Test Analysis）")
+ANALYSIS_DESC = say("Compare two groups of unit-level experiment data; outputs SRM, significance test, 95% confidence interval and lift.", "比较两组单位级实验数据，输出 SRM、显著性检验、95% 置信区间与提升幅度。")
 REQUIRED_PARAMS = ["target_column", "groupby_column"]
 OPTIONAL_PARAMS = ["analysis_options.control_group", "analysis_options.metric_type", "analysis_options.expected_allocation"]
 OUTPUT_TABLES = ["analysis_result", "analysis_breakdown", "analysis_metrics"]
@@ -72,11 +75,11 @@ def _t_975(degrees_freedom: float) -> float:
 def _groups(values: pd.Series, options: dict[str, Any]) -> tuple[str, str, str]:
     groups = sorted(values.dropna().astype(str).unique().tolist())
     if len(groups) != 2:
-        raise ValueError(f"A/B 分析要求恰好两组，当前得到 {len(groups)} 组：{', '.join(groups)}")
+        raise ValueError(say(f"A/B analysis requires exactly two groups, got {len(groups)}: {', '.join(groups)}", f"A/B 分析要求恰好两组，当前得到 {len(groups)} 组：{', '.join(groups)}"))
     control = str(options.get("control_group", "")).strip()
     if control:
         if control not in groups:
-            raise ValueError(f"对照组 '{control}' 不在分组中：{', '.join(groups)}")
+            raise ValueError(say(f"Control group '{control}' is not among the groups: {', '.join(groups)}", f"对照组 '{control}' 不在分组中：{', '.join(groups)}"))
         return control, next(item for item in groups if item != control), "specified"
     for candidate in ("control", "Control", "对照组", "对照", "A"):
         if candidate in groups:
@@ -92,12 +95,12 @@ def _srm(counts: np.ndarray, group_names: list[str], options: dict[str, Any]) ->
         try:
             weights = np.array([float(allocation[name]) for name in group_names])
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("expected_allocation 必须包含两个分组的正数权重") from exc
+            raise ValueError(say("expected_allocation must contain positive weights for both groups", "expected_allocation 必须包含两个分组的正数权重")) from exc
         if not np.isfinite(weights).all() or np.any(weights <= 0):
-            raise ValueError("expected_allocation 的权重必须为有限正数")
+            raise ValueError(say("expected_allocation weights must be finite and positive", "expected_allocation 的权重必须为有限正数"))
         expected = counts.sum() * weights / weights.sum()
     else:
-        raise ValueError("expected_allocation 必须是对象，例如 {'control': 1, 'treatment': 1}")
+        raise ValueError(say("expected_allocation must be an object, e.g. {'control': 1, 'treatment': 1}", "expected_allocation 必须是对象，例如 {'control': 1, 'treatment': 1}"))
     chi2 = float(np.sum((counts - expected) ** 2 / expected))
     return chi2, math.erfc(math.sqrt(chi2 / 2))
 
@@ -113,9 +116,9 @@ def run(
     del n_deciles
     options = analysis_options or {}
     if not isinstance(options, dict):
-        raise ValueError("analysis_options 必须是对象。")
+        raise ValueError(say("analysis_options must be an object.", "analysis_options 必须是对象。"))
     if not groupby_column or groupby_column not in df or target_column not in df:
-        raise ValueError("A/B 分析需要有效的 target_column 和 groupby_column（实验分组字段）。")
+        raise ValueError(say("A/B analysis needs valid target_column and groupby_column (the experiment group field).", "A/B 分析需要有效的 target_column 和 groupby_column（实验分组字段）。"))
 
     work = df[[groupby_column, target_column]].copy()
     input_rows = len(work)
@@ -123,7 +126,7 @@ def run(
     work[target_column] = pd.to_numeric(work[target_column], errors="coerce")
     work = work.loc[work[groupby_column].notna() & work[groupby_column].ne("")].dropna(subset=[target_column])
     if len(work) < 4:
-        raise ValueError("有效单位少于 4，无法进行可靠的 A/B 分析。")
+        raise ValueError(say("Fewer than 4 valid units; cannot run a reliable A/B analysis.", "有效单位少于 4，无法进行可靠的 A/B 分析。"))
 
     control, treatment, control_source = _groups(work[groupby_column], options)
     work[groupby_column] = work[groupby_column].astype(str)
@@ -133,17 +136,17 @@ def run(
     result.insert(1, "role", ["control", "treatment"])
     n0, n1 = result["n"].astype(int).tolist()
     if min(n0, n1) < 2:
-        raise ValueError("每个实验组至少需要 2 个有效单位。")
+        raise ValueError(say("Each experiment group needs at least 2 valid units.", "每个实验组至少需要 2 个有效单位。"))
     counts = np.array([n0, n1], dtype=float)
     srm_chi2, srm_p = _srm(counts, [control, treatment], options)
 
     values = set(work[target_column].unique().tolist())
     requested_type = str(options.get("metric_type", "auto")).strip().lower()
     if requested_type not in {"auto", "binary", "continuous"}:
-        raise ValueError("metric_type 只支持 auto、binary 或 continuous。")
+        raise ValueError(say("metric_type only supports auto, binary or continuous.", "metric_type 只支持 auto、binary 或 continuous。"))
     metric_type = "binary" if requested_type == "binary" or (requested_type == "auto" and values.issubset({0.0, 1.0})) else "continuous"
     if metric_type == "binary" and not values.issubset({0.0, 1.0}):
-        raise ValueError("二元指标只能包含 0 和 1；请先按随机化单位聚合成功条件。")
+        raise ValueError(say("A binary metric may only contain 0 and 1; aggregate the success condition per randomisation unit first.", "二元指标只能包含 0 和 1；请先按随机化单位聚合成功条件。"))
 
     mean0, mean1 = result["mean"].astype(float).tolist()
     diff = mean1 - mean0
@@ -179,16 +182,16 @@ def run(
 
     significant = p_value < 0.05 and not ci_low <= 0 <= ci_high
     verdict = (
-        "实验组在主指标上有统计证据优于对照组" if significant and diff > 0 else
-        "实验组在主指标上有统计证据低于对照组" if significant and diff < 0 else
-        "尚无足够证据证明两组主指标存在差异"
+        say("The treatment group is statistically better than control on the primary metric", "实验组在主指标上有统计证据优于对照组") if significant and diff > 0 else
+        say("The treatment group is statistically worse than control on the primary metric", "实验组在主指标上有统计证据低于对照组") if significant and diff < 0 else
+        say("Not enough evidence that the two groups differ on the primary metric", "尚无足够证据证明两组主指标存在差异")
     )
     quality = pd.DataFrame([
-        {"check": "input_rows", "value": input_rows, "status": "info", "detail": "输入应为每个随机化单位一行。"},
-        {"check": "valid_units", "value": len(work), "status": "pass", "detail": "移除缺失分组或指标后的单位数。"},
-        {"check": "srm_chi_square", "value": srm_chi2, "status": "warning" if srm_p < 0.01 else "pass", "detail": "样本比例失衡检验。"},
-        {"check": "srm_p_value", "value": srm_p, "status": "warning" if srm_p < 0.01 else "pass", "detail": "p < 0.01 时优先排查分流或日志。"},
-        {"check": "control_selection", "value": control, "status": "warning" if control_source == "alphabetical" else "pass", "detail": f"对照组选择方式：{control_source}。"},
+        {"check": "input_rows", "value": input_rows, "status": "info", "detail": say("Input should have one row per randomisation unit.", "输入应为每个随机化单位一行。")},
+        {"check": "valid_units", "value": len(work), "status": "pass", "detail": say("Units left after removing missing group or metric values.", "移除缺失分组或指标后的单位数。")},
+        {"check": "srm_chi_square", "value": srm_chi2, "status": "warning" if srm_p < 0.01 else "pass", "detail": say("Sample ratio mismatch test.", "样本比例失衡检验。")},
+        {"check": "srm_p_value", "value": srm_p, "status": "warning" if srm_p < 0.01 else "pass", "detail": say("If p < 0.01, check traffic splitting or logging first.", "p < 0.01 时优先排查分流或日志。")},
+        {"check": "control_selection", "value": control, "status": "warning" if control_source == "alphabetical" else "pass", "detail": say(f"Control group selection: {control_source}.", f"对照组选择方式：{control_source}。")},
     ])
     metrics = pd.DataFrame([
         {"metric": "metric_type", "value": metric_type}, {"metric": "control_group", "value": control},
@@ -198,13 +201,13 @@ def run(
         {"metric": "ci_95_high", "value": ci_high}, {"metric": "effect_size", "value": effect_size},
         {"metric": "verdict", "value": verdict},
     ])
-    value_label = "转化率" if metric_type == "binary" else "均值"
+    value_label = say("Conversion rate", "转化率") if metric_type == "binary" else say("Mean", "均值")
     markdown = "\n".join([
-        "## 🧪 A/B 实验分析", f"- 指标类型：**{metric_type}**；对照组：`{control}`；实验组：`{treatment}`。",
-        f"- {value_label}：对照组 **{mean0:.4%}**，实验组 **{mean1:.4%}**。" if metric_type == "binary" else f"- {value_label}：对照组 **{mean0:.4f}**，实验组 **{mean1:.4f}**。",
-        f"- 绝对提升：**{diff:.4%}**；相对提升：**{relative:.2%}**。" if metric_type == "binary" else f"- 均值差：**{diff:.4f}**；相对提升：**{relative:.2%}**。",
-        f"- p 值：**{p_value:.4g}**；95% CI：**[{ci_low:.4f}, {ci_high:.4f}]**。", f"- 结论：**{verdict}**。",
-        "- ⚠️ SRM 检查异常，先排查分流/曝光日志。" if srm_p < 0.01 else "- SRM 检查未发现显著样本比例失衡。",
-        "- 结果不替代护栏指标、长期指标、多重比较和最小业务效果评估。",
+        say("## 🧪 A/B Experiment Analysis", "## 🧪 A/B 实验分析"), say(f"- Metric type: **{metric_type}**; control: `{control}`; treatment: `{treatment}`.", f"- 指标类型：**{metric_type}**；对照组：`{control}`；实验组：`{treatment}`。"),
+        say(f"- {value_label}: control **{mean0:.4%}**, treatment **{mean1:.4%}**.", f"- {value_label}：对照组 **{mean0:.4%}**，实验组 **{mean1:.4%}**。") if metric_type == "binary" else say(f"- {value_label}: control **{mean0:.4f}**, treatment **{mean1:.4f}**.", f"- {value_label}：对照组 **{mean0:.4f}**，实验组 **{mean1:.4f}**。"),
+        say(f"- Absolute lift: **{diff:.4%}**; relative lift: **{relative:.2%}**.", f"- 绝对提升：**{diff:.4%}**；相对提升：**{relative:.2%}**。") if metric_type == "binary" else say(f"- Mean difference: **{diff:.4f}**; relative lift: **{relative:.2%}**.", f"- 均值差：**{diff:.4f}**；相对提升：**{relative:.2%}**。"),
+        say(f"- p-value: **{p_value:.4g}**; 95% CI: **[{ci_low:.4f}, {ci_high:.4f}]**.", f"- p 值：**{p_value:.4g}**；95% CI：**[{ci_low:.4f}, {ci_high:.4f}]**。"), say(f"- Conclusion: **{verdict}**.", f"- 结论：**{verdict}**。"),
+        say("- ⚠️ SRM check is abnormal; investigate traffic splitting/exposure logs first.", "- ⚠️ SRM 检查异常，先排查分流/曝光日志。") if srm_p < 0.01 else say("- SRM check found no significant sample ratio mismatch.", "- SRM 检查未发现显著样本比例失衡。"),
+        say("- Results do not replace guardrail metrics, long-term metrics, multiple-comparison control or a minimum business-effect assessment.", "- 结果不替代护栏指标、长期指标、多重比较和最小业务效果评估。"),
     ])
     return result, quality, metrics, markdown

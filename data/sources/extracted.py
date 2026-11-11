@@ -11,6 +11,8 @@ from ._utils import (
     _clean_identifier, _dedup_columns, _list_tables, _new_conn,
     _preview_table_dict, _query, _register, _table_schema_str,
 )
+from compute.i18n import say
+
 from .base import DataSource
 
 
@@ -24,7 +26,7 @@ class ExtractedTableDataSource(DataSource):
     """
 
     def __init__(self, name: str, tables: dict[str, pd.DataFrame]) -> None:
-        self.name = str(name or "网页表格").strip() or "网页表格"
+        self.name = str(name or say("Web table", "网页表格")).strip() or say("Web table", "网页表格")
         self._conn = _new_conn()
         self._tables: List[str] = []
         for raw_name, frame in tables.items():

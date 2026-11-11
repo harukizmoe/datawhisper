@@ -23,12 +23,17 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from charts.base import ChartResult
+from compute.i18n import say
 from charts.color_schemes import get_color_scheme
 
 __all__ = ["generate"]
 
-_DATA_FMT = "group列(分类) + value列(数值)"
-_DESC = "通过蜂群避让布局将个体数据点分散排列，展示分布形态和异常值。"
+def _data_fmt() -> str:
+    return say("group column (category) + value column (numeric)", "group列(分类) + value列(数值)")
+
+
+def _desc() -> str:
+    return say("Spreads individual data points with swarm-avoidance layout to show distribution shape and outliers.", "通过蜂群避让布局将个体数据点分散排列，展示分布形态和异常值。")
 
 
 def _auto_col(df: pd.DataFrame, *hints: str) -> Optional[str]:
@@ -188,8 +193,8 @@ h1{{color:#222;font-size:22px;margin-bottom:6px}}
 <h1>{title}</h1><div class="subtitle">{chart_name} | {library}</div>
 {embed}
 </div><div class="desc">
-<strong>数据格式：</strong>{data_fmt}<br>
-<strong>说明：</strong>{desc}
+<strong>{say('Data format:', '数据格式：')}</strong>{data_fmt}<br>
+<strong>{say('Description:', '说明：')}</strong>{desc}
 </div></body></html>"""
 
 
@@ -200,7 +205,7 @@ def generate(
     excel_path: str = None,
     group: str = None,
     value: str = None,
-    title: str = "蜜蜂群图",
+    title: str = None,
     **kwargs
 ) -> ChartResult:
     warnings: list = []
@@ -213,9 +218,9 @@ def generate(
                 df = pd.read_excel(excel_path)
             except Exception as e:
                 log.warning("[chart] 图表生成异常: %s", e)
-                return ChartResult(warnings=[f"读取Excel失败: {e}"])
+                return ChartResult(warnings=[say(f"Failed to read Excel: {e}", f"读取Excel失败: {e}")])
         else:
-            return ChartResult(warnings=["请提供 df 或 excel_path"])
+            return ChartResult(warnings=[say("Provide df or excel_path", "请提供 df 或 excel_path")])
 
     # 宽格式检测仅在用户未显式提供映射时启用，避免 melt 覆盖用户意图
     user_mapping = any(v is not None for v in (group, value)) or bool(mapping)
@@ -224,7 +229,7 @@ def generate(
         df = _wide_to_long(df)
         group_col = "group"
         value_col = "value"
-        warnings.append("检测到宽格式数据，已自动转换为长格式")
+        warnings.append(say("Wide-format data detected and converted to long format", "检测到宽格式数据，已自动转换为长格式"))
     else:
         # chart_selector 声明角色为 y(必填)/x：调度器不做 x→group 转换，因此
         # 这里同时接受 selector 规范 (y=数值, x=分组) 与旧别名 (value/group)。
@@ -234,23 +239,25 @@ def generate(
         group_col = group_col if group_col is not None else (mapping.get("group") if mapping.get("group") is not None else group)
 
     title = options.get("title", title)
+    if title is None:
+        title = say("Beeswarm Plot", "蜜蜂群图")
 
     _group = _auto_col(df, group_col, "x", "group", "分组", "类别", "行业", "地区")
     _value = _auto_col(df, value_col, "y", "value", "数值", "销售额", "薪资", "价格")
 
     if _value is None or _value not in df.columns:
-        warnings.append("找不到必填字段 [value]")
+        warnings.append(say("Required field [value] not found", "找不到必填字段 [value]"))
         return ChartResult(warnings=warnings)
 
     if _group is None or _group not in df.columns:
-        warnings.append("找不到必填字段 [group]")
+        warnings.append(say("Required field [group] not found", "找不到必填字段 [group]"))
         return ChartResult(warnings=warnings)
 
     plot_df = df[[_group, _value]].copy()
     plot_df = plot_df.dropna(subset=[_group, _value])
 
     if plot_df.empty:
-        return ChartResult(warnings=["有效数据为空"])
+        return ChartResult(warnings=[say("No valid data", "有效数据为空")])
 
     color_scheme_name = options.get("color_scheme", "mckinsey")
     color_scheme = get_color_scheme(color_scheme_name)
@@ -271,7 +278,7 @@ def generate(
         grp_data = grp_series.to_numpy(dtype=float)
 
         if len(grp_data) == 0:
-            warnings.append(f"分组 '{grp}' 无有效数据，已跳过")
+            warnings.append(say(f"Group '{grp}' has no valid data; skipped", f"分组 '{grp}' 无有效数据，已跳过"))
             continue
 
         offsets = _swarm_offsets(
@@ -327,7 +334,7 @@ def generate(
     )
 
     chart_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
-    html = _build_html(title, "beeswarm_plot", "plotly", _DATA_FMT, _DESC, chart_html)
+    html = _build_html(title, "beeswarm_plot", "plotly", _data_fmt(), _desc(), chart_html)
 
     meta = {
         "chart_id": "beeswarm_plot",

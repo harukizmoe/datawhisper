@@ -1,0 +1,59 @@
+{
+  "coverage": {
+    "export_excel": [
+      "ok"
+    ]
+  },
+  "covers": [
+    "export_excel"
+  ],
+  "description": "Skill 'export' proposes an Excel export; the excel_confirm fast path runs export_excel without a model call.",
+  "scenario": "export_excel",
+  "status": "recorded",
+  "steps": [
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:query_knowledge",
+        "end:query_knowledge",
+        "start:propose_excel_export",
+        "end:propose_excel_export"
+      ],
+      "final_text": "",
+      "message": "把 sales 和 stores 两张表导出成 Excel。",
+      "model_requests": [
+        {
+          "fallback": false,
+          "tool_choice": "auto",
+          "tools": [
+            "get_schema",
+            "query_data"
+          ],
+          "turn_index": 0
+        }
+      ],
+      "options": {
+        "skill": "export"
+      },
+      "tool_results": []
+    },
+    {
+      "errors": [],
+      "executed_tools": [
+        "start:export_excel"
+      ],
+      "final_text": "✅ Excel 文件已生成，共 2 张表：sales, stores。\n\n[📥 点击下载 baseline_export.xlsx](/api/export/baseline_export.xlsx?sid=<SID>)",
+      "message": "确认导出",
+      "model_requests": [],
+      "options": {
+        "excel_filename": "baseline_export",
+        "excel_tables": [
+          "sales",
+          "stores"
+        ],
+        "internal_action": "excel_confirm"
+      },
+      "tool_results": []
+    }
+  ]
+}

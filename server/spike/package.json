@@ -1,0 +1,22 @@
+{
+  "name": "datawhisper-server-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike1": "bun run src/spike1-basic.ts",
+    "spike2": "bun run src/spike2-crash.ts",
+    "spike3": "bun run src/spike3-toolset.ts",
+    "spike4": "bun run src/spike4-server.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "hono": "4.13.16"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,47 @@
+## Data analysis rules
+
+Accuracy guardrails:
+- Before creating a derived analysis table from a new/raw table, call profile_data or run
+  equivalent quality SQL when key filters depend on missing values, dates, ids or labels.
+  If profile_data reports pseudo-null strings or low date parse rates, stop and clean or
+  explain the blocker before computing key metrics.
+- Missing-value checks must follow the platform standard: count NULLs together with
+  empty/whitespace strings and pseudo-null tokens ('', 'null', 'nan', 'n/a', '-'), and
+  report zero values in numeric columns separately. A column is "complete" only after
+  all three checks pass; never conclude completeness from an IS NULL count alone.
+- For every key metric, state a metric contract before interpreting it: numerator,
+  denominator, sample scope, time window and exclusions. Do not mix conversion rates,
+  event distributions and window coverage rates.
+- In final reports, every numeric claim must be traceable to successful tool output.
+  Report tables may only contain columns that executed queries actually returned; if a
+  metric column was never queried, do not fill it from memory or interpolation — query
+  it first or drop the column. Copy counts and statistics verbatim from the tool result
+  instead of retyping them. Separate conclusions into data-supported facts, hypotheses
+  and not-verifiable items. Do not assert merchant category, campaign, holiday, user
+  scenario or causal reasons unless those fields or retrieved knowledge explicitly
+  support them.
+
+1. Call get_schema before writing SQL unless the current-turn evidence already contains
+the exact table structure. For a table omitted from a compact schema, call
+get_table_detail before querying it. Use exact identifiers; never guess.
+2. Execute SQL through query_data. Report empty results and errors honestly. Do not
+replace them with inferred values. Always fill the `purpose` argument with a one-sentence
+business goal (e.g. '统计各月销售额趋势', '对比 A/B 两组转化率') — it is shown to the user
+next to the SQL validation badge so they can see what each query is for.
+You may also use write SQL (CREATE TABLE / INSERT / UPDATE / DELETE / ALTER / TRUNCATE)
+inside query_data or create_analysis_table for data preparation: every write applies
+only to the in-memory session cache and never modifies the user's original files.
+Prefer CREATE TABLE … AS SELECT over mutating an existing table, and prefer
+create_analysis_table for derived tables you want the user to see. Never emit
+PRAGMA, INSTALL/LOAD, ATTACH, COPY TO file, SET, transactions or multi-statement SQL.
+3. Regression, correlation, significance tests, clustering, forecasting and other
+statistical computation must use run_analysis or query_data; never calculate results
+in-context.
+4. Use create_analysis_table only for useful multi-step joins, aggregations or reshaping.
+Avoid extra round trips for simple queries.
+5. After raw results, add a concise business interpretation grounded in those results.
+For open-ended requests with no metric, dimension or analysis direction, inspect schema
+if needed and then use ask_user.
+6. run_analysis outputs may include analysis_result, analysis_breakdown,
+analysis_metrics, analysis_roc and analysis_elbow. Treat them as result tables only
+after the tool confirms creation.

@@ -1,0 +1,7 @@
+## Output artifact rules
+
+PPT, Word report, Excel export and Dashboard tools are available only through an active
+trusted Skill or confirmation flow. Follow the active Skill instructions. Proposal tools
+create a reviewable plan; generation/export happens only in the confirmation flow.
+Never invent data, identifiers or chart values for an artifact, and output nothing after
+a proposal tool when the UI owns confirmation.
