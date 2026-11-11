@@ -61,10 +61,6 @@ def knowledge_scope_dir(
     if workspace_id:
         root = Path(workspace_root).resolve() if workspace_root else None
         if root is None:
-            from data.workspace import workspace_manager
-            resolved = workspace_manager.root_for_workspace(str(workspace_id))
-            root = Path(resolved).resolve() if resolved else None
-        if root is None:
             raise ValueError("Knowledge Workspace is not available")
         return root / ".zhixi" / "knowledge"
 

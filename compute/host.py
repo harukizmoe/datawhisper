@@ -10,7 +10,7 @@ Context（除注明外均可选）：::
     {"sources": [source_id, ...],   # 活动 source，按顺序（src1__、src2__、...）
      "primary": source_id,          # 默认 sources[0]
      "tables": {source_id: [table, ...]},  # SQL 分析表选择
-     "user_id": str, "workspace_id": str, "session_id": str,
+     "user_id": str, "workspace_id": str, "workspace_root": str, "session_id": str,
      "lang": "zh" | "en", "color_scheme": str,
      "chart_ids": [chart_id, ...],  # 会话图表，供 export_report 使用
      "chart_dir": str}              # 这些图表的 <chart_id>.html 所在目录
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from data.sources._utils import is_write_sql
-from data.workspace import WorkspacePathAuthorization, workspace_manager
+from data.workspace import WorkspacePathAuthorization, WorkspaceRuntime
 
 from .dashboard import dashboard_path
 from .i18n import say
@@ -115,6 +115,7 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         self.ppt_color_scheme = _opt_str(context, "color_scheme") or "mckinsey"
         self._session_id = _opt_str(context, "session_id")
         self._workspace_id = _opt_str(context, "workspace_id")
+        self._workspace_root = _opt_str(context, "workspace_root")
         self._user_id = _opt_str(context, "user_id").strip()[:200]
         self._ui_lang = "en" if context.get("lang") == "en" else "zh"
         self._knowledge_allowed_this_turn = True
@@ -146,12 +147,12 @@ class ToolHost(DataToolsMixin, ExportToolsMixin):
         return en if self._ui_lang == "en" else zh
 
     def _workspace_runtime(self):
-        if not self._workspace_id:
+        if not self._workspace_root:
             return None
-        return workspace_manager.get_by_workspace(self._workspace_id)
+        return WorkspaceRuntime(workspace_id=self._workspace_id, workdir=Path(self._workspace_root))
 
     def _workspace_path_authorization(self):
-        return sql_path_authorization(self._workspace_id)
+        return sql_path_authorization(self._workspace_id, self._workspace_root)
 
     def _run_as_job(self, fn, job_type: str, label: str = ""):
         """就地执行 mixin 的 job worker；状态字典与旧桥接层一致。"""
@@ -201,24 +202,26 @@ def active_sources(context: dict) -> tuple[list[str], str | None]:
     return sources, primary
 
 
-def sql_path_authorization(workspace_id: str) -> WorkspacePathAuthorization | None:
-    """*workspace_id* 下某次调用的 SQL 文件读取能力：挂载 Workspace 的根目录；
-    没有 Workspace 时为 None（即默认根目录）。固定但不存在的 Workspace 必须
-    失败关闭，而不是悄悄回退到全局 uploads/Information，因此它拿到的根目录为空。"""
-    authorization = workspace_manager.path_authorization(workspace_id)
-    if workspace_id and authorization is None:
+def sql_path_authorization(workspace_id: str, workspace_root: str = "") -> WorkspacePathAuthorization | None:
+    """某次调用的 SQL 文件读取能力：由 server 在请求里给出的工作区根目录推出
+    （工作目录 + artifacts + 缓存 + 元数据 + uploads/Information）；没有工作区时
+    为 None（即默认根目录）。只有 id 没有根目录必须失败关闭，而不是悄悄回退到
+    全局 uploads/Information，因此它拿到的根目录为空。"""
+    if workspace_root:
+        return WorkspaceRuntime(workspace_id=workspace_id, workdir=Path(workspace_root)).path_authorization()
+    if workspace_id:
         return WorkspacePathAuthorization(workspace_id=workspace_id, allowed_roots=(), metadata_revision=0)
-    return authorization
+    return None
 
 
-def prepare_args(name: str, args: dict, workspace_id: str) -> dict:
+def prepare_args(name: str, args: dict, workspace_id: str, workspace_root: str = "") -> dict:
     """完全按旧 agent 循环在 dispatch 之前的方式规范化并校验模型参数；被拒时
     携带旧的 ``[ARG ERROR]`` 工具文案。"""
     if name == "generate_chart":
         args = normalize_chart_call_args(args)
     elif name == "export_report":
         args = normalize_report_outline_args(args)
-    error = validate_tool_args(name, args, workspace_authorization=sql_path_authorization(workspace_id))
+    error = validate_tool_args(name, args, workspace_authorization=sql_path_authorization(workspace_id, workspace_root))
     if error:
         raise RpcError(error, data={"kind": "arg_validation", "text": f"[ARG ERROR] {error}"})
     return args
@@ -278,7 +281,7 @@ def drive(gen, rpc: MethodContext, events: list[dict]):
 def run_tool(rpc: MethodContext, registry: SourceRegistry, name: str, params: dict) -> dict:
     context, args = parse_context(params)
     sources, primary = active_sources(context)
-    args = prepare_args(name, args, _opt_str(context, "workspace_id"))
+    args = prepare_args(name, args, _opt_str(context, "workspace_id"), _opt_str(context, "workspace_root"))
     rpc.check()
     events: list[dict] = []
     with registry.lease(sources) as lease:

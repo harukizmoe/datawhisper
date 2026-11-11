@@ -9,30 +9,23 @@
     的 artifacts/。
   - 两者注册到同一个 DuckDB 连接，可跨源 JOIN。
 
-本模块只做后端骨架：
-  - WorkspaceRuntime：路径容器 + fs 鉴权方法（is_path_allowed）
-  - WorkspaceManager：按 session_id 管理 runtime 的单例
-  - 挂载/卸载/查询
-
-不涉及：
-  - DuckDB 连接级沙箱改造（A4）
-  - Python 工具层 fs 鉴权接入（A5）
-  - 前端入口（A3）
+Python 侧无状态：工作区的身份与根目录由 server 在每次请求里给出，这里只负责
+  - WorkspaceRuntime：由根目录推出的路径容器（artifacts/.baa_cache/.zhixi）、
+    注册快照读写、数据文件枚举与 SQL 读取白名单
+  - validate_workdir：根目录的黑名单校验
+不保存挂载状态、会话绑定或引用计数。
 """
 from __future__ import annotations
 
 import hashlib
 import logging
 import os
-import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import List, Optional
 
-from .system_workspace import SystemWorkspace
-from .workspace_metadata import WorkspaceMetadataStore, workspace_metadata_store
-from infrastructure.paths import content_data_path, content_data_root, resource_path, resource_root
+from infrastructure.paths import content_data_path, resource_path
 from compute.i18n import say
 
 log = logging.getLogger(__name__)
@@ -155,6 +148,11 @@ class WorkspacePathAuthorization:
     metadata_revision: int
 
 
+def _default_extra_roots() -> List[Path]:
+    """SQL 文件读取在工作区之外始终允许的项目级根目录。"""
+    return [content_data_path("uploads"), resource_path("Information")]
+
+
 @dataclass
 class WorkspaceRuntime:
     """单个工作目录的资源容器。
@@ -162,21 +160,14 @@ class WorkspaceRuntime:
     A5+ 起：持持久化 DuckDB 路径 + 注册快照路径，实现"关闭后保留、下次秒开"。
     连接本身仍在 DataSource 层管理，Runtime 只提供路径和注册快照读写。
     """
-    workspace_id: str                    # 来自 .zhixi/workspace.json 的稳定 UUID
-    workdir: Path                        # 挂载的工作目录（resolve 后的绝对路径）
-    permission: str = "read_only"        # read_only | read_write
-    name: str = ""
-    schema_version: int = 1
+    workspace_id: str                    # 稳定的工作区 id（由 server 分配，Python 不持有）
+    workdir: Path                        # 工作目录（resolve 后的绝对路径）
     metadata_revision: int = 1
-    state: str = "ready"
-    session_ref_count: int = 0
-    job_ref_count: int = 0
     artifacts_dir: Path = field(init=False)   # 产出物目录（workdir/artifacts）
     cache_dir: Path = field(init=False)       # Parquet 缓存目录（workdir/.baa_cache）
     meta_dir: Path = field(init=False)        # 元数据目录（workdir/.zhixi）—— 持久化 DB + registry
     db_path: Path = field(init=False)         # 持久化 DuckDB 文件（meta_dir/workspace.duckdb）
     registry_path: Path = field(init=False)   # 文件注册快照（meta_dir/registry.json）
-    mounted_at: float = field(default_factory=lambda: __import__("time").time())
 
     # DuckDB only allows one writer for a persistent workspace database at a
     # time.  B2 workers take this lock before opening their own read-write
@@ -187,8 +178,8 @@ class WorkspaceRuntime:
         compare=False,
     )
 
-    # 允许读取的额外根目录（uploads/knowledge 等，由 manager 注入）
-    extra_roots: List[Path] = field(default_factory=list)
+    # 允许读取的额外根目录（uploads/Information，项目级）
+    extra_roots: List[Path] = field(default_factory=lambda: _default_extra_roots())
 
     def __post_init__(self):
         # artifacts 和 cache 在工作目录下创建
@@ -200,92 +191,6 @@ class WorkspaceRuntime:
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.meta_dir.mkdir(parents=True, exist_ok=True)
-
-    @property
-    def ref_count(self) -> int:
-        return self.session_ref_count + self.job_ref_count
-
-    # ── fs 鉴权 ────────────────────────────────────────────────────────────
-
-    def _allowed_roots(self) -> List[Path]:
-        """所有允许的根目录列表（工作目录 + 额外根）。"""
-        return [self.workdir] + list(self.extra_roots)
-
-    def is_path_allowed(self, path: Path, *, write: bool = False) -> bool:
-        """检查路径是否允许读/写。
-
-        规则：
-          1. resolve 后必须在某个允许根目录下（白名单）
-          2. resolve 后不能命中始终黑名单（.env/.ssh/.git/系统目录等）
-          3. write=True 时，路径必须在 artifacts_dir 或 cache_dir 下
-             （工作目录本身只读，产出物只能写 artifacts/）
-        """
-        try:
-            resolved = path.expanduser().resolve()
-        except (OSError, RuntimeError):
-            return False
-
-        # 始终黑名单
-        if _is_blocked_path(resolved):
-            return False
-
-        # 白名单：必须在某个根目录下
-        in_allowed_root = False
-        for root in self._allowed_roots():
-            try:
-                resolved.relative_to(root)
-                in_allowed_root = True
-                break
-            except ValueError:
-                continue
-        if not in_allowed_root:
-            return False
-
-        if write and self.permission != "read_write":
-            return False
-
-        # 写权限：只能写 artifacts_dir / cache_dir / meta_dir
-        if write:
-            for writable in (self.artifacts_dir, self.cache_dir, self.meta_dir):
-                try:
-                    resolved.relative_to(writable)
-                    return True
-                except ValueError:
-                    continue
-            return False
-
-        return True
-
-    def resolve_tool_path(self, path_value: str, *, write: bool = False) -> Path:
-        """Resolve a path for interactive workspace tools.
-
-        Unlike export/data writers, explicit workspace file tools may modify
-        ordinary files anywhere under the mounted workdir. They still cannot
-        cross the workdir boundary or touch internal/sensitive paths.
-        """
-        if not isinstance(path_value, str) or not path_value.strip():
-            raise ValueError("path is required")
-        if write and self.permission != "read_write":
-            raise PermissionError("workspace is mounted read-only")
-        raw = Path(path_value.strip())
-        candidate = raw if raw.is_absolute() else self.workdir / raw
-        try:
-            resolved = candidate.expanduser().resolve(strict=False)
-            resolved.relative_to(self.workdir)
-        except (OSError, RuntimeError, ValueError) as exc:
-            raise ValueError("path must stay inside the mounted workspace") from exc
-        if _is_blocked_path(resolved):
-            raise ValueError("path is blocked by workspace security policy")
-        # Runtime metadata/cache are implementation details, not user files.
-        for internal in (self.meta_dir, self.cache_dir):
-            try:
-                resolved.relative_to(internal)
-            except ValueError:
-                continue
-            raise ValueError("internal workspace metadata cannot be accessed")
-        if write and resolved == self.workdir:
-            raise ValueError("workspace root cannot be overwritten")
-        return resolved
 
     # ── 目录浏览（A3：让 Agent 看见工作目录内容）──────────────────────────
 
@@ -411,392 +316,3 @@ class WorkspaceRuntime:
             return h.hexdigest()
         except OSError:
             return ""
-
-    def to_dict(self) -> dict:
-        """序列化给前端（A3 用）。"""
-        return {
-            "workspace_id": self.workspace_id,
-            "workdir": str(self.workdir),
-            "permission": self.permission,
-            "name": self.name,
-            "schema_version": self.schema_version,
-            "metadata_revision": self.metadata_revision,
-            "state": self.state,
-            "ref_count": self.ref_count,
-            "session_ref_count": self.session_ref_count,
-            "job_ref_count": self.job_ref_count,
-            "artifacts_dir": str(self.artifacts_dir),
-            "mounted_at": self.mounted_at,
-            "extra_roots": [str(r) for r in self.extra_roots],
-        }
-
-
-# ── WorkspaceManager ──────────────────────────────────────────────────────
-
-class WorkspaceManager:
-    """Manage shared runtimes and session-to-workspace bindings.
-
-    C1 keeps the public API session-oriented for compatibility, while runtime
-    ownership is keyed by the stable workspace UUID. Multiple sessions that
-    mount the same directory therefore share one runtime and one database
-    lock. Job leases are intentionally deferred to C3.
-    """
-
-    def __init__(
-        self,
-        metadata_store: Optional[WorkspaceMetadataStore] = None,
-        *,
-        remember_mounts_by_default: bool = True,
-    ):
-        self._runtimes_by_workspace: Dict[str, WorkspaceRuntime] = {}
-        self._path_authorizations: Dict[
-            str, tuple[int, WorkspacePathAuthorization]
-        ] = {}
-        self._session_bindings: Dict[str, str] = {}
-        self._session_permissions: Dict[str, str] = {}
-        self._lock = threading.RLock()
-        self.metadata_store = metadata_store or workspace_metadata_store
-        self.remember_mounts_by_default = bool(remember_mounts_by_default)
-        # 默认额外根目录（uploads/knowledge，项目级）
-        self._default_extra_roots: List[Path] = [
-            content_data_path("uploads"),
-            resource_path("Information"),   # knowledge 文件
-        ]
-        # Always-available logical roots. These paths are not moved and are
-        # exposed through workspace:// aliases with per-root policies.
-        self.system_workspace = SystemWorkspace(
-            resource_root(),
-            data_root_path=content_data_root(),
-            resource_root_path=resource_root(),
-        )
-
-    def system_status(self) -> dict:
-        """Return a bounded metadata summary for the logical system Workspace."""
-        return self.system_workspace.summary()
-
-    def mount(
-        self,
-        session_id: str,
-        workdir_path: str,
-        permission: str = "read_only",
-        *,
-        remember: Optional[bool] = None,
-    ) -> tuple[bool, str, Optional[WorkspaceRuntime]]:
-        """为 session 挂载工作目录。
-
-        返回 (ok, message, runtime)。
-        如果该 session 已挂载，先卸载旧的再挂载新的。
-        """
-        ok, msg, resolved = validate_workdir(workdir_path)
-        if not ok:
-            return False, msg, None
-        if permission not in {"read_only", "read_write"}:
-            return False, say("Invalid workspace permission.", "工作目录权限无效。"), None
-
-        try:
-            metadata = self.metadata_store.open_or_create(
-                resolved,
-                permission,
-                remember=(
-                    self.remember_mounts_by_default
-                    if remember is None else bool(remember)
-                ),
-            )
-        except (OSError, RuntimeError) as e:
-            return False, say(f"Unable to mount workspace: {e}", f"无法挂载工作目录：{e}"), None
-
-        with self._lock:
-            previous_id = self._session_bindings.get(session_id)
-            if previous_id and previous_id != metadata.workspace_id:
-                self._unbind_locked(session_id)
-
-            runtime = self._runtimes_by_workspace.get(metadata.workspace_id)
-            if runtime is not None and runtime.workdir != resolved:
-                return (
-                    False,
-                    say("This workspace is still in use at another path. Unmount the existing session before mounting the moved directory.", "该工作区仍在其他路径使用中，请先卸载现有会话后再挂载移动后的目录。"),
-                    None,
-                )
-
-            if runtime is None:
-                try:
-                    runtime = WorkspaceRuntime(
-                        workspace_id=metadata.workspace_id,
-                        workdir=resolved,
-                        permission=permission,
-                        name=metadata.name,
-                        schema_version=metadata.schema_version,
-                        metadata_revision=metadata.metadata_revision,
-                        extra_roots=list(self._default_extra_roots),
-                    )
-                except OSError as e:
-                    return False, say(f"Unable to mount workspace: {e}", f"无法挂载工作目录：{e}"), None
-                self._runtimes_by_workspace[metadata.workspace_id] = runtime
-
-            is_new_binding = self._session_bindings.get(session_id) != metadata.workspace_id
-            self._session_bindings[session_id] = metadata.workspace_id
-            self._session_permissions[session_id] = permission
-            if is_new_binding:
-                runtime.session_ref_count += 1
-            self._recompute_permission_locked(metadata.workspace_id)
-            runtime.state = "ready"
-
-        log.info(
-            "[workspace] mounted session=%s workspace=%s refs=%d workdir=%s",
-            session_id, runtime.workspace_id, runtime.ref_count, resolved,
-        )
-        return True, "", runtime
-
-    def _recompute_permission_locked(self, workspace_id: str) -> None:
-        runtime = self._runtimes_by_workspace.get(workspace_id)
-        if runtime is None:
-            return
-        permissions = [
-            self._session_permissions[sid]
-            for sid, wid in self._session_bindings.items()
-            if wid == workspace_id and sid in self._session_permissions
-        ]
-        if permissions:
-            runtime.permission = (
-                "read_write"
-                if all(value == "read_write" for value in permissions)
-                else "read_only"
-            )
-
-    def _maybe_close_locked(self, workspace_id: str, runtime: WorkspaceRuntime) -> None:
-        if runtime.ref_count == 0:
-            runtime.state = "closed"
-            self._runtimes_by_workspace.pop(workspace_id, None)
-            self._path_authorizations.pop(workspace_id, None)
-
-    def _unbind_locked(self, session_id: str) -> Optional[WorkspaceRuntime]:
-        workspace_id = self._session_bindings.pop(session_id, None)
-        self._session_permissions.pop(session_id, None)
-        if workspace_id is None:
-            return None
-        runtime = self._runtimes_by_workspace.get(workspace_id)
-        if runtime is None:
-            return None
-        runtime.session_ref_count = max(0, runtime.session_ref_count - 1)
-        if runtime.session_ref_count:
-            self._recompute_permission_locked(workspace_id)
-        self._maybe_close_locked(workspace_id, runtime)
-        return runtime
-
-    def acquire_job_for_session(
-        self, session_id: str,
-    ) -> tuple[Optional[str], Optional[WorkspaceRuntime]]:
-        """Atomically snapshot a session binding and acquire a Job lease."""
-        with self._lock:
-            workspace_id = self._session_bindings.get(session_id)
-            if not workspace_id:
-                return None, None
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is None:
-                return workspace_id, None
-            runtime.job_ref_count += 1
-            return workspace_id, runtime
-
-    def acquire_job(self, workspace_id: str) -> Optional[WorkspaceRuntime]:
-        """Acquire an additional Job lease for an already-bound workspace."""
-        if not workspace_id:
-            return None
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is None:
-                return None
-            runtime.job_ref_count += 1
-            return runtime
-
-    def release_job(self, workspace_id: str) -> bool:
-        if not workspace_id:
-            return False
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is None or runtime.job_ref_count <= 0:
-                return False
-            runtime.job_ref_count -= 1
-            self._maybe_close_locked(workspace_id, runtime)
-            return True
-
-    def unmount(self, session_id: str) -> bool:
-        """卸载 session 的工作目录。返回是否曾挂载。"""
-        with self._lock:
-            runtime = self._unbind_locked(session_id)
-        if runtime:
-            log.info(
-                "[workspace] unmounted session=%s workspace=%s refs=%d",
-                session_id, runtime.workspace_id, runtime.ref_count,
-            )
-            return True
-        return False
-
-    def get(self, session_id: str) -> Optional[WorkspaceRuntime]:
-        """获取 session 的 runtime，未挂载返回 None。"""
-        with self._lock:
-            workspace_id = self._session_bindings.get(session_id)
-            return self._runtimes_by_workspace.get(workspace_id) if workspace_id else None
-
-    @staticmethod
-    def _workflow_session_workspace_id(session_id: str) -> str:
-        """Stable, non-user-workdir identity for an unmounted Workflow session."""
-        digest = hashlib.sha256(str(session_id).encode("utf-8")).hexdigest()[:24]
-        return f"workflow-session-{digest}"
-
-    def workflow_workspace_id_for_session(self, session_id: str) -> str:
-        """Return the mounted workspace identity or the Workflow-only fallback."""
-        with self._lock:
-            mounted = self._session_bindings.get(session_id)
-        return mounted or self._workflow_session_workspace_id(session_id)
-
-    def workflow_runtime_for_session(self, session_id: str) -> WorkspaceRuntime:
-        """Resolve a usable Workflow runtime even when no user folder is mounted.
-
-        The fallback is deliberately not added to ``_session_bindings``: the UI
-        must continue to report that no user workspace is mounted, and file
-        tools must not gain access to an arbitrary user directory. Its only
-        writable surface is a session-isolated application-data directory.
-        """
-        mounted = self.get(session_id)
-        if mounted is not None:
-            return mounted
-        workspace_id = self._workflow_session_workspace_id(session_id)
-        with self._lock:
-            existing = self._runtimes_by_workspace.get(workspace_id)
-            if existing is not None:
-                return existing
-            workdir = content_data_path("outputs", "workflow_sessions", workspace_id)
-            runtime = WorkspaceRuntime(
-                workspace_id=workspace_id,
-                workdir=workdir,
-                permission="read_write",
-                name="Workflow session workspace",
-                extra_roots=list(self._default_extra_roots),
-            )
-            self._runtimes_by_workspace[workspace_id] = runtime
-            return runtime
-
-    def release_workflow_session(self, session_id: str) -> None:
-        """Release only the in-memory fallback; persisted Workflow data remains."""
-        workspace_id = self._workflow_session_workspace_id(session_id)
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is not None:
-                runtime.state = "closed"
-                self._runtimes_by_workspace.pop(workspace_id, None)
-                self._path_authorizations.pop(workspace_id, None)
-
-    def get_by_workspace(self, workspace_id: str) -> Optional[WorkspaceRuntime]:
-        """Return the shared runtime by stable identity (C3 dispatch hook)."""
-        with self._lock:
-            return self._runtimes_by_workspace.get(workspace_id)
-
-    def path_authorization(
-        self, workspace_id: str,
-    ) -> Optional[WorkspacePathAuthorization]:
-        """Return a cached path capability keyed by stable workspace_id."""
-        if not workspace_id:
-            return None
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is None:
-                self._path_authorizations.pop(workspace_id, None)
-                return None
-            cached = self._path_authorizations.get(workspace_id)
-            if cached is not None and cached[0] == id(runtime):
-                return cached[1]
-            authorization = runtime.path_authorization()
-            self._path_authorizations[workspace_id] = (id(runtime), authorization)
-            return authorization
-
-    def workspace_id_for_session(self, session_id: str) -> Optional[str]:
-        with self._lock:
-            return self._session_bindings.get(session_id)
-
-    def root_for_workspace(self, workspace_id: str) -> Optional[Path]:
-        """Locate an active or known Workspace root without mounting it."""
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is not None:
-                return runtime.workdir
-        metadata = self.metadata_store.find(workspace_id)
-        if metadata is None:
-            return None
-        root = Path(metadata.root_path)
-        return root.resolve() if root.is_dir() else None
-
-    def list_known(self, session_id: str = "") -> list[dict]:
-        """Return known Workspaces enriched with current Runtime/Session state."""
-        current_id = self.workspace_id_for_session(session_id) if session_id else None
-        records = self.metadata_store.list_known()
-        with self._lock:
-            for record in records:
-                workspace_id = str(record.get("workspace_id") or "")
-                runtime = self._runtimes_by_workspace.get(workspace_id)
-                record["current"] = workspace_id == current_id
-                record["active_lease_count"] = runtime.job_ref_count if runtime else 0
-                record["active_job_count"] = 0
-                record["connected_session_count"] = (
-                    runtime.session_ref_count if runtime else 0
-                )
-                if runtime is not None:
-                    record["effective_permission"] = runtime.permission
-        return records
-
-    def rename(self, workspace_id: str, name: str):
-        """Rename Workspace display metadata and refresh any live Runtime."""
-        metadata = self.metadata_store.rename(workspace_id, name)
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is not None:
-                runtime.name = metadata.name
-                runtime.metadata_revision = metadata.metadata_revision
-                self._path_authorizations.pop(workspace_id, None)
-        return metadata
-
-    def forget(self, workspace_id: str) -> tuple[bool, str, Optional[dict]]:
-        """Remove a discovery record only when no Session or Job still owns it."""
-        with self._lock:
-            runtime = self._runtimes_by_workspace.get(workspace_id)
-            if runtime is not None and runtime.session_ref_count:
-                return False, say("The workspace still has connected sessions. Unmount it before removing the record.", "工作目录仍有会话连接，请先卸载后再移除记录。"), None
-            if runtime is not None and runtime.job_ref_count:
-                return False, say("The workspace still has running tasks. Wait for them to finish or cancel them before removing the record.", "工作目录仍有任务执行，请等待完成或取消任务后再移除记录。"), None
-            entry = self.metadata_store.forget(workspace_id)
-            if entry is None:
-                return False, say("The workspace is not in the discovery list.", "工作目录不在发现列表中。"), None
-            self._path_authorizations.pop(workspace_id, None)
-            return True, "", entry
-
-    def update_permission(self, session_id: str, permission: str) -> tuple[bool, str, Optional[WorkspaceRuntime]]:
-        if permission not in {"read_only", "read_write"}:
-            return False, say("Invalid workspace permission.", "工作目录权限无效。"), None
-        with self._lock:
-            workspace_id = self._session_bindings.get(session_id)
-            runtime = self._runtimes_by_workspace.get(workspace_id) if workspace_id else None
-            if runtime is None:
-                return False, say("No workspace is mounted.", "未挂载工作目录。"), None
-            self._session_permissions[session_id] = permission
-            self._recompute_permission_locked(workspace_id)
-            return True, "", runtime
-
-    def is_mounted(self, session_id: str) -> bool:
-        with self._lock:
-            return session_id in self._session_bindings
-
-    def status(self, session_id: str) -> dict:
-        """返回挂载状态（给前端用）。"""
-        runtime = self.get(session_id)
-        if runtime:
-            with self._lock:
-                requested = self._session_permissions.get(session_id, runtime.permission)
-            return {
-                "mounted": True,
-                **runtime.to_dict(),
-                "requested_permission": requested,
-            }
-        return {"mounted": False}
-
-
-# 模块级单例（由 api/state.py 导入）
-workspace_manager = WorkspaceManager(remember_mounts_by_default=True)
