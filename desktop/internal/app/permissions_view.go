@@ -36,19 +36,21 @@ func (a *app) permissionCards(c *ui.Context) {
 	}
 }
 
-// permissionCard 是一次待审批的改动：一句话说明、命令或内容的开头，以及放行/拒绝的按钮。
+// permissionCard 是一次待审批的改动：标题行（说明加工具名徽标）、一句话说明、命令或内容的开头，以及放行/拒绝的按钮。
+// 放行的按钮靠左、拒绝靠右隔开，免得顺手点错；预览用等宽字体并限高，长内容不会把输入框顶出屏幕。
 func (a *app) permissionCard(c *ui.Context, request service.PermissionRequest) {
 	t := c.Theme()
 	tok := a.tokens().Tok
 	busy := a.perm.busy[request.RequestID]
-	ui.Column(c).Padding(14, 16).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(t.Warning.Alpha(0.6)).Gap(8).Children(func() {
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icons.Info).TextColor(t.Warning)
-			ui.Text(c, a.tr("perm.title")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+	ui.Column(c).Padding(14, 16).Radius(radiusCard).Background(tok.Card).BorderWidth(1).BorderColor(t.Warning.Alpha(0.4)).Gap(10).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icons.Tool).TextColor(t.Warning)
+			ui.Text(c, a.tr("perm.title")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Grow(1).MinWidth(0).SingleLine()
+			ui.Badge(c, request.Tool)
 		})
 		ui.Text(c, request.Summary).Bold().Selectable()
 		if request.Detail != "" {
-			ui.Text(c, request.Detail).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable().Padding(8, 10).Radius(8).Background(t.Surface)
+			a.buffer(ui.Text(c, request.Detail)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable().Padding(8, 10).Radius(8).Background(t.Surface).MaxHeight(132).Clip()
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			if ui.PrimaryButton(c, a.tr("perm.allow")).Disabled(busy).Tooltip(a.tr("perm.allowTip")).Shrink(0).Clicked() {
@@ -59,11 +61,12 @@ func (a *app) permissionCard(c *ui.Context, request service.PermissionRequest) {
 					a.respondPermission(request.RequestID, service.ReplyAllowChat)
 				}
 			}
-			if ui.Button(c, a.tr("perm.deny")).Disabled(busy).Tooltip(a.tr("perm.denyTip")).Shrink(0).Clicked() {
-				a.respondPermission(request.RequestID, service.ReplyDeny)
-			}
 			if busy {
 				ui.Spinner(c)
+			}
+			ui.Spacer(c)
+			if ui.Button(c, a.tr("perm.deny")).Disabled(busy).Tooltip(a.tr("perm.denyTip")).Shrink(0).Clicked() {
+				a.respondPermission(request.RequestID, service.ReplyDeny)
 			}
 		})
 	})

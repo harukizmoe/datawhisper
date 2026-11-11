@@ -249,7 +249,7 @@ def workspace_sync(ctx: MethodContext, registry: SourceRegistry, params: dict) -
     if not ok:
         raise RpcError(message, INVALID_PARAMS, data={"kind": "invalid_workdir"})
     runtime = WorkspaceRuntime(workspace_id=workspace_id, workdir=workdir)
-    name = str_param(params, "name", required=False) or f"📁 {workdir.name}"
+    name = str_param(params, "name", required=False) or workdir.name
     descriptor = {"kind": "workspace_persistent", "db_path": str(runtime.db_path), "name": name}
 
     def run_job(_job_type: str, _label: str, worker):

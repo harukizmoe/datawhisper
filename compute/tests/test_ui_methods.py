@@ -427,7 +427,7 @@ class WorkspaceSyncTest(UiTestBase):
         self.assertIn("result", resp, resp.get("error"))
         first = resp["result"]
         db_path = workdir.resolve() / ".zhixi" / "workspace.duckdb"
-        self.assertEqual(first["descriptor"], {"kind": "workspace_persistent", "db_path": str(db_path), "name": "📁 项目"})
+        self.assertEqual(first["descriptor"], {"kind": "workspace_persistent", "db_path": str(db_path), "name": "项目"})
         self.assertEqual({a["source_name"]: a["tables"] for a in first["added"]}, {
             "baseline.xlsx": ["sales", "stores"], "orders.csv": ["orders"], "shops.csv": ["shops"]})
         self.assertEqual((first["errors"], first["reused"]), ([], 0))

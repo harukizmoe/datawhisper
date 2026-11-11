@@ -93,7 +93,7 @@ func (a *app) sidebar(c *ui.Context) {
 		if ui.Sidebar(c, &a.nav, func() {
 			// 工作区的会话单独成组，排在时间分组之前（同一批会话不会再出现在「今天」里）。
 			for _, g := range workspaces {
-				ui.SidebarSection(c, g.label, nil, func() {
+				ui.SidebarSection(c, g.label, a.groupOpen(g.workspaceID), func() {
 					for _, session := range g.sessions {
 						a.sessionItem(c, session)
 					}
@@ -229,8 +229,10 @@ func (a *app) island(e ui.Element) ui.Element {
 
 // sessionGroup 是侧栏里的一组会话。
 type sessionGroup struct {
-	label    string // 已翻译的组名
-	sessions []service.Session
+	label string // 已翻译的组名
+	// workspaceID 非空表示这是某个工作区的分组（可折叠）；时间分组为空。
+	workspaceID string
+	sessions    []service.Session
 }
 
 // sessionGroups 把普通聊天按「置顶 / 今天 / 昨天 / 7 天内 / 更早」分组（服务端已按更新时间倒序），归档的与

@@ -18,7 +18,9 @@ type workspaceIndex struct {
 	// list 是全部工作区记录；scopes 把对话映射到工作区（普通聊天不出现）。
 	list   []service.Workspace
 	scopes map[int]string
-	err    string
+	// open 记着每个工作区分组在侧栏里是展开还是折叠（本次运行内）；没出现过的默认展开。
+	open map[string]*bool
+	err  string
 }
 
 // workspaceDialog 是「New workspace」对话框的状态。
@@ -58,6 +60,20 @@ func (a *app) workspaceName(workspaceID string) string {
 		return record.Name
 	}
 	return workspaceID
+}
+
+// groupOpen 返回工作区分组的展开状态指针，交给 SidebarSection 直接读写。
+func (a *app) groupOpen(workspaceID string) *bool {
+	if a.ws.open == nil {
+		a.ws.open = map[string]*bool{}
+	}
+	open, ok := a.ws.open[workspaceID]
+	if !ok {
+		open = new(bool)
+		*open = true
+		a.ws.open[workspaceID] = open
+	}
+	return open
 }
 
 // scopeOf 返回对话所属的工作区 id；普通聊天返回空串。
@@ -216,7 +232,7 @@ func (a *app) workspaceGroups(now time.Time) []sessionGroup {
 			return
 		}
 		seen[workspaceID] = true
-		out = append(out, sessionGroup{label: "📁 " + a.workspaceName(workspaceID), sessions: sessions})
+		out = append(out, sessionGroup{label: a.workspaceName(workspaceID), workspaceID: workspaceID, sessions: sessions})
 	}
 	for i := range a.ws.list {
 		appendGroup(a.ws.list[i].WorkspaceID)

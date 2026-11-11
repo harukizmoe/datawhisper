@@ -542,13 +542,11 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
 
   // ── 工作区 ────────────────────────────────────────────────────────────────
 
-  const workspaceSourceName = (name: string): string => `📁 ${name}`;
-
   /** 共享来源的描述符：库文件固定在 `<目录>/.zhixi/workspace.duckdb`，所以随时可以重建。 */
   const workspaceDescriptor = (record: WorkspaceRecord): SourceDescriptor => ({
     kind: "workspace_persistent",
     db_path: join(record.workdir, ".zhixi", "workspace.duckdb"),
-    name: workspaceSourceName(record.name),
+    name: record.name,
   });
 
   type WorkspaceSync = {
@@ -586,7 +584,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
     const syncParams: Record<string, unknown> = {
       workspace_id: record.workspaceId,
       workdir: record.workdir,
-      name: workspaceSourceName(record.name),
+      name: record.name,
     };
     // 已打开的持久化连接直接作为导入目标；否则让 compute 只建库，随后再 open。
     if (alreadyOpen) syncParams.source_id = sourceId;
@@ -596,7 +594,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
       throw appReason(say("Workspace sync returned no data source descriptor", "工作区同步没有返回数据源描述符"), "invalid_descriptor");
     }
     const opened = alreadyOpen
-      ? { name: workspaceSourceName(record.name), tables: synced.tables ?? [] }
+      ? { name: record.name, tables: synced.tables ?? [] }
       : await openCompute(sourceId, descriptor);
     if (!alreadyOpen) openIds.add(sourceId);
     const next: WorkspaceRecord = { ...record, sourceId, lastSyncedAt: iso() };
@@ -632,7 +630,7 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
   const workspaceSourceRecord = (record: WorkspaceRecord, tables: string[], existing?: StoredSource): StoredSource => ({
     id: record.sourceId,
     kind: "workspace_persistent",
-    name: workspaceSourceName(record.name),
+    name: record.name,
     active: true,
     descriptor: workspaceDescriptor(record),
     tables,
@@ -1348,9 +1346,9 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
         await state.update(conversationIdParam(params), (draft) => {
           const source = draft.sources.find((item) => item.id === next.sourceId);
           if (source === undefined) return;
-          source.name = workspaceSourceName(next.name);
+          source.name = next.name;
           // 重开时 compute 用 descriptor 的 name；保持与界面显示名一致。
-          source.descriptor = { ...source.descriptor, name: workspaceSourceName(next.name) };
+          source.descriptor = { ...source.descriptor, name: next.name };
         });
       }
       const current = await currentWorkspaceId(params);

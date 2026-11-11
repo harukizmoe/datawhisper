@@ -559,7 +559,7 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 				continue
 			}
 			f.current = moved
-			f.sources = append(f.sources, service.Source{ID: moved.SourceID, Name: "📁 " + moved.Name, Kind: "workspace_persistent", Active: true, Open: true, Tables: []string{"sales"}})
+			f.sources = append(f.sources, service.Source{ID: moved.SourceID, Name: moved.Name, Kind: "workspace_persistent", Active: true, Open: true, Tables: []string{"sales"}})
 			list := snapshotLocked()
 			f.mu.Unlock()
 			respond(req.ID, map[string]any{"ok": true, "workspace": moved, "sources": list})
@@ -1428,7 +1428,7 @@ func TestSidebarGroupsChatsByWorkspace(t *testing.T) {
 	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"📁 sales", "in the workspace", "plain chat", "Today"}, nil)
+	expectTexts(t, tt, []string{"sales", "in the workspace", "plain chat", "Today"}, nil)
 }
 
 func TestNewChatGoesIntoTheChosenWorkspace(t *testing.T) {
@@ -1501,5 +1501,28 @@ func TestHomeScreenGroupsWorkspaceChatsWithoutAnOpenConversation(t *testing.T) {
 	if a.ws.err != "" {
 		t.Errorf("workspace index error: %s", a.ws.err)
 	}
-	expectTexts(t, tt, []string{"📁 sales", "in the workspace", "plain chat"}, nil)
+	expectTexts(t, tt, []string{"sales", "in the workspace", "plain chat"}, nil)
+}
+
+func TestWorkspaceGroupFoldsAndUnfolds(t *testing.T) {
+	f := newSourceFake(t)
+	seedWorkspaces(f)
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"sales", "in the workspace"}, nil)
+
+	// 点分组标题折叠：组里的会话收起，普通聊天不受影响。
+	if err := tt.Click("sales"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"sales", "plain chat"}, []string{"in the workspace"})
+
+	if err := tt.Click("sales"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"in the workspace"}, nil)
 }
