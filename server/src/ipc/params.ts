@@ -15,6 +15,8 @@ export type ParamRule = {
   readonly type: "string" | "integer" | "boolean" | "array" | "object";
   /** 覆盖默认错误文案；需要与旧实现逐字一致时用。 */
   readonly message?: string;
+  /** 缺省时的文案（旧实现在「没传」与「传错」上常常给不同句子）。 */
+  readonly missingMessage?: string;
   /** 只对字符串生效：整体必须匹配（不是「包含」）。 */
   readonly pattern?: RegExp;
   /** 只对字符串生效：最短长度。 */
@@ -37,25 +39,31 @@ const TYPE_LABELS: Record<ParamRule["type"], string> = {
   object: "an object",
 };
 
-function matches(rule: ParamRule, value: unknown): boolean {
+/** 校验一个值；不合法时返回要报的文案，合法时返回 undefined。 */
+function failure(rule: ParamRule, value: unknown, key: string): string | undefined {
+  const message = rule.message ?? `'${key}' must be ${TYPE_LABELS[rule.type]}`;
   switch (rule.type) {
     case "string":
-      if (typeof value !== "string") return false;
-      if (rule.pattern !== undefined && !rule.pattern.test(value)) return false;
-      if (rule.minLength !== undefined && value.length < rule.minLength) return false;
-      return true;
+      if (typeof value !== "string") return message;
+      if (rule.pattern !== undefined && !rule.pattern.test(value)) return message;
+      if (rule.minLength !== undefined && value.length < rule.minLength) return message;
+      return undefined;
     case "integer":
-      return typeof value === "number" && Number.isInteger(value);
+      return typeof value === "number" && Number.isInteger(value) ? undefined : message;
     case "boolean":
-      return typeof value === "boolean";
-    case "array":
-      if (!Array.isArray(value)) return false;
-      if (rule.minItems !== undefined && value.length < rule.minItems) return false;
-      if (rule.maxItems !== undefined && value.length > rule.maxItems) return false;
-      if (rule.items !== undefined) return value.every((item) => matches(rule.items as ParamRule, item));
-      return true;
+      return typeof value === "boolean" ? undefined : message;
+    case "array": {
+      if (!Array.isArray(value)) return message;
+      if (rule.minItems !== undefined && value.length < rule.minItems) return message;
+      if (rule.maxItems !== undefined && value.length > rule.maxItems) return message;
+      for (const item of value) {
+        const inner = rule.items === undefined ? undefined : failure(rule.items, item, key);
+        if (inner !== undefined) return inner;
+      }
+      return undefined;
+    }
     case "object":
-      return typeof value === "object" && value !== null && !Array.isArray(value);
+      return typeof value === "object" && value !== null && !Array.isArray(value) ? undefined : message;
   }
 }
 
@@ -65,11 +73,17 @@ export function checkParams(params: MethodParams, rules: ParamRules): void {
     const value = params[key];
     if (value === undefined) {
       if (rule.optional === true) continue;
-      throw invalidParams(rule.message ?? `'${key}' must be ${TYPE_LABELS[rule.type]}`);
+      throw invalidParams(rule.missingMessage ?? rule.message ?? `'${key}' must be ${TYPE_LABELS[rule.type]}`);
     }
-    if (matches(rule, value)) continue;
-    throw invalidParams(rule.message ?? `'${key}' must be ${TYPE_LABELS[rule.type]}`);
+    const problem = failure(rule, value, key);
+    if (problem !== undefined) throw invalidParams(problem);
   }
+}
+
+/** 读出必填的工作区 id；形状不对时报与旧实现相同的两句话。 */
+export function workspaceIdParam(params: MethodParams): string {
+  checkParams(params, { workspaceId: WORKSPACE_ID_RULE });
+  return params.workspaceId as string;
 }
 
 /** 工作区 id 的固定形状：`ws_` 加 16 位小写十六进制。 */
@@ -77,4 +91,5 @@ export const WORKSPACE_ID_RULE: ParamRule = {
   type: "string",
   pattern: /^ws_[0-9a-f]{16}$/,
   message: "'workspaceId' must look like ws_<16 hex>",
+  missingMessage: "'workspaceId' must be a non-empty string",
 };

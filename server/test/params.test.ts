@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkParams, WORKSPACE_ID_RULE } from "../src/ipc/params.ts";
+import { checkParams, WORKSPACE_ID_RULE, workspaceIdParam } from "../src/ipc/params.ts";
 import { INVALID_PARAMS } from "../src/ipc/errors.ts";
 
 function code(fn: () => void): number | undefined {
@@ -39,5 +39,18 @@ describe("checkParams", () => {
     expect(code(() => checkParams({ paths: [] }, rule))).toBe(INVALID_PARAMS);
     expect(code(() => checkParams({ paths: ["a", "b", "c"] }, rule))).toBe(INVALID_PARAMS);
     expect(code(() => checkParams({ paths: ["a", 2] }, rule))).toBe(INVALID_PARAMS);
+  });
+});
+
+describe("workspaceIdParam", () => {
+  test("必填与形状两种错误各自一句，和旧实现一致", () => {
+    expect(() => workspaceIdParam({})).toThrow("'workspaceId' must be a non-empty string");
+    expect(() => workspaceIdParam({ workspaceId: "ws_x" })).toThrow("'workspaceId' must look like ws_<16 hex>");
+    expect(workspaceIdParam({ workspaceId: "ws_0123456789abcdef" })).toBe("ws_0123456789abcdef");
+  });
+
+  test("数组元素不合法时报元素自己的文案", () => {
+    const rule = { paths: { type: "array", items: { type: "string", message: "'paths' must contain only strings" } } } as const;
+    expect(() => checkParams({ paths: ["a", 2] }, rule)).toThrow("'paths' must contain only strings");
   });
 });
