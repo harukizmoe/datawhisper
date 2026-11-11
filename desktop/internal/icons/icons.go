@@ -36,6 +36,7 @@ var (
 	Refresh      = mustIcon("refresh-cw")
 	Close        = mustIcon("x")
 	Check        = mustIcon("check")
+	Message      = mustIcon("message-square")
 	CircleCheck  = mustIcon("circle-check")
 	CircleX      = mustIcon("circle-x")
 	Info         = mustIcon("info")

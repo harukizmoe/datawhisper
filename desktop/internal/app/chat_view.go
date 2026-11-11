@@ -133,6 +133,10 @@ func (a *app) homeView(c *ui.Context) {
 			ui.Icon(c, icons.Sparkles).FontSize(a.fs(textHero)).TextColor(t.Accent)
 			ui.Text(c, a.tr("chat.homeTitle")).Bold().FontSize(a.fs(textHero))
 			ui.Text(c, a.tr("chat.homeHint")).TextColor(t.TextMuted)
+			// 新对话在这里选种类：普通对话，或某个工作区里的对话。
+			if a.conv == 0 {
+				a.newChatChooser(c, t)
+			}
 			ui.Text(c, a.tr("chat.suggestions")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Margin(12, 0, 0, 0)
 			for _, text := range []string{a.tr("chat.suggest1"), a.tr("chat.suggest2"), a.tr("chat.suggest3"), a.tr("chat.suggest4")} {
 				if ui.Button(c, "").Label(text).Justify(ui.Start).Children(func() {
@@ -752,7 +756,7 @@ func (a *app) composer(c *ui.Context) {
 					}
 					if a.perm.scope.Scope == "workspace" && a.perm.scope.Mode != "" {
 						a.modeChip(c)
-					} else if a.conv == 0 || a.ws.scopes[a.conv] == "" {
+					} else if a.conv != 0 && a.ws.scopes[a.conv] == "" {
 						a.scopeChip(c)
 					}
 					if busy {

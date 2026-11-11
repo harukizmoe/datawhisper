@@ -231,12 +231,7 @@ func (a *app) workspaceRows() []workspaceRow {
 // 它在 Sidebar 里面，所以会话条目照常参与键盘导航。
 func (a *app) workspaceSection(c *ui.Context, t *ui.Theme) {
 	rows := a.workspaceRows()
-	ui.Row(c).AlignItems(ui.Center).Padding(6, 4, 2, 8).Children(func() {
-		ui.Text(c, a.tr("ws.section")).FontSize(a.fs(textCaption)).Bold().TextColor(t.TextMuted).Grow(1).MinWidth(0).SingleLine()
-		if ghostIconButton(c, icons.Plus, a.tr("ws.new")).Clicked() {
-			a.openWorkspaceDialog("")
-		}
-	})
+	ui.Text(c, a.tr("ws.section")).FontSize(a.fs(textCaption)).Bold().TextColor(t.TextMuted).Padding(6, 8, 2, 8).SingleLine()
 	if len(rows) == 0 && a.sideSearch == "" {
 		if ui.ButtonBase(c).Label(a.tr("ws.emptyHint")).Padding(6, 8).Radius(8).Justify(ui.Start).Children(func() {
 			ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
@@ -254,27 +249,28 @@ func (a *app) workspaceSection(c *ui.Context, t *ui.Theme) {
 		if folded {
 			chevron = icons.ChevronRight
 		}
-		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
-			header := ui.ButtonBase(c).Label(row.name).Grow(1).MinWidth(0).Justify(ui.Start).Gap(6).Padding(6, 8).Radius(8)
-			if row.id == active {
-				header = header.Background(t.Accent.Alpha(0.12))
+		header := ui.ButtonBase(c).Label(row.name).Justify(ui.Start).Gap(6).Padding(6, 8).Radius(8)
+		if row.id == active {
+			header = header.Background(t.Accent.Alpha(0.12))
+		}
+		header = header.Children(func() {
+			ui.Icon(c, chevron).TextColor(t.TextMuted)
+			icon := ui.Icon(c, icons.FolderOpen).TextColor(t.Accent)
+			name := ui.Text(c, row.name).Bold().SingleLine().Grow(1).MinWidth(0)
+			if row.missing {
+				icon.TextColor(t.Warning)
+				name.TextColor(t.Warning).Tooltip(a.tr("ws.missing"))
 			}
-			header.Children(func() {
-				ui.Icon(c, chevron).TextColor(t.TextMuted)
-				icon := ui.Icon(c, icons.FolderOpen).TextColor(t.Accent)
-				name := ui.Text(c, row.name).Bold().SingleLine().Grow(1).MinWidth(0)
-				if row.missing {
-					icon.TextColor(t.Warning)
-					name.TextColor(t.Warning).Tooltip(a.tr("ws.missing"))
-				}
-			})
-			if header.Clicked() {
-				if a.ws.folded == nil {
-					a.ws.folded = map[string]bool{}
-				}
-				a.ws.folded[row.id] = !folded
+		})
+		if header.Clicked() {
+			if a.ws.folded == nil {
+				a.ws.folded = map[string]bool{}
 			}
-			if ghostIconButton(c, icons.Plus, a.tr("ws.newChatIn", "name", row.name)).Disabled(row.missing).Clicked() {
+			a.ws.folded[row.id] = !folded
+		}
+		// 右键：也能在这个工作区里新建对话（主入口是展开后第一行）。
+		header.PopoverMenu(func(m *ui.Menu) {
+			if m.Item(a.tr("ws.newChatIn", "name", row.name)).Disabled(row.missing).Chosen() {
 				a.newChatInWorkspace(row.id)
 			}
 		})
@@ -282,13 +278,22 @@ func (a *app) workspaceSection(c *ui.Context, t *ui.Theme) {
 			continue
 		}
 		ui.Column(c).Margin(0, 0, 4, 16).Padding(0, 0, 0, 6).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
-			if len(row.sessions) == 0 {
-				ui.Text(c, a.tr("ws.noChats")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(4, 8)
+			if ui.ButtonBase(c).Label(a.tr("ws.startChat")).Disabled(row.missing).Padding(5, 8).Radius(8).Gap(6).Justify(ui.Start).Children(func() {
+				ui.Icon(c, icons.Message).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("ws.startChat")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine()
+			}).Clicked() {
+				a.newChatInWorkspace(row.id)
 			}
 			for _, session := range row.sessions {
 				a.sessionItem(c, session)
 			}
 		})
+	}
+	if ui.ButtonBase(c).Label(a.tr("ws.newItem")).Padding(5, 8).Radius(8).Gap(6).Justify(ui.Start).Children(func() {
+		ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("ws.newItem")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine()
+	}).Clicked() {
+		a.openWorkspaceDialog("")
 	}
 }
 
@@ -310,31 +315,87 @@ func (a *app) newChatInWorkspace(workspaceID string) {
 	a.cv.wantFocus = true
 }
 
-// scopeChip 是输入框底栏里的范围芯片：还没有对话时选下一条对话属于普通聊天还是某个工作区；已有的普通
-// 聊天里把它移入工作区（单向）。已经属于工作区的对话不画它——工作区名在标题栏，模式芯片管权限。
-func (a *app) scopeChip(c *ui.Context) {
-	label := a.tr("ws.scopeChat")
-	current := a.newScope()
-	if a.conv == 0 && current != "" {
-		label = a.workspaceName(current)
+// chooseWorkspaceKind 选「工作区对话」这一种：沿用上次选过的工作区，没有就取第一个可用的；一个工作区都没有时
+// 直接打开新建对话框（建好后 createWorkspace 会把它设为归属）。
+func (a *app) chooseWorkspaceKind() {
+	if a.newScope() != "" {
+		return
 	}
-	ui.PopoverMenuButton(c, label, func(m *ui.Menu) {
-		a.menuShown()
-		if a.conv == 0 {
-			if m.Item(a.tr("ws.scopeChat")).Radio(current == "").Chosen() {
-				a.setNewScope("")
-			}
-			for i := range a.ws.list {
-				if m.Item(a.ws.list[i].Name).Radio(a.ws.list[i].WorkspaceID == current).Chosen() {
-					a.setNewScope(a.ws.list[i].WorkspaceID)
-				}
-			}
-			m.Separator()
-			if m.Item(a.tr("ws.newItem")).Chosen() {
-				a.openWorkspaceDialog("")
-			}
+	for i := range a.ws.list {
+		if a.ws.list[i].Available {
+			a.setNewScope(a.ws.list[i].WorkspaceID)
 			return
 		}
+	}
+	a.openWorkspaceDialog("")
+}
+
+// kindCard 是种类选择里的一张卡片：图标、标题、一句说明；选中的用强调色描边与淡底。
+func (a *app) kindCard(c *ui.Context, t *ui.Theme, icon *ui.SVG, title, hint string, selected bool) bool {
+	card := ui.ButtonBase(c).Label(title).Grow(1).Basis(0).MinWidth(0).Padding(12, 14).Radius(radiusCard).Gap(10).Justify(ui.Start).AlignItems(ui.Start).
+		BorderWidth(1).BorderColor(t.Border).Background(a.tokens().Tok.Card)
+	if selected {
+		card = card.BorderColor(t.Accent).Background(t.Accent.Alpha(0.08))
+	}
+	return card.Children(func() {
+		iconColor := t.TextMuted
+		if selected {
+			iconColor = t.Accent
+		}
+		ui.Icon(c, icon).TextColor(iconColor)
+		ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, title).Bold()
+			ui.Text(c, hint).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		})
+	}).Clicked()
+}
+
+// newChatChooser 是新对话页上的种类选择：左边普通对话，右边工作区对话；选了工作区对话时下面列出工作区供挑。
+// 选择记在 newChatScope 里（空串就是普通对话），所以侧栏、标题栏与底栏都跟着它走。
+func (a *app) newChatChooser(c *ui.Context, t *ui.Theme) {
+	inWorkspace := a.newScope() != ""
+	ui.Column(c).Gap(8).Margin(12, 0, 0, 0).Children(func() {
+		ui.Text(c, a.tr("ws.startIn")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		ui.Row(c).Gap(10).Children(func() {
+			if a.kindCard(c, t, icons.Message, a.tr("ws.scopeChat"), a.tr("ws.kindChatHint"), !inWorkspace) {
+				a.setNewScope("")
+			}
+			if a.kindCard(c, t, icons.FolderOpen, a.tr("ws.kindWorkspace"), a.tr("ws.kindWorkspaceHint"), inWorkspace) {
+				a.chooseWorkspaceKind()
+			}
+		})
+		if !inWorkspace {
+			return
+		}
+		current := a.newScope()
+		for i := range a.ws.list {
+			ws := a.ws.list[i]
+			row := ui.ButtonBase(c).Label(ws.Name).Padding(8, 12).Radius(8).Gap(8).Justify(ui.Start)
+			if ws.WorkspaceID == current {
+				row = row.Background(t.Accent.Alpha(0.12))
+			}
+			if row.Disabled(!ws.Available).Children(func() {
+				ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
+				ui.Text(c, ws.Name).Bold().SingleLine().Shrink(0)
+				ui.Text(c, ws.Workdir).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0).Tooltip(ws.Workdir)
+				if ws.WorkspaceID == current {
+					ui.Icon(c, icons.Check).TextColor(t.Accent)
+				}
+			}).Clicked() {
+				a.setNewScope(ws.WorkspaceID)
+			}
+		}
+		if iconTextButton(c, icons.Plus, a.tr("ws.newItem")).Clicked() {
+			a.openWorkspaceDialog("")
+		}
+	})
+}
+
+// scopeChip 是输入框底栏里的范围芯片，只出现在已有的普通聊天里：菜单把它单向移入某个工作区。
+// 新对话的种类在首页的卡片里选（newChatChooser）；已经属于工作区的对话不画它——名字在标题栏，模式芯片管权限。
+func (a *app) scopeChip(c *ui.Context) {
+	ui.PopoverMenuButton(c, a.tr("ws.scopeChat"), func(m *ui.Menu) {
+		a.menuShown()
 		m.Submenu(a.tr("ws.moveMenu"), func(sub *ui.Menu) {
 			for i := range a.ws.list {
 				if sub.Item(a.ws.list[i].Name).Disabled(!a.ws.list[i].Available).Chosen() {

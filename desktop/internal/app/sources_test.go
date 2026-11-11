@@ -1471,14 +1471,11 @@ func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
 	f := newSourceFake(t)
 	dir := t.TempDir()
 	a, q, tt := openChat(t, f)
-	a.newChat() // 「New workspace…」在输入框底栏范围芯片的菜单里
+	a.newChat()
 	q.run()
 	tt.Frame()
-	if err := tt.Click("Chat"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if err := tt.Click("New workspace…"); err != nil {
+	// 新对话页上选「工作区」：一个工作区都没有时直接打开新建对话框。
+	if err := tt.Click("Workspace"); err != nil {
 		t.Fatal(err)
 	}
 	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
@@ -1503,7 +1500,7 @@ func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
 	// 创建后侧栏立刻有这一行（还没有对话也要看得见），数据面板与侧栏读的是同一份。
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"Sales", "No chats yet"}, nil)
+	expectTexts(t, tt, []string{"Sales", "Start a chat"}, nil)
 	if len(a.ws.list) != 1 {
 		t.Errorf("workspace index: %v", a.ws.list)
 	}
@@ -1557,9 +1554,9 @@ func TestEmptyWorkspaceShowsInTheSidebarAndStartsAChat(t *testing.T) {
 	q.pump(t, tt, "the workspace row", func() bool { return len(a.ws.list) == 1 })
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"Workspaces", "sales", "No chats yet"}, nil)
+	expectTexts(t, tt, []string{"Workspaces", "sales", "Start a chat", "New workspace…"}, nil)
 
-	if err := tt.Click("New chat in sales"); err != nil {
+	if err := tt.Click("Start a chat"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -1626,14 +1623,32 @@ func TestDismissedPermissionDoesNotComeBackFromALateSnapshot(t *testing.T) {
 	}
 }
 
-func TestSidebarHasANewWorkspaceEntry(t *testing.T) {
+// 新对话页给出两种开始方式；选「工作区」就列出工作区供挑，开始的对话归属于选中的那个。
+func TestHomeOffersChatOrWorkspaceKind(t *testing.T) {
 	f := newSourceFake(t)
+	seedWorkspaces(f)
 	a, q, tt := openChat(t, f)
-	expectTexts(t, tt, []string{"New chat", "New workspace"}, nil)
-	if err := tt.Click("New workspace"); err != nil {
+	q.pump(t, tt, "the workspace index", func() bool { return len(a.ws.list) == 1 })
+	a.newChat()
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Start a new conversation as", "Chat", "Workspace"}, []string{"/work/sales"})
+
+	if err := tt.Click("Workspace"); err != nil {
 		t.Fatal(err)
 	}
-	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
+	tt.Frame()
+	if a.newScope() != "ws_0000000000000001" {
+		t.Fatalf("scope after choosing Workspace: %q", a.newScope())
+	}
+	expectTexts(t, tt, []string{"/work/sales"}, nil)
+
+	if err := tt.Click("Chat"); err != nil {
+		t.Fatal(err)
+	}
+	if a.newScope() != "" {
+		t.Errorf("scope after choosing Chat: %q", a.newScope())
+	}
 }
 
 // seedTree 给假服务放一棵小树：根下一个目录 reports（里面一个 q1.csv）、一个文件 notes.md。
