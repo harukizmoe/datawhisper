@@ -131,7 +131,6 @@ type sourcesState struct {
 
 	// 工作区。
 	current      *service.Workspace
-	workspaces   []service.Workspace
 	workspaceErr string
 	mountPath    string
 	mountName    string
@@ -174,7 +173,7 @@ func (a *app) sourcesConversationChanged() {
 	a.src.sources = nil
 	a.src.previewID, a.src.preview, a.src.previewTable, a.src.table = "", nil, "", nil
 	a.src.schema, a.src.previewErr, a.src.tableErr, a.src.schemaErr = "", "", "", ""
-	a.src.current, a.src.workspaces = nil, nil
+	a.src.current = nil
 	a.src.artifacts, a.src.artifactsErr = nil, ""
 	a.src.artifactName, a.src.artifactText, a.src.artifactErr = "", "", ""
 	a.src.confirmOpen, a.src.editOpen = false, false
@@ -228,7 +227,6 @@ func (a *app) loadSources() {
 				a.src.workspaceErr = a.sourceErr(workspaceErr)
 			} else {
 				a.src.current = view.Workspace
-				a.src.workspaces = view.Workspaces
 				a.src.workspaceErr = ""
 			}
 			if artifactsErr != nil {
@@ -1087,6 +1085,7 @@ func (a *app) mountWorkspace() {
 			} else {
 				a.src.notice, a.src.noticeErr = a.tr("data.mounted", "label", label), false
 			}
+			a.loadWorkspaces()
 			a.loadSources()
 			// 对话现在属于这个工作区了：底栏要出现权限模式芯片。
 			a.loadPermissions()
@@ -1113,6 +1112,7 @@ func (a *app) removeWorkspace(id string) {
 				return
 			}
 			a.src.notice, a.src.noticeErr = a.tr("data.folderRemoved"), false
+			a.loadWorkspaces()
 			a.loadSources()
 		})
 	}()

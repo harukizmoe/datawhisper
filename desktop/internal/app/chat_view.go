@@ -163,7 +163,7 @@ func (a *app) chatHeader(c *ui.Context) {
 		// Grow+MinWidth(0) 让它把多余宽度让给右侧控件，SingleLine 在放不下时以省略号结尾。
 		ui.Text(c, title).Bold().FontSize(a.fs(textSection)).SingleLine().Grow(1).MinWidth(0).Tooltip(title)
 		// 范围标签：属于工作区的对话在标题旁边显示工作区名。
-		if workspaceID := a.perm.scope.WorkspaceID; workspaceID != "" {
+		if workspaceID := a.activeWorkspaceID(); workspaceID != "" {
 			ui.Row(c).Gap(4).AlignItems(ui.Center).Shrink(0).Tooltip(a.workspaceName(workspaceID)).Children(func() {
 				ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
 				ui.Text(c, a.workspaceName(workspaceID)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine()

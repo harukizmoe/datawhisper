@@ -8,18 +8,19 @@ import (
 	"strings"
 	"time"
 
+	"datawhisper/desktop/internal/icons"
 	"datawhisper/desktop/internal/service"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
-// workspaceIndex 是侧栏与新对话选择器共用的工作区索引。
+// workspaceIndex 是工作区数据的唯一来源：侧栏、新对话选择器与数据面板都读它，服务端的变化只经 loadWorkspaces 进来。
 type workspaceIndex struct {
 	// list 是全部工作区记录；scopes 把对话映射到工作区（普通聊天不出现）。
 	list   []service.Workspace
 	scopes map[int]string
-	// folded 记着侧栏的「Workspaces」分组是否被折叠（本次运行内）；默认展开。
-	folded bool
+	// folded 记着哪些工作区在侧栏里被折叠（本次运行内）；没出现过的默认展开。
+	folded map[string]bool
 	err    string
 }
 
@@ -191,44 +192,122 @@ func (a *app) moveCurrentToWorkspace(workspaceID string) {
 	}()
 }
 
-// workspaceGroups 是侧栏里按工作区分出的组：每组一个工作区，只列有会话的那些（空工作区不影响使用，
-// 新对话时在选择器里能选到它）。归档的与搜索不匹配的不列出。
-func (a *app) workspaceGroups(now time.Time) []sessionGroup {
+// workspaceRow 是侧栏里的一个工作区：记录加上它名下的会话（可以是空的）。
+type workspaceRow struct {
+	id       string
+	name     string
+	missing  bool // 目录不在了（被移走或卸载）
+	sessions []service.Session
+}
+
+// workspaceRows 列出侧栏里的全部工作区，空的也列：工作区是一等对象，刚建好、还没有对话时也要看得见、点得到。
+// 归档的会话不列；搜索框有字时只留名称或会话标题命中的工作区。
+func (a *app) workspaceRows() []workspaceRow {
 	query := strings.ToLower(strings.TrimSpace(a.sideSearch))
 	byWorkspace := map[string][]service.Session{}
 	for _, s := range a.sessions {
-		if s.Archived {
+		if workspaceID := a.scopeOf(s.ID); workspaceID != "" && !s.Archived {
+			byWorkspace[workspaceID] = append(byWorkspace[workspaceID], s)
+		}
+	}
+	var rows []workspaceRow
+	for _, ws := range a.ws.list {
+		row := workspaceRow{id: ws.WorkspaceID, name: a.workspaceName(ws.WorkspaceID), missing: !ws.Available}
+		nameHit := query == "" || strings.Contains(strings.ToLower(row.name), query)
+		for _, s := range byWorkspace[ws.WorkspaceID] {
+			if nameHit || strings.Contains(strings.ToLower(a.sessionTitle(s.ID)), query) {
+				row.sessions = append(row.sessions, s)
+			}
+		}
+		if nameHit || len(row.sessions) > 0 {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// workspaceSection 画侧栏的工作区区：标题行（带新建按钮），然后每个工作区一行——折叠箭头、强调色文件夹图标、
+// 加粗的名字、右边的「在这里新建对话」；名下的会话缩进在左侧引导线后面。空工作区写明还没有对话。
+// 它在 Sidebar 里面，所以会话条目照常参与键盘导航。
+func (a *app) workspaceSection(c *ui.Context, t *ui.Theme) {
+	rows := a.workspaceRows()
+	ui.Row(c).AlignItems(ui.Center).Padding(6, 4, 2, 8).Children(func() {
+		ui.Text(c, a.tr("ws.section")).FontSize(a.fs(textCaption)).Bold().TextColor(t.TextMuted).Grow(1).MinWidth(0).SingleLine()
+		if ghostIconButton(c, icons.Plus, a.tr("ws.new")).Clicked() {
+			a.openWorkspaceDialog("")
+		}
+	})
+	if len(rows) == 0 && a.sideSearch == "" {
+		if ui.ButtonBase(c).Label(a.tr("ws.emptyHint")).Padding(6, 8).Radius(8).Justify(ui.Start).Children(func() {
+			ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("ws.emptyHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		}).Clicked() {
+			a.openWorkspaceDialog("")
+		}
+		return
+	}
+	active := a.activeWorkspaceID()
+	for _, row := range rows {
+		row := row
+		folded := a.ws.folded[row.id]
+		chevron := icons.ChevronDown
+		if folded {
+			chevron = icons.ChevronRight
+		}
+		ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+			header := ui.ButtonBase(c).Label(row.name).Grow(1).MinWidth(0).Justify(ui.Start).Gap(6).Padding(6, 8).Radius(8)
+			if row.id == active {
+				header = header.Background(t.Accent.Alpha(0.12))
+			}
+			header.Children(func() {
+				ui.Icon(c, chevron).TextColor(t.TextMuted)
+				icon := ui.Icon(c, icons.FolderOpen).TextColor(t.Accent)
+				name := ui.Text(c, row.name).Bold().SingleLine().Grow(1).MinWidth(0)
+				if row.missing {
+					icon.TextColor(t.Warning)
+					name.TextColor(t.Warning).Tooltip(a.tr("ws.missing"))
+				}
+			})
+			if header.Clicked() {
+				if a.ws.folded == nil {
+					a.ws.folded = map[string]bool{}
+				}
+				a.ws.folded[row.id] = !folded
+			}
+			if ghostIconButton(c, icons.Plus, a.tr("ws.newChatIn", "name", row.name)).Disabled(row.missing).Clicked() {
+				a.newChatInWorkspace(row.id)
+			}
+		})
+		if folded {
 			continue
 		}
-		workspaceID := a.scopeOf(s.ID)
-		if workspaceID == "" {
-			continue
-		}
-		if query != "" && !strings.Contains(strings.ToLower(a.sessionTitle(s.ID)), query) {
-			continue
-		}
-		byWorkspace[workspaceID] = append(byWorkspace[workspaceID], s)
+		ui.Column(c).Margin(0, 0, 4, 16).Padding(0, 0, 0, 6).BorderWidth(0, 0, 0, 1).BorderColor(t.Border).Children(func() {
+			if len(row.sessions) == 0 {
+				ui.Text(c, a.tr("ws.noChats")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Padding(4, 8)
+			}
+			for _, session := range row.sessions {
+				a.sessionItem(c, session)
+			}
+		})
 	}
-	var out []sessionGroup
-	// 按工作区列表的顺序，读起来与数据面板一致；列表外的（已被移除）放最后。
-	seen := map[string]bool{}
-	appendGroup := func(workspaceID string) {
-		sessions := byWorkspace[workspaceID]
-		if len(sessions) == 0 {
-			return
-		}
-		seen[workspaceID] = true
-		out = append(out, sessionGroup{label: a.workspaceName(workspaceID), sessions: sessions})
+}
+
+// activeWorkspaceID 是当前界面所处的工作区：打开着的对话所属的那个；还没有对话时是下一条新对话要进的那个。
+func (a *app) activeWorkspaceID() string {
+	if a.conv == 0 {
+		return a.newScope()
 	}
-	for i := range a.ws.list {
-		appendGroup(a.ws.list[i].WorkspaceID)
+	if id := a.perm.scope.WorkspaceID; id != "" {
+		return id
 	}
-	for workspaceID := range byWorkspace {
-		if !seen[workspaceID] {
-			appendGroup(workspaceID)
-		}
-	}
-	return out
+	return a.scopeOf(a.conv)
+}
+
+// newChatInWorkspace 切到一个归属为该工作区的空白新对话；真正的对话在发出第一条消息时才创建。
+func (a *app) newChatInWorkspace(workspaceID string) {
+	a.setNewScope(workspaceID)
+	a.newChat()
+	a.cv.wantFocus = true
 }
 
 // scopeChip 是输入框底栏里的范围芯片：还没有对话时选下一条对话属于普通聊天还是某个工作区；已有的普通

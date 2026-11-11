@@ -593,14 +593,14 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 				ui.Text(c, a.tr("ws.modeHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			})
 			a.fileTreeView(c, t, current)
-		} else if len(a.src.workspaces) > 0 {
+		} else if len(a.ws.list) > 0 {
 			// 普通聊天可以移入一个已有的工作区（移入后不能退出，服务端只允许单向）。
 			ui.Text(c, a.tr("ws.moveHere")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
-		if len(a.src.workspaces) > 0 {
+		if len(a.ws.list) > 0 {
 			ui.Text(c, a.tr("data.knownFolders")).Bold().FontSize(a.fs(textSection))
 		}
-		for _, ws := range a.src.workspaces {
+		for _, ws := range a.ws.list {
 			ws := ws
 			label := ws.Name
 			if label == "" {
@@ -620,7 +620,7 @@ func (a *app) workspaceTab(c *ui.Context, t *ui.Theme) {
 						}
 					}
 					// 属于本对话的工作区没有操作；其余的可以删记录（仍有对话在用时服务端拒绝）。
-					if ws.Current {
+					if ws.WorkspaceID == a.activeWorkspaceID() {
 						ui.Badge(c, a.tr("data.badgeMounted"))
 					} else if ui.Button(c, a.tr("data.remove")).Tooltip(a.tr("data.removeFolderTip", "name", label)).Clicked() {
 						a.src.confirmKind, a.src.confirmID, a.src.confirmName = confirmWorkspace, ws.WorkspaceID, label

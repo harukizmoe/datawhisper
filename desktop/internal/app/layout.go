@@ -77,12 +77,10 @@ func (a *app) sidebar(c *ui.Context) {
 			ui.Icon(c, icons.Sparkles).TextColor(t.Accent)
 			ui.Text(c, "DataWhisper").Bold().FontSize(a.fs(textSection)).SingleLine()
 		})
-		// 两个按钮上下各占一行：侧栏只有 248 宽，并排放会把两边的文字都截断。
+		// 「New chat」永远是普通聊天；要在某个工作区里开始，点工作区那一行的加号。
 		if iconTextButton(c, icons.Plus, a.tr("sidebar.newChat")).Clicked() {
+			a.setNewScope("")
 			a.newChat()
-		}
-		if iconTextButton(c, icons.FolderOpen, a.tr("ws.new")).Tooltip(a.tr("ws.newTip")).Clicked() {
-			a.openWorkspaceDialog("")
 		}
 		if a.ws.err != "" {
 			ui.Text(c, a.ws.err).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(2, 8)
@@ -90,27 +88,11 @@ func (a *app) sidebar(c *ui.Context) {
 		ui.SearchField(c, &a.sideSearch).Label(a.tr("sidebar.search")).Placeholder(a.tr("sidebar.search"))
 		a.maybeSearch(c)
 		groups := a.sessionGroups(c.Now())
-		workspaces := a.workspaceGroups(c.Now())
 		hits := a.bodyHits(groups)
 		archived := a.archivedSessions()
 		if ui.Sidebar(c, &a.nav, func() {
-			// 工作区的会话单独成一个「Workspaces」分组（样式同「今天」），排在时间分组之前；组内每个工作区是一行小标题，
-			// 同一批会话不会再出现在「今天」里。
-			if len(workspaces) > 0 {
-				open := !a.ws.folded
-				ui.SidebarSection(c, a.tr("ws.section"), &open, func() {
-					for _, g := range workspaces {
-						ui.Row(c).Gap(6).AlignItems(ui.Center).Padding(6, 8, 2, 8).Children(func() {
-							ui.Icon(c, icons.FolderOpen).TextColor(t.TextMuted)
-							ui.Text(c, g.label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().MinWidth(0)
-						})
-						for _, session := range g.sessions {
-							a.sessionItem(c, session)
-						}
-					}
-				})
-				a.ws.folded = !open
-			}
+			// 工作区区在最上面，权重高于时间分组；属于工作区的会话只在这里出现，不再进「今天」。
+			a.workspaceSection(c, t)
 			for _, g := range groups {
 				ui.SidebarSection(c, g.label, nil, func() {
 					for _, session := range g.sessions {

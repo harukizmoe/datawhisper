@@ -54,6 +54,19 @@ func iconButton(c *ui.Context, icon *ui.SVG, label string) ui.Element {
 	})
 }
 
+// ghostIconButton 是侧栏里用的轻量图标按钮：平时只有一个淡色图标，悬停才出底色，不抢名字的权重。
+// label 同时是辅助技术的名字与悬停提示。
+func ghostIconButton(c *ui.Context, icon *ui.SVG, label string) ui.Element {
+	t := c.Theme()
+	b := ui.ButtonBase(c).Label(label).Tooltip(label).Padding(6).Radius(6).Shrink(0)
+	if b.Hovered() {
+		b = b.Background(t.Border.Alpha(0.6))
+	}
+	return b.Children(func() {
+		ui.Icon(c, icon).TextColor(t.TextMuted)
+	})
+}
+
 // iconTextButton 是图标加文字的按钮。
 func iconTextButton(c *ui.Context, icon *ui.SVG, label string) ui.Element {
 	return ui.Button(c, "").Label(label).Children(func() {

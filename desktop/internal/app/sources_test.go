@@ -1500,6 +1500,13 @@ func TestWorkspaceDialogCreatesAWorkspace(t *testing.T) {
 	if a.newScope() != "ws_0000000000000001" {
 		t.Errorf("the new workspace became the next chat's scope: %q", a.newScope())
 	}
+	// 创建后侧栏立刻有这一行（还没有对话也要看得见），数据面板与侧栏读的是同一份。
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Sales", "No chats yet"}, nil)
+	if len(a.ws.list) != 1 {
+		t.Errorf("workspace index: %v", a.ws.list)
+	}
 }
 
 func TestHomeScreenGroupsWorkspaceChatsWithoutAnOpenConversation(t *testing.T) {
@@ -1517,27 +1524,65 @@ func TestHomeScreenGroupsWorkspaceChatsWithoutAnOpenConversation(t *testing.T) {
 	expectTexts(t, tt, []string{"sales", "in the workspace", "plain chat"}, nil)
 }
 
-func TestWorkspaceGroupFoldsAndUnfolds(t *testing.T) {
+func TestWorkspaceRowFoldsAndUnfolds(t *testing.T) {
 	f := newSourceFake(t)
 	seedWorkspaces(f)
 	a, q, tt := openChat(t, f)
-	q.pump(t, tt, "the workspace group", func() bool { return len(a.ws.scopes) == 1 })
+	q.pump(t, tt, "the workspace row", func() bool { return len(a.ws.scopes) == 1 })
 	q.run()
 	tt.Frame()
-	expectTexts(t, tt, []string{"Workspaces", "in the workspace"}, nil)
+	expectTexts(t, tt, []string{"Workspaces", "sales", "in the workspace", "plain chat"}, nil)
 
-	// 点「Workspaces」折叠：组里的会话收起，普通聊天不受影响。
-	if err := tt.Click("Workspaces"); err != nil {
+	// 点工作区那一行折叠：名下的会话收起，普通聊天不受影响。
+	if err := tt.Click("sales"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	expectTexts(t, tt, []string{"Workspaces", "plain chat"}, []string{"in the workspace"})
+	expectTexts(t, tt, []string{"sales", "plain chat"}, []string{"in the workspace"})
 
-	if err := tt.Click("Workspaces"); err != nil {
+	if err := tt.Click("sales"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 	expectTexts(t, tt, []string{"in the workspace"}, nil)
+}
+
+// 刚建好、还没有对话的工作区也在侧栏里，并写明还没有对话；点它的加号进入一个归属已选好的空白对话。
+func TestEmptyWorkspaceShowsInTheSidebarAndStartsAChat(t *testing.T) {
+	f := newSourceFake(t)
+	f.mu.Lock()
+	f.work = []service.Workspace{{WorkspaceID: "ws_0000000000000001", Name: "sales", Workdir: "/work/sales", Available: true}}
+	f.mu.Unlock()
+	a, q, tt := openChat(t, f)
+	q.pump(t, tt, "the workspace row", func() bool { return len(a.ws.list) == 1 })
+	q.run()
+	tt.Frame()
+	expectTexts(t, tt, []string{"Workspaces", "sales", "No chats yet"}, nil)
+
+	if err := tt.Click("New chat in sales"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.conv != 0 || a.newScope() != "ws_0000000000000001" {
+		t.Fatalf("conv=%d scope=%q", a.conv, a.newScope())
+	}
+	// 标题栏与芯片都说明下一条对话属于哪个工作区；顶部的 New chat 回到普通聊天。
+	if err := tt.Click("New chat"); err != nil {
+		t.Fatal(err)
+	}
+	if a.newScope() != "" {
+		t.Errorf("New chat kept the workspace scope: %q", a.newScope())
+	}
+}
+
+func TestSidebarWithoutWorkspacesInvitesToCreateOne(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	expectTexts(t, tt, []string{"Workspaces", "Turn a folder into a workspace"}, nil)
+	if err := tt.Click("Turn a folder into a workspace"); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "the dialog", func() bool { return a.wsDlg.open })
 }
 
 func TestChipMenuSurvivesTheComposerGracePeriod(t *testing.T) {
