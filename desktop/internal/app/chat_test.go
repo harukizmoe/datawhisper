@@ -52,6 +52,34 @@ func TestToolCallsRenderAsCards(t *testing.T) {
 }
 
 // TestLongToolOutputIsTruncated 断言长输出默认只显示末尾几行，「前面还有 N 行」展开全文、「收起」收回；
+// 运行中的状态行说出正在跑哪个工具：模型等结果时只写 Working 看不出卡在哪。
+func TestStatusLineNamesTheRunningTool(t *testing.T) {
+	f := newSourceFake(t)
+	a, q, tt := openChat(t, f)
+	a.connected = true
+	a.chat.Busy = true
+	a.chat.Messages = []conversation.Message{
+		{Key: "e1", Role: "user", Text: "revenue by region", Done: true},
+		{Key: "e2.0", Role: "tool", Text: "query_data", Tool: &conversation.ToolCall{CallID: "c1", Name: "query_data", Status: "running"}},
+	}
+	_ = q
+	tt.Frame()
+	expectTexts(t, tt, []string{"Running query_data…"}, []string{"Working"})
+}
+
+func TestStatusLineFallsBackToWorkingAfterTheToolFinishes(t *testing.T) {
+	f := newSourceFake(t)
+	a, _, tt := openChat(t, f)
+	a.connected = true
+	a.chat.Busy = true
+	a.chat.Messages = []conversation.Message{
+		{Key: "e1", Role: "user", Text: "revenue by region", Done: true},
+		{Key: "e2.0", Role: "tool", Text: "query_data", Done: true, Tool: &conversation.ToolCall{CallID: "c1", Name: "query_data", Status: "ok"}},
+	}
+	tt.Frame()
+	expectTexts(t, tt, []string{"Working"}, []string{"Running query_data…"})
+}
+
 // 失败的调用一直完整展开。
 func TestLongToolOutputIsTruncated(t *testing.T) {
 	q := newQueue()
@@ -319,6 +347,7 @@ func TestWhenBusyChoice(t *testing.T) {
 	openRichChat(t, fs, q, a, tt)
 
 	// 直接进入“正在回复”的界面状态：订阅的增量事件由别的用例覆盖，这里只关心发送参数。
+	a.connected = true
 	a.chat.Busy = true
 	tt.Frame()
 	expectTexts(t, tt, []string{"Queue", "Steer", "Stop"}, nil)
@@ -334,6 +363,7 @@ func TestWhenBusyChoice(t *testing.T) {
 		t.Errorf("queued params %v", call)
 	}
 
+	a.connected = true
 	a.chat.Busy = true
 	if err := tt.Click("Steer"); err != nil {
 		t.Fatal(err)
@@ -359,6 +389,7 @@ func TestStopAbortsTheReply(t *testing.T) {
 	tt := ui.NewTester(a.view, 1180, 760)
 	openRichChat(t, fs, q, a, tt)
 
+	a.connected = true
 	a.chat.Busy = true
 	tt.Frame()
 	if err := tt.Click("Stop"); err != nil {
@@ -415,6 +446,7 @@ func TestThinkingTurnMetaAndNavRail(t *testing.T) {
 		{Key: "e3", Role: "user", Text: "second question", Done: true},
 		{Key: "g10", Role: "assistant", Text: "partial", Done: false},
 	}
+	a.connected = true
 	a.chat.Busy = true
 	a.prefs = prefs.Default()
 	a.prefs.Appearance.FoldRuns = false // 检查单独的「Thought」行；折叠成组的情形见 chat_fold_test.go
