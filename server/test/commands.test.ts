@@ -157,6 +157,15 @@ describe("parseCommandFile on every fixture file, trusted and untrusted", () => 
   });
 });
 
+/**
+ * golden 里内置命令的 path 是录制时那台机器上「临时目录 → 仓库」的相对路径（如 `../../home/me/proj/commands/x.md`），
+ * 换一台机器或 CI 就不同。比较前把内置命令的 path 归一成 `<builtin>/x.md`，用户目录下的相对路径原样保留。
+ */
+function portablePath<T extends { path: string | null }>(command: T): T {
+  const match = command.path?.match(/^(?:\.\.\/)+.*\/commands\/([^/]+\.md)$/);
+  return match === null || match === undefined ? command : { ...command, path: `<builtin>/${match[1]}` };
+}
+
 describe("dynamic trees", () => {
   for (const c of golden.dynamic) {
     test(c.id, () => {
@@ -164,7 +173,7 @@ describe("dynamic trees", () => {
       temps.push(root);
       materialize(root, c.files);
       const { registry, diagnostics } = loadCommands({ builtinDir, userDir: join(root, "user") });
-      expect(registry.all(true).map((x) => pyCommand(x, root))).toEqual(c.commands);
+      expect(registry.all(true).map((x) => portablePath(pyCommand(x, root)))).toEqual(c.commands.map(portablePath));
       expect(pyDiagnostics(diagnostics, root)).toEqual(expectedDiagnostics(c.diagnostics));
     });
   }
