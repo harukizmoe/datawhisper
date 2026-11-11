@@ -2,8 +2,7 @@
  * 飞书多维表格（Bitable）读写。
  *
  * 移植自 `data/feishu_bitable_service.py`：参数校验、错误文案、分批写入与返回值字段逐字沿用。
- * 只移植工具用到的部分（建表、列数据表、追加记录、更新单条记录）；`read_bitable_records`
- * 属于 `load_feishu_bitable`（P4.2 的 compute 侧外壳），届时在同一层补上即可。
+ * 移植工具与数据源用到的部分（建表、列数据表、读取记录、追加记录、更新单条记录）。
  *
  * 所有请求都带应用身份（tenant_access_token）；不接收也不回显用户 token。
  */
@@ -245,6 +244,89 @@ export async function listBitableTables(
     pageToken = next;
   }
   return { app_token: appToken, tables };
+}
+
+/** 旧 `_cell_value`：把多维表格的富文本单元格压成 DataFrame 里可用的标量。 */
+function cellValue(value: unknown): string | number | boolean | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== null && item !== undefined)
+      .map((item) => pyStr(cellValue(item)))
+      .join(", ");
+  }
+  const object = asObject(value);
+  if (object !== undefined) {
+    for (const key of ["text", "name", "url", "link"]) {
+      const scalar = object[key];
+      if (typeof scalar === "string" || typeof scalar === "number" || typeof scalar === "boolean") return scalar;
+    }
+    // 与旧实现一致：没有可用标量时落成按键排序的 JSON 文本。
+    return JSON.stringify(object, (_key, nested: unknown) => {
+      const inner = asObject(nested);
+      return inner === undefined ? nested : Object.fromEntries(Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    });
+  }
+  return String(value);
+}
+
+export type BitableRead = {
+  app_token: string;
+  table_id: string;
+  url: string;
+  records: Record<string, string | number | boolean | null>[];
+  record_count: number;
+  limited: boolean;
+};
+
+/** 旧 `read_bitable_records`：读取有上限的一批记录，保留 record_id 供之后按条编辑。 */
+export async function readBitableRecords(
+  client: FeishuClient,
+  input: { bitable: unknown; tableId?: unknown; maxRecords?: unknown },
+): Promise<BitableRead> {
+  const { appToken, tableId } = parseBitableReference(input.bitable, input.tableId ?? "");
+  if (tableId === "") {
+    throw new FeishuBitableError(
+      say("Provide a table_id, or use a Bitable link that contains ?table=...", "请提供 table_id，或使用包含 ?table=... 的多维表格链接"),
+    );
+  }
+  const requested = input.maxRecords === undefined ? MAX_RECORDS : Number(input.maxRecords);
+  if (!Number.isFinite(requested)) throw new FeishuBitableError(say("max_records must be a number", "max_records 必须是数字"));
+  const limit = Math.max(1, Math.min(Math.trunc(requested), MAX_RECORDS));
+  const records: BitableRead["records"] = [];
+  let pageToken = "";
+  let limited = false;
+  while (records.length < limit) {
+    const params: Record<string, string> = { page_size: String(Math.min(PAGE_SIZE, limit - records.length)) };
+    if (pageToken !== "") params.page_token = pageToken;
+    const data = await call(client, "GET", `/bitable/v1/apps/${appToken}/tables/${tableId}/records`, say("reading Feishu Bitable records", "读取飞书多维表格记录"), {
+      params,
+    });
+    limited = data.has_more === true;
+    for (const item of Array.isArray(data.items) ? data.items : []) {
+      const entry = asObject(item);
+      if (entry === undefined) continue;
+      const row: BitableRead["records"][number] = {};
+      for (const [key, value] of Object.entries(asObject(entry.fields) ?? {})) row[key] = cellValue(value);
+      const recordId = typeof entry.record_id === "string" ? entry.record_id.trim() : "";
+      if (recordId !== "") row._feishu_record_id = recordId;
+      records.push(row);
+      if (records.length >= limit) break;
+    }
+    if (records.length >= limit || !limited) break;
+    const next = typeof data.page_token === "string" ? data.page_token.trim() : "";
+    if (next === "") break;
+    pageToken = next;
+  }
+  return {
+    app_token: appToken,
+    table_id: tableId,
+    url: bitableUrl(appToken, tableId),
+    records,
+    record_count: records.length,
+    limited,
+  };
 }
 
 /** 旧 `append_bitable_records`。 */

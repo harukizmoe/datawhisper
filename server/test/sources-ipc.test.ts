@@ -123,6 +123,9 @@ let compute: FakeCompute;
 let store: MemorySourceDocStore;
 let configs: SourceConfigStore;
 let changed: number[];
+/** 假飞书读取：记下被读的 `appToken/tableId`；`feishuError` 非空时模拟飞书拒绝。 */
+let feishuReads: string[];
+let feishuError: string | undefined;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "dw-sources-"));
@@ -135,11 +138,25 @@ beforeEach(async () => {
   );
   configs = createSourceConfigStore({ dataDir: dir, credentials });
   changed = [];
+  feishuReads = [];
+  feishuError = undefined;
   compute = fakeCompute();
   server = memoryServer(sourceMethods({
     compute: compute.client,
     state: store,
     configs,
+    feishuRecords: async (appToken, tableId) => {
+      feishuReads.push(`${appToken}/${tableId}`);
+      if (feishuError !== undefined) throw new Error(feishuError);
+      return {
+        app_token: appToken,
+        table_id: tableId,
+        url: `https://feishu.cn/base/${appToken}?table=${tableId}`,
+        records: [{ 地区: "East", 金额: 10, _feishu_record_id: "rec1" }],
+        record_count: 1,
+        limited: false,
+      };
+    },
     uploadsDir: join(dir, "uploads"),
     outputsDir: join(dir, "outputs"),
     projectRoot: join(dir, "repo"),
@@ -526,6 +543,33 @@ describe("数据源配置：密钥只进不出", () => {
       bitable: "https://acme.feishu.cn/base/appToken123",
     });
     expect(reasonOf(missing)).toBe("missing_table");
+  });
+
+  test("飞书来源打开时由 server 读好记录交给 compute，记录本身不落进会话文档", async () => {
+    const opened = await server.call<{ source: { id: string } }>("source.open", {
+      conversationId: 1,
+      kind: "feishu",
+      bitable: "https://acme.feishu.cn/base/appToken123?table=tblABC",
+    });
+    expect(opened.error).toBeUndefined();
+    expect(feishuReads).toEqual(["appToken123/tblABC"]);
+    expect(compute.opened.get(opened.result!.source.id)?.records).toEqual([
+      { 地区: "East", 金额: 10, _feishu_record_id: "rec1" },
+    ]);
+    expect(JSON.stringify(store.peek(1))).not.toContain("rec1");
+  });
+
+  test("飞书读取失败时来源不被登记，错误文案原样返回", async () => {
+    feishuError = "飞书拒绝读取飞书多维表格记录（错误码 91402）：NOTEXIST";
+    const opened = await server.call("source.open", {
+      conversationId: 1,
+      kind: "feishu",
+      bitable: "https://acme.feishu.cn/base/appToken123?table=tblABC",
+    });
+    expect(opened.error?.message).toContain("91402");
+    expect(reasonOf(opened)).toBe("open_failed");
+    expect(store.peek(1).sources).toEqual([]);
+    expect(compute.opened.size).toBe(0);
   });
 });
 

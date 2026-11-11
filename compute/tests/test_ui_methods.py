@@ -250,6 +250,13 @@ class UploadTest(UiTestBase):
         self.assertIn("Cannot open the database file", error["message"])
         self.assert_error("source.open", {"source_id": "bad", "descriptor": {
             "kind": "http", "url": "https://example.test/data", "auth_type": "cookie"}}, "open_failed")
+        # 飞书记录由 server 读好后随 descriptor 传入；缺失时不会回头去联网读取。
+        self.assert_error("source.open", {"source_id": "bad", "descriptor": {
+            "kind": "feishu", "app_token": "bas", "table_id": "tbl"}}, "open_failed")
+        source_id, tables = self.open_source({"kind": "feishu", "app_token": "bas", "table_id": "tbl", "records": [
+            {"region": "East", "amount": "10", "_feishu_record_id": "rec1"},
+            {"region": "West", "amount": "5", "_feishu_record_id": "rec2"}]})
+        self.assertEqual(self.count(source_id, tables[0]), 2)
 
 
 class PreviewTest(UiTestBase):

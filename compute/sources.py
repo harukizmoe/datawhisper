@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Iterator, Sequence
 from urllib.parse import quote
 
-from data.feishu_bitable_service import FeishuBitableError, read_bitable_records
 from data.sources import (
     CSVDataSource,
     DataSource,
@@ -257,7 +256,6 @@ def _connection_label(kind: str) -> str | None:
         "sql": say("Database", "数据库"),
         "gsheets": "Google Sheets",
         "http": say("External API", "外部 API"),
-        "feishu": say("Feishu Bitable", "飞书多维表格"),
     }.get(kind)
 
 
@@ -265,7 +263,7 @@ def open_failed(descriptor: dict, exc: Exception) -> RpcError:
     """打开 source 失败时的错误（``data.kind == "open_failed"``）：远程连接给出
     可读原因，文件则保留原始消息。"""
     label = _connection_label(str(descriptor.get("kind") or ""))
-    if label and not isinstance(exc, FeishuBitableError):
+    if label:
         message = friendly_conn_error(exc, label)
     else:
         message = str(exc) or type(exc).__name__
@@ -359,15 +357,11 @@ def restore_source(info: dict) -> DataSource:
             raise ValueError(say("Invalid auth type; supported: none / bearer / api_key", "认证方式无效，支持: none / bearer / api_key"))
         return HTTPAPIDataSource(url, auth_type, str(info.get("auth_value") or ""), name)
     if kind == "feishu":
-        app_token = str(info.get("app_token") or "")
-        table_id = str(info.get("table_id") or "")
-        if not app_token or not table_id:
-            raise ValueError(say("Feishu Bitable app_token or table_id is empty", "飞书多维表格 app_token 或 table_id 为空"))
-        result = read_bitable_records(bitable=app_token, table_id=table_id)
-        source = FeishuBitableDataSource(result["records"], name or say("Feishu Bitable", "飞书多维表格"))
-        source._feishu_app_token = app_token
-        source._feishu_table_id = table_id
-        return source
+        # 记录由 server 用自己的飞书凭据读好后随 descriptor 传入；Python 不联网、不持有凭据。
+        records = info.get("records")
+        if not isinstance(records, list):
+            raise ValueError(say("Feishu Bitable records are missing from the descriptor", "飞书多维表格记录缺失"))
+        return FeishuBitableDataSource(records, name or say("Feishu Bitable", "飞书多维表格"))
     if kind == "workspace_persistent":
         db_path = str(info.get("db_path") or "")
         if not Path(db_path).is_file():

@@ -19,6 +19,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import type { CredentialStore } from "@earendil-works/pi-ai";
+import type { BitableRead } from "../feishu/bitable.ts";
 import { ComputeError, type SourceDescriptor } from "../compute/client.ts";
 import { APP_ERROR, INVALID_PARAMS, RpcError, appError, invalidParams } from "./errors.ts";
 import type { MethodParams, RpcMethod } from "./rpc.ts";
@@ -75,6 +76,11 @@ export type SourcesDeps = {
   readonly state: SourceDocStore;
   /** 数据源配置；密钥只进不出。 */
   readonly configs: SourceConfigStore;
+  /**
+   * 飞书多维表格的记录读取。凭据与网络都在 server 一侧，compute 只拿到读好的记录，
+   * 因此打开 feishu 来源前必须有这个端口；省略时打开会报「飞书不可用」。
+   */
+  readonly feishuRecords?: (appToken: string, tableId: string) => Promise<BitableRead>;
   /** 上传副本目录（`<dataDir>/uploads`）。 */
   readonly uploadsDir: string;
   /** 导出产物根（`<dataDir>/outputs`，实际读取其下的 `exports/`）。 */
@@ -471,8 +477,18 @@ export function sourceMethods(deps: SourcesDeps): Record<string, RpcMethod> {
   };
 
   const openCompute = async (sourceId: string, descriptor: SourceDescriptor): Promise<{ name: string; tables: string[] }> => {
+    let outgoing = descriptor;
+    if (descriptor.kind === "feishu") {
+      try {
+        if (deps.feishuRecords === undefined) throw new Error(say("Feishu is not available", "飞书不可用"));
+        const read = await deps.feishuRecords(String(descriptor.app_token ?? ""), String(descriptor.table_id ?? ""));
+        outgoing = { ...descriptor, records: read.records };
+      } catch (error) {
+        throw appReason(error instanceof Error ? error.message : String(error), "open_failed");
+      }
+    }
     try {
-      return await deps.compute.openSource(sourceId, descriptor);
+      return await deps.compute.openSource(sourceId, outgoing);
     } catch (error) {
       // 远程连接失败时 compute 的文案可能回显 DSN；按本次描述符里的凭据原文做脱敏。
       throw mapComputeError(error, secretValues(descriptor));

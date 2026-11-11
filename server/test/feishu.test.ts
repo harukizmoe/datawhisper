@@ -29,7 +29,7 @@ import {
 import { FeishuLongConnection } from "../src/feishu/long-connection.ts";
 import { FeishuEndpointError, type FeishuTransport } from "../src/feishu/transport.ts";
 import { FeishuWriteLedger, ledgerKey } from "../src/feishu/ledger.ts";
-import { FeishuBitableError, parseBitableReference } from "../src/feishu/bitable.ts";
+import { FeishuBitableError, parseBitableReference, readBitableRecords } from "../src/feishu/bitable.ts";
 import { splitMarkdown } from "../src/feishu/client.ts";
 import { createFeishuTools } from "../src/feishu/tools.ts";
 import type { AppTool } from "../src/tools/app/types.ts";
@@ -149,6 +149,24 @@ function startFakeFeishu(options: { chats?: { chat_id: string; name: string }[] 
     }
     if (/\/records\/[^/]+$/.test(url.pathname) && request.method === "PUT") {
       return Response.json({ code: 0, data: { record: { record_id: "rec_1" } } });
+    }
+    if (/\/tables\/[^/]+\/records$/.test(url.pathname) && request.method === "GET") {
+      // 共 120 条，按 page_size/page_token 翻页；第 1 条放富文本单元格，覆盖展平规则。
+      const total = 120;
+      const start = Number(url.searchParams.get("page_token") ?? "0");
+      const size = Number(url.searchParams.get("page_size") ?? "100");
+      const end = Math.min(start + size, total);
+      const items = [];
+      for (let index = start; index < end; index += 1) {
+        items.push({
+          record_id: `rec_${index + 1}`,
+          fields:
+            index === 0
+              ? { 名称: [{ text: "甲" }, { text: "乙" }], 链接: { link: "https://x.test", text: "站点" }, 数量: 3, 空: null, 嵌套: { b: { z: 1, a: 2 } } }
+              : { 名称: `n${index + 1}`, 数量: index + 1 },
+        });
+      }
+      return Response.json({ code: 0, data: { items, has_more: end < total, page_token: String(end) } });
     }
     return Response.json({ code: 99991663, msg: "not found" }, { status: 404 });
   }
@@ -583,6 +601,35 @@ describe("飞书多维表格工具", () => {
     expect(parsed.tables).toEqual([
       { table_id: "tbl_1", name: "数据", url: "https://feishu.cn/base/bas_1?table=tbl_1" },
     ]);
+  });
+
+  test("readBitableRecords pages through the table, keeps record ids and flattens rich cells", async () => {
+    const { client } = await feishu.connections();
+    const read = await readBitableRecords(client, { bitable: "https://feishu.cn/base/bas_1?table=tbl_1" });
+    expect(read.record_count).toBe(120);
+    expect(read.limited).toBe(false);
+    expect(read.url).toBe("https://feishu.cn/base/bas_1?table=tbl_1");
+    expect(read.records[0]).toEqual({
+      名称: "甲, 乙",
+      链接: "站点",
+      数量: 3,
+      空: null,
+      嵌套: '{"b":{"a":2,"z":1}}',
+      _feishu_record_id: "rec_1",
+    });
+    expect(read.records[119]).toMatchObject({ _feishu_record_id: "rec_120", 数量: 120 });
+  });
+
+  test("readBitableRecords stops at maxRecords and reports the table was cut", async () => {
+    const { client } = await feishu.connections();
+    const read = await readBitableRecords(client, { bitable: "bas_1", tableId: "tbl_1", maxRecords: 5 });
+    expect(read.record_count).toBe(5);
+    expect(read.limited).toBe(true);
+  });
+
+  test("readBitableRecords asks for a table_id when the link has none", async () => {
+    const { client } = await feishu.connections();
+    await expect(readBitableRecords(client, { bitable: "bas_1" })).rejects.toThrow(FeishuBitableError);
   });
 
   test("the same durable call delivered twice writes once", async () => {

@@ -18,6 +18,8 @@ import {
   turnStateFor,
   type SourceDocStore,
 } from "./ipc/source-store.ts";
+import { readBitableRecords } from "./feishu/bitable.ts";
+import { feishuService } from "./feishu/service.ts";
 import { sourceMethods } from "./ipc/sources.ts";
 import { createJobs, jobsExtension, type Jobs } from "./jobs/service.ts";
 import { WorkExecutorRegistry } from "./jobs/work-task.ts";
@@ -151,10 +153,15 @@ export async function startService(config: Config, options: ServiceOptions = {})
     join(config.dataDir, "datasource-credentials.index.json"),
     { forceFile: options.forceFileCredentials },
   );
+  // 飞书凭据和网络都归 server：来源打开时由这里读好记录再交给 compute（Python 不碰飞书）。
+  // 实例按数据目录单例且「先创建者的选项生效」，所以要等到第一次真正读取时才取，
+  // 不能在装配期抢先创建（那会吞掉 attachIpc / 测试传入的日志与端点选项）。
   const sourceApis = sourceMethods({
     compute,
     state: sourceState,
     configs: createSourceConfigStore({ dataDir: config.dataDir, credentials: sourceCredentials }),
+    feishuRecords: async (appToken, tableId) =>
+      readBitableRecords((await feishuService({ dataDir: config.dataDir }).connections()).client, { bitable: appToken, tableId }),
     uploadsDir: join(config.dataDir, "uploads"),
     outputsDir: join(config.dataDir, "outputs"),
     projectRoot: config.projectRoot,

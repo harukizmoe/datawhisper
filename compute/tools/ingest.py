@@ -87,7 +87,7 @@ def extracted_source_text(source_id: str, source, tables: dict, meta: dict, sche
 
 
 def bitable_source(read_result: dict[str, Any], source_name: str):
-    """为 ``data.feishu_bitable_service.read_bitable_records`` 返回的记录给出
+    """为 server 侧 ``readBitableRecords`` 返回的记录给出
     ``(source, 显示名)``。"""
     from data.sources.feishu_bitable import FeishuBitableDataSource
 
