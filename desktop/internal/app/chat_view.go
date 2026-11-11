@@ -18,7 +18,7 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// chatColumnWidth 返回对话列的最大宽度（外观里的「对话宽度」）：标准 760 时正文一行最好读，宽窗口里两侧
+// chatColumnWidth 返回对话列的最大宽度（外观里的「对话宽度」）：标准 840 时正文一行最好读，宽窗口里两侧
 // 留白而不是把行拉长；「铺满」不设上限。
 func (a *app) chatColumnWidth() float32 {
 	switch a.appearance().ChatWidth {
@@ -29,7 +29,7 @@ func (a *app) chatColumnWidth() float32 {
 	case prefs.ChatWidthFull:
 		return 100000
 	}
-	return 760
+	return 840
 }
 
 // toolPreviewLines 是工具卡片默认显示的输出行数（末尾几行）；更早的行折叠成「前面还有 N 行」。

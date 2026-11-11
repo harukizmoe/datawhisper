@@ -156,11 +156,11 @@ func TestBufferFontSizeReachesAnswerText(t *testing.T) {
 		return r.H
 	}
 	baseline := answerHeight(prefs.BodyFontBuffer, func(*prefs.Appearance) {})
-	if got := answerHeight(prefs.BodyFontBuffer, func(ap *prefs.Appearance) { ap.BufferFont.Size += 3 }); got <= baseline {
+	if got := answerHeight(prefs.BodyFontBuffer, func(ap *prefs.Appearance) { ap.BufferFont.Size += 2 }); got <= baseline {
 		t.Errorf("a larger buffer font left the answer at %v (was %v)", got, baseline)
 	}
 	baselineUI := answerHeight(prefs.BodyFontUI, func(*prefs.Appearance) {})
-	if got := answerHeight(prefs.BodyFontUI, func(ap *prefs.Appearance) { ap.BufferFont.Size += 3 }); got != baselineUI {
+	if got := answerHeight(prefs.BodyFontUI, func(ap *prefs.Appearance) { ap.BufferFont.Size += 2 }); got != baselineUI {
 		t.Errorf("the buffer font size changed an answer set in the interface font: %v vs %v", got, baselineUI)
 	}
 	if got := answerHeight(prefs.BodyFontUI, func(ap *prefs.Appearance) { ap.UIFont.Size += 3 }); got <= baselineUI {

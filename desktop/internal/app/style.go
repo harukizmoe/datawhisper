@@ -20,7 +20,7 @@ const (
 	textHero                    // 首页问候
 )
 
-// roleOffsets 是各层级相对 UI 字号的差（默认 14 时为 12 / 13 / 14 / 16 / 20 / 28）。
+// roleOffsets 是各层级相对 UI 字号的差（默认 15 时为 13 / 14 / 15 / 17 / 21 / 29）。
 var roleOffsets = [...]float32{-2, -1, 0, 2, 6, 14}
 
 // fs 返回某个层级的字号。

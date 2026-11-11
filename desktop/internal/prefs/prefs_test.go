@@ -57,6 +57,22 @@ func TestPrefsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFirstRunDefaults 固定首次使用的外观：跟随系统语言、Islands、标准密度与对话宽度、
+// 界面字号 15、buffer 字号 16。
+func TestFirstRunDefaults(t *testing.T) {
+	def := Default()
+	if def.Theme != ThemeSystem || def.Language != i18n.System {
+		t.Errorf("first run theme/language %q/%q", def.Theme, def.Language)
+	}
+	ap := def.Appearance
+	if ap.Layout != LayoutIslands || ap.Density != DensityStandard || ap.ChatWidth != ChatWidthStandard {
+		t.Errorf("first run layout/density/width %q/%q/%q", ap.Layout, ap.Density, ap.ChatWidth)
+	}
+	if ap.UIFont.Size != 15 || ap.BufferFont.Size != 16 {
+		t.Errorf("first run font sizes %v/%v", ap.UIFont.Size, ap.BufferFont.Size)
+	}
+}
+
 func TestNormalizeAppearance(t *testing.T) {
 	def := DefaultAppearance()
 	bad := Appearance{

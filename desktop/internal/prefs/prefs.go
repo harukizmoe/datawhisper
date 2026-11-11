@@ -31,8 +31,8 @@ const AppearanceVersion = 1
 // 字体的默认值与取值范围。默认字体不随安装包分发：没装时 resolveFonts 回退到系统字体。
 const (
 	DefaultFontFamily       = "Maple Mono NF CN"
-	DefaultUIFontSize       = 14
-	DefaultBufferSize       = 14
+	DefaultUIFontSize       = 15
+	DefaultBufferSize       = 16
 	DefaultBufferLineHeight = 1.5
 	DefaultBodyLineHeight   = 1.7
 	minUIFontSize           = 12
@@ -147,7 +147,7 @@ func DefaultAppearance() Appearance {
 		BufferFont:     Font{Family: DefaultFontFamily, Size: DefaultBufferSize, LineHeight: DefaultBufferLineHeight},
 		BodyFont:       BodyFontBuffer,
 		BodyLineHeight: DefaultBodyLineHeight,
-		Layout:         LayoutCompact,
+		Layout:         LayoutIslands,
 		Density:        DensityStandard,
 		Radius:         RadiusStandard,
 		ChatWidth:      ChatWidthStandard,
