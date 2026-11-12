@@ -12,7 +12,8 @@
 | 深色主题磨砂浓度 | 磨砂层不透明度按底色亮度分两档（浅色 0.62、深色 0.72）；深色底透出的浅色文字在 0.62 下会糊 | `desktop/internal/app/frost.go` |
 | 上下文用量条 | 输入框上方一条细进度条，按最近一次回复的用量占模型窗口的比例；不知道窗口或不到 1% 时不画 | `desktop/internal/app/chat_view.go`（`contextMeter`） |
 | 折叠行 | 一轮里连续的工具调用折成一行「Worked for …」，外观里可关 | `desktop/internal/app/chat_fold.go` |
-| 输入区边缘模糊 | 磨砂着色器按圆角矩形 SDF 计算到边缘的深度，`EdgeFade`（10 DIP）内把不透明度降到 0；卡片边缘只留背景模糊，不再是一圈实色 | `desktop/internal/app/frost.go` |
+| 输入区磨砂与边缘羽化 | 卡片本身半透明 + 背景模糊（std 16 DIP），边缘按圆角矩形 SDF 在 14 DIP 内渐隐；卡片里再放一块实色内容板（圆角 18）承载输入与引用，所以文字只有卡片之外才透出 | `desktop/internal/app/frost.go`、`chat_view.go`（`frosted`、`composer`） |
+| 输入区内部结构 | 状态区在卡片里：回复中左边转圈、已用时与正在做的事，下面一条细进度条，条下左边百分比、右边上下文窗口；回复中把这一轮提问引在实色板里，停止按钮是深色圆钮 | `desktop/internal/app/chat_view.go`（`cardStatus`、`quotedPrompt`、`stopButton`），用例 `TestComposerQuotesThePromptWhileReplying` |
 | 无气泡扁平风格 | 用户消息去掉气泡与右对齐，与助手正文同一套排版，左侧一条 3 DIP 的 accent 竖线做区分；`userBubble` 主题令牌随之删除（19 个配色文件、`Tokens` 与默认值） | `desktop/internal/app/chat_view.go`、`internal/theme/` |
 
 ## 未完成

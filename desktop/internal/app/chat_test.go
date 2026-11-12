@@ -67,6 +67,35 @@ func TestStatusLineNamesTheRunningTool(t *testing.T) {
 	expectTexts(t, tt, []string{"Running query_data…"}, []string{"Working"})
 }
 
+// 回复进行中，输入区卡片里引这一轮的提问；回复结束后引用块收起。
+func TestComposerQuotesThePromptWhileReplying(t *testing.T) {
+	f := newSourceFake(t)
+	a, _, tt := openChat(t, f)
+	a.connected = true
+	a.chat.Busy = true
+	a.chat.Messages = []conversation.Message{
+		{Key: "e1", Role: "user", Text: "revenue by region", Done: true},
+	}
+	tt.Frame()
+	count := func(want string) int {
+		n := 0
+		for _, text := range tt.Texts() {
+			if text == want {
+				n++
+			}
+		}
+		return n
+	}
+	// 文本在消息列与导航轨各有一份；引用块只在回复中出现一份。
+	busyCount := count("revenue by region")
+	a.chat.Busy = false
+	tt.Frame()
+	idleCount := count("revenue by region")
+	if busyCount != idleCount+1 {
+		t.Errorf("the quote shows only while replying: %d on screen while busy, %d when idle; texts %q", busyCount, idleCount, tt.Texts())
+	}
+}
+
 func TestStatusLineFallsBackToWorkingAfterTheToolFinishes(t *testing.T) {
 	f := newSourceFake(t)
 	a, _, tt := openChat(t, f)
