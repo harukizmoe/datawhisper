@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Shared DuckDB / DataFrame helpers used by every data source.
 
-These were originally module-level helpers in `data.connector`. They are
+These were originally module-level helpers in a shared connector module. They are
 intentionally underscore-prefixed and not re-exported — concrete sources
 import them directly.
 """

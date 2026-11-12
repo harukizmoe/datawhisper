@@ -1,7 +1,6 @@
 """Data source connectors.
 
-Public API — import these from `data.sources` (or via the legacy
-`data.connector` shim which re-exports the same names):
+Public API — import these from `compute.data.sources`.
 
     DataSource              — abstract base class
     ExcelDataSource         — .xlsx / .xls via calamine (Rust) → DuckDB

@@ -38,10 +38,10 @@
 |---|---|
 | `server/`、`desktop/`、`compute/`、`scripts/` | 新实现 |
 | `Function/`（13 MB） | compute 的图表/清洗/知识库/输出实现 |
-| `data/sources/` | compute 的数据源实现（其余 `data/*.py` 删除） |
+| `compute/data/` | 已并入 compute：数据源连接器、工作区运行时、导入限流 |
 | `skills/`、`commands/` | agent 的技能与命令资源 |
 | `config/` | hooks 与默认配置 |
-| `infrastructure/` | `paths.py` 等计算侧基础设施（检查是否只剩这部分） |
+| `compute/infrastructure/` | 已并入 compute：路径、产物生命周期、训练设备路由 |
 | `Information/*.md` | 产品说明与版本记录（`assets/` 另议） |
 | `static/vendor/{plotly.min.js,echarts.min.js,d3.v7.min.js}` | 图表 HTML 运行时依赖，随包 |
 

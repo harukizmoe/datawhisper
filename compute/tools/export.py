@@ -10,8 +10,8 @@ import uuid
 from pathlib import Path
 from ..i18n import say
 from ..validate import normalize_report_outline_args, validate_tool_args
-from infrastructure.artifact_lifecycle import register_artifact
-from infrastructure.paths import content_data_path, resource_root
+from compute.infrastructure.artifact_lifecycle import register_artifact
+from compute.infrastructure.paths import content_data_path, resource_root
 
 REPORT_JOB_SECTION_THRESHOLD = 6
 REPORT_JOB_CHART_THRESHOLD = 3

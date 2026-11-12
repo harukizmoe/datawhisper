@@ -23,8 +23,9 @@
 | `desktop/` | 桌面应用（原生 UI、web view 图表、托盘与菜单） | Go + MyGo |
 | `server/` | agent 服务：模型回合、工具、长任务、工作流、MCP、飞书机器人 | TypeScript on Bun |
 | `compute/` | 计算进程：数据源、SQL、统计、图表、导出 | Python |
+| `compute/data/` | 计算私有实现：数据源连接器、工作区运行时、导入限流 | Python |
+| `compute/infrastructure/` | 计算私有实现：路径与产物生命周期、训练设备路由 | Python |
 | `Function/` | 计算实现（图表模板、清洗、知识库、产出物） | Python |
-| `data/sources/` | 计算进程的数据源实现 | Python |
 | `skills/`、`commands/`、`config/` | agent 的技能、斜杠命令与默认配置 | Markdown / JSON |
 | `static/vendor/` | 图表页面依赖的 plotly / echarts / d3 | JS |
 | `docs/refactor/` | 重构计划、协议文档、打包说明 | Markdown |

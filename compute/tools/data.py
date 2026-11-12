@@ -394,7 +394,7 @@ class DataToolsMixin:
 
         # A6 护栏：job 的新连接会直接写到文件 DB，绕过内存影子，因此这里
         # 拒绝写操作，让影子路径（请求线程）保持为唯一的写入通道。
-        from data.sources._utils import is_write_sql
+        from compute.data.sources._utils import is_write_sql
         if is_write_sql(sql):
             return pd.DataFrame(), say("Write operations cannot run in a background job (in-memory cache path).",
                                        "写操作不支持在后台 job 中执行（内存缓存路径）。")
@@ -423,7 +423,7 @@ class DataToolsMixin:
 
         # A6：写 SQL 必须在请求线程走 source 的影子路径 ——
         # 绝不能走后台 job 的直接文件连接。
-        from data.sources._utils import is_write_sql
+        from compute.data.sources._utils import is_write_sql
         if is_write_sql(rewritten_sql):
             return self._tool_query_data_with_refs(sql)
 

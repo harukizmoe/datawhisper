@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from compute.i18n import say
-from infrastructure import gpu_detect
+from compute.infrastructure import gpu_detect
 
 
 def select_training_device(min_free_memory_mb: int = 2048) -> dict[str, Any]:

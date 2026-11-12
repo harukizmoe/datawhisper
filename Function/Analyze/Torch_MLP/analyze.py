@@ -8,7 +8,7 @@ from typing import Any, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from infrastructure.training_router import select_training_target
+from compute.infrastructure.training_router import select_training_target
 from compute.i18n import say
 
 

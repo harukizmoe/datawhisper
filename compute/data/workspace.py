@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from infrastructure.paths import content_data_path, resource_path
+from compute.infrastructure.paths import content_data_path, resource_path
 from compute.i18n import say
 
 log = logging.getLogger(__name__)

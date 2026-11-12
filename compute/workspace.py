@@ -40,7 +40,7 @@ def select_files(runtime, paths) -> tuple[list[dict], list[str]]:
     返回 ``(files, errors)``；``files`` 的元素与 ``runtime.list_data_files()`` 的形状一致
     （``name``/``size``/``suffix``），所以后面的导入逻辑不用分情况处理。
     """
-    from data.workspace import _is_blocked_path
+    from compute.data.workspace import _is_blocked_path
 
     root = runtime.workdir.resolve()
     files: list[dict] = []
@@ -82,7 +82,7 @@ def import_workdir_files(runtime, source, run_job, check_canceled=None, paths=No
 
     返回 ``{"added": [{"source_name", "tables"}], "errors", "skipped", "reused"}``。
     """
-    from data.sources.workspace_persistent import (
+    from compute.data.sources.workspace_persistent import (
         csv_requires_job, parse_workspace_csv_job, parse_workspace_excel_job,
     )
 

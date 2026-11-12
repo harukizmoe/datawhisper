@@ -14,11 +14,11 @@ import json
 import uuid
 from pathlib import Path
 
-from data.sources import SQLDataSource
-from data.sources.excel import excel_requires_job, parse_excel_job
-from data.sources.workspace_persistent import WorkspacePersistentSource
-from data.workspace import WorkspaceRuntime, validate_workdir
-from infrastructure.paths import content_data_path
+from compute.data.sources import SQLDataSource
+from compute.data.sources.excel import excel_requires_job, parse_excel_job
+from compute.data.sources.workspace_persistent import WorkspacePersistentSource
+from compute.data.workspace import WorkspaceRuntime, validate_workdir
+from compute.infrastructure.paths import content_data_path
 
 from .dashboard import load_dashboard, render_widget, save_dashboard
 from .dashboard_html_export import build_export_html, export_filename

@@ -28,8 +28,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from data.sources._utils import is_write_sql
-from data.workspace import WorkspacePathAuthorization, WorkspaceRuntime
+from compute.data.sources._utils import is_write_sql
+from compute.data.workspace import WorkspacePathAuthorization, WorkspaceRuntime
 
 from .dashboard import dashboard_path
 from .i18n import say
@@ -230,7 +230,7 @@ def prepare_args(name: str, args: dict, workspace_id: str, workspace_root: str =
 def apply_table_selection(lease: Lease, tables: Any) -> None:
     """应用 SQL 分析表选择（与旧的 ``/chat`` 数据上下文做法一致）；当某个活动
     SQL source 尚未选择分析表时拒绝运行。"""
-    from data.sources.sql import SQLDataSource
+    from compute.data.sources.sql import SQLDataSource
 
     if tables is None:
         tables = {}
@@ -321,7 +321,7 @@ def run_tool(rpc: MethodContext, registry: SourceRegistry, name: str, params: di
 def run_fetch_table_parse(rpc: MethodContext, registry: SourceRegistry, params: dict) -> dict:
     """``fetch_table`` 在调用方取回 URL 之后的阶段：把 body 解析成表，并注册为
     source ``params.source_id``。"""
-    from data.table_extract import MAX_FETCH_BYTES, TableExtractError, parse_body
+    from compute.data.table_extract import MAX_FETCH_BYTES, TableExtractError, parse_body
 
     from .tools.ingest import (
         no_grids_text, no_tables_text, extracted_source, extracted_source_text, fetch_error_text,

@@ -1049,8 +1049,8 @@
       "web-import"
      ]
     },
-    "prompt_sha256": "8b1e646819d01c90e9b92d9b7217427a67389aa20a1e88b7d839704989cee1a0",
-    "prompt_chars": 901,
+    "prompt_sha256": "10339ea104fd716eaf3e5d2a58afbe8d814cdff4d9bf91cf2e415f6ac5719523",
+    "prompt_chars": 909,
     "prompt_head": "# 网页表格导入\n\n用户给一个链接（或要求把某个网页/PDF 的表格\"抓下来\"）时，把表格注册为当前会话的数据源，注册后"
    },
    {
@@ -1365,12 +1365,12 @@
    {
     "name": "web-table",
     "request": "",
-    "sha256": "8b1e646819d01c90e9b92d9b7217427a67389aa20a1e88b7d839704989cee1a0"
+    "sha256": "10339ea104fd716eaf3e5d2a58afbe8d814cdff4d9bf91cf2e415f6ac5719523"
    },
    {
     "name": "web-table",
     "request": "按地区拆分销量",
-    "sha256": "c64be9c1f1dfe7d2675169a1630fabffe0281a8d251a483b42d7cd5a1790f3ce"
+    "sha256": "cab43b03c9a8e98c86042bfc2fe827944dca4125157e470250fbb28630da055c"
    },
    {
     "name": "winsorize",

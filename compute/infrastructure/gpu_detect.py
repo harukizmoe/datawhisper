@@ -22,7 +22,7 @@ import sys
 from typing import Dict, List
 
 from compute.i18n import say
-from infrastructure.paths import runtime_config_path
+from compute.infrastructure.paths import runtime_config_path
 
 log = logging.getLogger(__name__)
 
