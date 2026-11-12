@@ -77,8 +77,11 @@ type providerDraft struct {
 	inferred    map[string]bool
 }
 
-// settingsPageLabel 是默认模型下拉框里「不指定」的选项。
-const settingsPageLabel = "Service default (first available model)"
+// serviceDefault 是默认模型下拉框里「不指定」的选项；它同时是下拉框的值，所以按语言实时生成。
+func (a *app) serviceDefault() string { return a.tr("settings.serviceDefault") }
+
+// customEndpoint 是端点预设里的「自定义」选项，同样作为下拉框的值。
+func (a *app) customEndpoint() string { return a.tr("settings.customEndpoint") }
 
 // loadSettings 只刷新设置页需要的数据（模型设置、可用模型、用量），不重建窗口，也不影响正在显示的会话。
 func (a *app) loadSettings() {
@@ -103,20 +106,20 @@ func (a *app) loadSettings() {
 			a.st.loading = false
 			a.st.loaded = true
 			if availableErr != nil {
-				a.st.availableErr = settingsErrorText(availableErr)
+				a.st.availableErr = a.settingsErrorText(availableErr)
 			} else {
 				a.st.available, a.st.availableErr = available, ""
 				// 聊天里的模型下拉框用同一份目录：在设置里加了提供商、改了启用状态或默认模型后，不必重启就能选到。
 				a.cv.models, a.cv.modelsErr = available, ""
 			}
 			if viewErr != nil {
-				a.st.err = settingsErrorText(viewErr)
+				a.st.err = a.settingsErrorText(viewErr)
 			} else {
 				a.st.view = view
 				a.syncDefaultForm(view)
 			}
 			if usageErr != nil {
-				a.st.usageErr = settingsErrorText(usageErr)
+				a.st.usageErr = a.settingsErrorText(usageErr)
 			} else {
 				a.st.usage, a.st.usageErr = usage, ""
 				a.ensureExpanded()
@@ -243,7 +246,7 @@ func (a *app) setProviderEnabled(p service.ModelProvider, on bool) {
 				return
 			}
 			if err != nil {
-				a.st.notice, a.st.noticeErr = "Could not change "+p.Name+": "+settingsErrorText(err), true
+				a.st.notice, a.st.noticeErr = a.tr("settings.noticeChangeFailed", "name", p.Name, "error", a.settingsErrorText(err)), true
 				return
 			}
 			a.st.notice, a.st.noticeErr = p.Name+" is now "+enabledWord(on)+".", false
@@ -259,7 +262,7 @@ func (a *app) saveProviderKey(p service.ModelProvider) {
 		return
 	}
 	if key == "" {
-		a.st.keyErr = "Enter an API key first."
+		a.st.keyErr = a.tr("settings.errKeyEmpty")
 		return
 	}
 	a.st.keyBusy, a.st.keyErr = true, ""
@@ -273,12 +276,12 @@ func (a *app) saveProviderKey(p service.ModelProvider) {
 			}
 			a.st.keyBusy = false
 			if err != nil {
-				a.st.keyErr = "Could not store the key: " + settingsErrorText(err)
+				a.st.keyErr = a.tr("settings.errStoreKey", "error", a.settingsErrorText(err))
 				return
 			}
 			// 密钥只写不读：输入框立刻清空，界面只用 hasStoredKey 表示状态。
 			a.st.keyProvider, a.st.keyInput = "", ""
-			a.st.notice, a.st.noticeErr = "API key stored for "+p.Name+".", false
+			a.st.notice, a.st.noticeErr = a.tr("settings.noticeKeyStored", "name", p.Name), false
 			a.loadSettings()
 		})
 	}()
@@ -299,10 +302,10 @@ func (a *app) clearProviderKey(p service.ModelProvider) {
 				return
 			}
 			if err != nil {
-				a.st.notice, a.st.noticeErr = "Could not clear the key for "+p.Name+": "+settingsErrorText(err), true
+				a.st.notice, a.st.noticeErr = a.tr("settings.noticeClearFailed", "name", p.Name, "error", a.settingsErrorText(err)), true
 				return
 			}
-			a.st.notice, a.st.noticeErr = "API key cleared for "+p.Name+".", false
+			a.st.notice, a.st.noticeErr = a.tr("settings.noticeKeyCleared", "name", p.Name), false
 			a.loadSettings()
 		})
 	}()
@@ -323,7 +326,7 @@ func (a *app) removeProvider(p service.ModelProvider) {
 				return
 			}
 			if err != nil {
-				a.st.notice, a.st.noticeErr = "Could not remove "+p.Name+": "+settingsErrorText(err), true
+				a.st.notice, a.st.noticeErr = a.tr("settings.noticeRemoveFailed", "name", p.Name, "error", a.settingsErrorText(err)), true
 				return
 			}
 			if a.st.keyProvider == p.ID {
@@ -365,10 +368,10 @@ func (a *app) saveDefaultModel() {
 			}
 			a.st.defBusy = false
 			if err != nil {
-				a.st.defErr = settingsErrorText(err)
+				a.st.defErr = a.settingsErrorText(err)
 				return
 			}
-			a.st.notice, a.st.noticeErr = "Default model saved.", false
+			a.st.notice, a.st.noticeErr = a.tr("settings.noticeDefaultSaved"), false
 			a.loadSettings()
 		})
 	}()
@@ -392,7 +395,7 @@ func (a *app) applyPreset(label string) {
 		return
 	}
 	a.st.presetChoice = label
-	if label == "Custom endpoint" {
+	if label == a.customEndpoint() {
 		return
 	}
 	for _, p := range a.st.view.Presets {
@@ -446,7 +449,7 @@ func (a *app) discoverModels() {
 		return
 	}
 	if strings.TrimSpace(d.baseURL) == "" {
-		a.st.discoverErr = "Enter the endpoint's base URL first."
+		a.st.discoverErr = a.tr("settings.errBaseURLFirst")
 		return
 	}
 	a.st.discovering, a.st.discoverErr, a.st.testMsg = true, "", ""
@@ -461,11 +464,11 @@ func (a *app) discoverModels() {
 			}
 			a.st.discovering = false
 			if err != nil {
-				a.st.discoverErr = discoverErrorText(baseURL, err)
+				a.st.discoverErr = a.discoverErrorText(baseURL, err)
 				return
 			}
 			if len(models) == 0 {
-				a.st.discoverErr = "The endpoint listed no models. Check the base URL (usually it ends in /v1) and whether this service exposes a model list."
+				a.st.discoverErr = a.tr("settings.errNoModelsDiscovered")
 				return
 			}
 			d.models = make([]service.ProviderModel, 0, len(models))
@@ -502,18 +505,18 @@ func (a *app) testDraftModel(modelID string) {
 			}
 			a.st.testBusy = false
 			if err != nil {
-				a.st.testMsg = "Could not test " + modelID + ": " + settingsErrorText(err)
+				a.st.testMsg = a.tr("settings.testFailed", "model", modelID, "error", a.settingsErrorText(err))
 				return
 			}
 			if !result.OK {
-				a.st.testMsg = testErrorText(d.baseURL, result.Error)
+				a.st.testMsg = a.testErrorText(d.baseURL, result.Error)
 				return
 			}
 			text := strings.TrimSpace(result.Text)
 			if text == "" {
 				text = "(empty reply)"
 			}
-			a.st.testMsg = "Test passed: the model replied " + strconv.Quote(text) + "."
+			a.st.testMsg = a.tr("settings.testPassed", "text", strconv.Quote(text))
 		})
 	}()
 }
@@ -532,7 +535,7 @@ func (a *app) saveProvider() {
 		}
 	}
 	if len(models) == 0 {
-		a.st.formErr = "Choose at least one model: discover the endpoint and tick the models to enable."
+		a.st.formErr = a.tr("settings.errChooseModel")
 		return
 	}
 	settings.Models = models
@@ -553,12 +556,12 @@ func (a *app) saveProvider() {
 			a.st.saveBusy = false
 			if err != nil {
 				if a.st.editing == d {
-					a.st.formErr = settingsErrorText(err)
+					a.st.formErr = a.settingsErrorText(err)
 				}
 				return
 			}
 			if keyErr != nil {
-				a.st.notice, a.st.noticeErr = "Provider saved, but the API key was not stored: "+settingsErrorText(keyErr), true
+				a.st.notice, a.st.noticeErr = a.tr("settings.noticeKeyNotStored", "error", a.settingsErrorText(keyErr)), true
 			} else {
 				a.st.notice, a.st.noticeErr = settings.Name+" saved.", false
 			}
@@ -594,14 +597,15 @@ func draftSettings(d *providerDraft) service.ProviderSettings {
 	}
 }
 
-func keyStatus(p service.ModelProvider) string {
+// keyStatus 是提供方卡片上的密钥状态文字。
+func (a *app) keyStatus(p service.ModelProvider) string {
 	switch {
 	case p.HasStoredKey:
-		return "API key stored"
+		return a.tr("settings.keyStored")
 	case !p.KeyRequired:
-		return "No key needed"
+		return a.tr("settings.keyNotNeeded")
 	default:
-		return "No API key"
+		return a.tr("settings.keyMissing")
 	}
 }
 
@@ -679,42 +683,42 @@ func addUsage(total *service.Usage, u service.Usage) {
 }
 
 // settingsErrorText 把设置方法的 RPC 错误翻成用户可读的提示；未知模型与不支持的思考强度分开说明。
-func settingsErrorText(err error) string {
+func (a *app) settingsErrorText(err error) string {
 	var e *service.Error
 	if errors.As(err, &e) {
 		switch e.Kind {
 		case "invalid_input":
 			lower := strings.ToLower(e.Message)
 			if strings.Contains(lower, "contextwindow") || strings.Contains(lower, "maxtokens") {
-				return "The model's context window or output limit is not valid: " + e.Message + ". Both must be positive, and max output cannot exceed the context window."
+				return a.tr("settings.errContextWindow", "error", e.Message)
 			}
-			return "The service rejected this setting: " + e.Message
+			return a.tr("settings.errRejected", "error", e.Message)
 		case "unknown_model":
-			return "The service does not know this model: " + e.Message
+			return a.tr("settings.errUnknownModel", "error", e.Message)
 		case "unsupported_thinking_level":
-			return "This model does not support that thinking level: " + e.Message
+			return a.tr("settings.errThinkingLevel", "error", e.Message)
 		}
 		switch e.Code {
 		case -32601:
-			return "This service build has no model settings (method not found)."
+			return a.tr("settings.errNoSettings")
 		case -32000:
-			return "The service could not apply the change: " + e.Message
+			return a.tr("settings.errApplyFailed", "error", e.Message)
 		case -32603:
-			return "The service failed while applying the change: " + e.Message
+			return a.tr("settings.errApplyCrashed", "error", e.Message)
 		}
 	}
 	if errors.Is(err, service.ErrClosed) {
-		return "The agent service is not running."
+		return a.tr("settings.errNotRunning")
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "The service did not answer in time."
+		return a.tr("settings.errTimeout")
 	}
 	return err.Error()
 }
 
 // discoverErrorText 给「从端点发现模型」的失败补一句可操作的提示。服务端把连接失败报成内部错误，
 // 把 HTTP 状态放在 SettingsError 的文案里。
-func discoverErrorText(baseURL string, err error) string {
+func (a *app) discoverErrorText(baseURL string, err error) string {
 	var e *service.Error
 	text := err.Error()
 	message := ""
@@ -725,34 +729,34 @@ func discoverErrorText(baseURL string, err error) string {
 	lower := strings.ToLower(message)
 	switch {
 	case code == -32603:
-		return "Could not reach " + baseURL + ": is the local gateway (or Ollama) running at that address? Check the base URL and try again."
+		return a.tr("settings.discoverUnreachable", "base", baseURL)
 	case strings.Contains(lower, "http 401"), strings.Contains(lower, "http 403"):
-		return "The endpoint refused the request (" + message + "). Enter the API key it expects, then discover again."
+		return a.tr("settings.discoverRefused", "error", message)
 	case strings.Contains(lower, "http 404"):
-		return "The endpoint has no model list at that address (" + message + "). Most OpenAI-compatible servers expect the base URL to end in /v1."
+		return a.tr("settings.discoverNoList", "error", message)
 	case strings.Contains(lower, "http 5"):
-		return "The endpoint failed while listing models (" + message + "). Check the gateway's own log, then try again."
+		return a.tr("settings.discoverServerError", "error", message)
 	case strings.Contains(lower, "invalid base url"), strings.Contains(lower, "must be http"):
-		return "The base URL is not usable (" + message + "). It must be a full http(s) URL, for example http://127.0.0.1:3425/v1."
+		return a.tr("settings.discoverBadURL", "error", message)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "The endpoint did not answer in time. Check that it is running and that the base URL is correct."
+		return a.tr("settings.discoverTimeout")
 	}
-	return "Could not discover models from " + baseURL + ": " + text + ". Check the base URL, that the service is running, and whether it needs an API key."
+	return a.tr("settings.discoverFailed", "base", baseURL, "error", text)
 }
 
 // testErrorText 把 models.test 的业务错误补成可操作的话。模型测试不会抛 RPC 错误，失败都在 text 里。
-func testErrorText(baseURL, message string) string {
+func (a *app) testErrorText(baseURL, message string) string {
 	lower := strings.ToLower(message)
 	switch {
 	case containsAny(lower, "401", "403", "unauthorized", "invalid api key", "api key", "authentication", "auth"):
-		return "The test was rejected: " + message + ". Set the API key for this provider, then test again."
+		return a.tr("settings.testRejected", "error", message)
 	case containsAny(lower, "404", "not found", "unknown model"):
-		return "The provider does not offer this model: " + message + ". Discover the models again and pick one from the list."
+		return a.tr("settings.testNoModel", "error", message)
 	case containsAny(lower, "econnrefused", "connect", "fetch failed", "network", "dns", "timeout", "timed out"):
-		return "Could not reach " + baseURL + ": " + message + ". Check that the local gateway is running and the base URL is correct."
+		return a.tr("settings.testUnreachable", "base", baseURL, "error", message)
 	}
-	return "The test failed: " + message
+	return a.tr("settings.testResultFailed", "error", message)
 }
 
 func containsAny(s string, parts ...string) bool {

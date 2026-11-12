@@ -723,7 +723,7 @@ func (a *app) sourceModals(c *ui.Context, t *ui.Theme) {
 			switch a.src.confirmKind {
 			case confirmSource:
 				ui.Text(c, a.tr("data.confirmSource")).Bold()
-				ui.Textf(c, "%s will be disconnected. Its uploaded copy is deleted; files in a mounted folder stay.", a.src.confirmName).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.confirmSourceBody", "name", a.src.confirmName)).TextColor(t.TextMuted)
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 					if ui.Button(c, a.tr("data.cancel")).Clicked() {
 						a.src.confirmOpen = false
@@ -752,7 +752,7 @@ func (a *app) sourceModals(c *ui.Context, t *ui.Theme) {
 				})
 			case confirmWorkspace:
 				ui.Text(c, a.tr("data.confirmFolder")).Bold()
-				ui.Textf(c, "%s is removed from this chat. The folder and its files are not deleted.", a.src.confirmName).TextColor(t.TextMuted)
+				ui.Text(c, a.tr("data.confirmWorkspaceBody", "name", a.src.confirmName)).TextColor(t.TextMuted)
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 					if ui.Button(c, a.tr("data.cancel")).Clicked() {
 						a.src.confirmOpen = false

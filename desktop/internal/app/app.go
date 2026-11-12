@@ -337,7 +337,7 @@ func (a *app) send() {
 			// 新对话按首页选择的归属创建：工作区对话一创建就属于它（权限模式从 Manual 开始）。
 			id, err := client.CreateConversation(ctx, service.CreateConversationRequest{WorkspaceID: scope, Model: draftModel, ThinkingLevel: draftLevel})
 			if err != nil {
-				a.post(func() { a.sendFailed(p, "Could not start the conversation: ", err) })
+				a.post(func() { a.sendFailed(p, a.tr("chat.sendStartFailed", "error", err.Error()), err) })
 				return
 			}
 			conv = id
@@ -359,7 +359,7 @@ func (a *app) send() {
 		})
 		a.post(func() {
 			if err != nil {
-				a.sendFailed(p, "Could not send: ", err)
+				a.sendFailed(p, a.tr("chat.sendFailed", "error", err.Error()), err)
 				return
 			}
 			a.sending = false
@@ -371,18 +371,18 @@ func (a *app) send() {
 }
 
 // sendFailed 把没发出去的消息放回输入框（输入框为空时）；模型方面的问题则引导用户去设置。
-func (a *app) sendFailed(p pendingSend, what string, err error) {
+func (a *app) sendFailed(p pendingSend, message string, err error) {
 	a.sending = false
 	if a.input == "" {
 		a.input = p.text
 	}
 	switch {
 	case errors.Is(err, service.ErrNoModel):
-		a.sendErr, a.needModel = "No model is configured: add a model provider in the settings.", true
+		a.sendErr, a.needModel = a.tr("chat.sendNoModel"), true
 	case errors.Is(err, service.ErrModelUnavailable):
-		a.sendErr, a.needModel = "This conversation's model is no longer available: choose another in the settings.", true
+		a.sendErr, a.needModel = a.tr("chat.sendModelGone"), true
 	default:
-		a.sendErr = what + err.Error()
+		a.sendErr = message
 	}
 }
 
@@ -396,7 +396,7 @@ func (a *app) abort() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := client.Abort(ctx, conv); err != nil {
-			a.post(func() { a.sendErr = "Could not stop the reply: " + err.Error() })
+			a.post(func() { a.sendErr = a.tr("chat.stopFailed", "error", err.Error()) })
 		}
 	}()
 }

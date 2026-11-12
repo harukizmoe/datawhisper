@@ -185,7 +185,7 @@ func (a *app) providerCard(c *ui.Context, t *ui.Theme, p service.ModelProvider) 
 			} else {
 				ui.Spacer(c)
 			}
-			ui.Text(c, keyStatus(p)).FontSize(a.fs(textCaption)).TextColor(keyStatusColor(t, p)).Shrink(0)
+			ui.Text(c, a.keyStatus(p)).FontSize(a.fs(textCaption)).TextColor(keyStatusColor(t, p)).Shrink(0)
 			enabled := p.Enabled
 			if ui.Switch(c, &enabled).Label(a.tr("settings.enableProvider", "name", p.Name)).Changed() {
 				a.setProviderEnabled(p, enabled)
@@ -246,17 +246,17 @@ func (a *app) providerModels(c *ui.Context, t *ui.Theme, p service.ModelProvider
 	if p.Kind == "builtin" {
 		rows = availableModelRows(a.st.available, p.ID)
 		if len(rows) == 0 {
-			ui.Text(c, "Enable this provider and store its API key to list the models from the built-in catalog.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.providerDisabled")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			return
 		}
 	} else {
 		rows = providerModelRows(p.Models)
 		if len(rows) == 0 {
-			ui.Text(c, "No models yet: edit the provider and discover them from the endpoint.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.noModelsYet")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 			return
 		}
 	}
-	a.modelTable(c, t, rows, "Models for "+p.Name)
+	a.modelTable(c, t, rows, a.tr("settings.modelsFor", "name", p.Name))
 }
 
 func providerModelRows(models []service.ProviderModel) []settingsModelRow {
@@ -287,11 +287,11 @@ func availableModelRows(models []service.AvailableModel, provider string) []sett
 // modelTable 用 MyGo 的 Table 列出模型：上下文窗口、输出上限与能力各占一列。
 func (a *app) modelTable(c *ui.Context, t *ui.Theme, rows []settingsModelRow, label string) {
 	columns := []ui.TableColumn{
-		{Title: "Model", ID: "model", MinWidth: 120},
-		{Title: "Name", ID: "name", Width: 150},
-		{Title: "Context", ID: "context", Width: 84, Align: ui.End},
-		{Title: "Max output", ID: "max", Width: 100, Align: ui.End},
-		{Title: "Capabilities", ID: "capabilities"},
+		{Title: a.tr("settings.colModel"), ID: "model", MinWidth: 120},
+		{Title: a.tr("settings.colName"), ID: "name", Width: 150},
+		{Title: a.tr("settings.colContext"), ID: "context", Width: 84, Align: ui.End},
+		{Title: a.tr("settings.colMaxOutput"), ID: "max", Width: 100, Align: ui.End},
+		{Title: a.tr("settings.colCapabilities"), ID: "capabilities"},
 	}
 	ui.Table(c, nil, columns, len(rows), func(row, col int) {
 		m := rows[row]
@@ -346,19 +346,19 @@ func (a *app) availableCount(providerID string) int {
 
 func (a *app) keyEditor(c *ui.Context, t *ui.Theme, p service.ModelProvider) {
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-		input := ui.TextInput(c, &a.st.keyInput).Password().Label("API key for " + p.Name).
-			Placeholder("Paste the API key").Width(340)
-		if ui.PrimaryButton(c, "Save key").Clicked() || input.Submitted() {
+		input := ui.TextInput(c, &a.st.keyInput).Password().Label(a.tr("settings.keyFor", "name", p.Name)).
+			Placeholder(a.tr("settings.keyPlaceholder")).Width(340)
+		if ui.PrimaryButton(c, a.tr("settings.saveKey")).Clicked() || input.Submitted() {
 			a.saveProviderKey(p)
 		}
-		if ui.Button(c, "Cancel key").Clicked() {
+		if ui.Button(c, a.tr("settings.cancelKey")).Clicked() {
 			a.st.keyProvider, a.st.keyInput, a.st.keyErr = "", "", ""
 		}
 		if a.st.keyBusy {
 			ui.Spinner(c)
 		}
 	})
-	ui.Text(c, "The key is sent to the service and never shown again.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+	ui.Text(c, a.tr("settings.keySent")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 	if a.st.keyErr != "" {
 		ui.Text(c, a.st.keyErr).TextColor(t.Danger).FontSize(a.fs(textCaption))
 	}
@@ -372,46 +372,46 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 		return
 	}
 	d := a.st.editing
-	title := "New provider"
+	title := a.tr("settings.newProviderTitle")
 	if d.existing {
-		title = "Edit " + d.name
+		title = a.tr("settings.editProviderTitle", "name", d.name)
 	}
 	ui.Column(c).Gap(10).Padding(14).Radius(10).Background(t.Surface).BorderWidth(1).BorderColor(t.Accent.Alpha(0.5)).Children(func() {
 		ui.Text(c, title).Bold().FontSize(a.fs(textSection))
 		if !d.existing && a.st.view != nil {
-			labels := []string{"Custom endpoint"}
+			labels := []string{a.customEndpoint()}
 			for _, p := range a.st.view.Presets {
 				labels = append(labels, presetLabel(p))
 			}
 			choice := a.st.presetChoice
 			if choice == "" {
-				choice = "Custom endpoint"
+				choice = a.customEndpoint()
 			}
-			ui.Field(c, "Endpoint preset", func() {
-				if ui.Select(c, &choice, labels).Label("Endpoint preset").Changed() {
+			ui.Field(c, a.tr("settings.fieldPreset"), func() {
+				if ui.Select(c, &choice, labels).Label(a.tr("settings.fieldPreset")).Changed() {
 					a.applyPreset(choice)
 				}
 			})
 		}
 		ui.Row(c).Gap(12).AlignItems(ui.Start).Children(func() {
-			ui.Field(c, "Provider id", func() {
-				if ui.TextInput(c, &d.id).Label("Provider id").Placeholder("custom-my-endpoint").Changed() {
+			ui.Field(c, a.tr("settings.fieldProviderID"), func() {
+				if ui.TextInput(c, &d.id).Label(a.tr("settings.fieldProviderID")).Placeholder("custom-my-endpoint").Changed() {
 					d.idTouched = true
 				}
 			}).Grow(1)
-			ui.Field(c, "Display name", func() {
-				if ui.TextInput(c, &d.name).Label("Provider name").Placeholder("My endpoint").Changed() && !d.existing && !d.idTouched {
+			ui.Field(c, a.tr("settings.fieldDisplayName"), func() {
+				if ui.TextInput(c, &d.name).Label(a.tr("settings.fieldProviderName")).Placeholder("My endpoint").Changed() && !d.existing && !d.idTouched {
 					d.id = uniqueProviderID(a, slug(d.name))
 				}
 			}).Grow(1)
 		})
-		ui.Field(c, "Base URL", func() {
-			ui.TextInput(c, &d.baseURL).Label("Base URL").Placeholder("http://127.0.0.1:3425/v1")
+		ui.Field(c, a.tr("settings.fieldBaseURL"), func() {
+			ui.TextInput(c, &d.baseURL).Label(a.tr("settings.fieldBaseURL")).Placeholder("http://127.0.0.1:3425/v1")
 		})
-		ui.Checkbox(c, &d.requiresKey, "Requires an API key")
+		ui.Checkbox(c, &d.requiresKey, a.tr("settings.requiresKey"))
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.TextInput(c, &d.key).Password().Label("API key").Placeholder("Paste the API key (optional for local models)").Grow(1)
-			discover := ui.Button(c, "Discover models")
+			ui.TextInput(c, &d.key).Password().Label(a.tr("settings.fieldAPIKey")).Placeholder(a.tr("settings.keyOptionalPlaceholder")).Grow(1)
+			discover := ui.Button(c, a.tr("settings.discoverModels"))
 			if a.st.discovering {
 				discover.Disabled(true)
 				ui.Spinner(c)
@@ -420,7 +420,7 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 				a.discoverModels()
 			}
 		})
-		ui.Text(c, "The API key is only used to list and test models; saving stores it in the service and it never comes back.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		ui.Text(c, a.tr("settings.discoverHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		if a.st.discoverErr != "" {
 			ui.Text(c, a.st.discoverErr).TextColor(t.Danger).FontSize(a.fs(textCaption))
 		}
@@ -428,7 +428,7 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, a.st.formErr).TextColor(t.Danger).FontSize(a.fs(textCaption))
 		}
 		if anyInferred(d) {
-			ui.Text(c, "Some models did not report their context length: the conservative defaults (32k context / 4k output) were filled in. Check them before saving.").
+			ui.Text(c, a.tr("settings.inferredWarning")).
 				TextColor(t.Warning).FontSize(a.fs(textCaption))
 		}
 		if len(d.models) > 0 {
@@ -439,7 +439,7 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 			ui.Text(c, a.st.testMsg).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			save := ui.PrimaryButton(c, "Save provider")
+			save := ui.PrimaryButton(c, a.tr("settings.saveProvider"))
 			if a.st.saveBusy {
 				save.Disabled(true)
 				ui.Spinner(c)
@@ -447,7 +447,7 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 			if save.Clicked() {
 				a.saveProvider()
 			}
-			if ui.Button(c, "Cancel provider").Clicked() {
+			if ui.Button(c, a.tr("settings.cancelProvider")).Clicked() {
 				a.closeEditor()
 			}
 		})
@@ -457,19 +457,19 @@ func (a *app) providerEditor(c *ui.Context, t *ui.Theme) {
 // editorModelsTable 是「发现模型」后的勾选表：勾选要启用的模型，并在保存前逐个测试。
 func (a *app) editorModelsTable(c *ui.Context, t *ui.Theme, d *providerDraft) {
 	columns := []ui.TableColumn{
-		{Title: "Use", ID: "use", Width: 140, Fixed: true},
-		{Title: "Model", ID: "model", MinWidth: 110},
-		{Title: "Context", ID: "context", Width: 84, Align: ui.End},
-		{Title: "Max output", ID: "max", Width: 100, Align: ui.End},
-		{Title: "Capabilities", ID: "capabilities"},
-		{Title: "Test", ID: "test", Width: 150, Fixed: true},
+		{Title: a.tr("settings.colUse"), ID: "use", Width: 140, Fixed: true},
+		{Title: a.tr("settings.colModel"), ID: "model", MinWidth: 110},
+		{Title: a.tr("settings.colContext"), ID: "context", Width: 84, Align: ui.End},
+		{Title: a.tr("settings.colMaxOutput"), ID: "max", Width: 100, Align: ui.End},
+		{Title: a.tr("settings.colCapabilities"), ID: "capabilities"},
+		{Title: a.tr("settings.colTest"), ID: "test", Width: 150, Fixed: true},
 	}
 	ui.Table(c, nil, columns, len(d.models), func(row, col int) {
 		m := d.models[row]
 		switch col {
 		case 0:
 			on := d.include[m.ID]
-			if ui.Checkbox(c, &on, "Use "+m.ID).Changed() {
+			if ui.Checkbox(c, &on, a.tr("settings.useModel", "id", m.ID)).Changed() {
 				d.include[m.ID] = on
 			}
 		case 1:
@@ -481,11 +481,11 @@ func (a *app) editorModelsTable(c *ui.Context, t *ui.Theme, d *providerDraft) {
 		case 4:
 			caps := capabilitiesText(m.Reasoning, m.Vision, nil)
 			if d.inferred[m.ID] {
-				caps += " · context inferred"
+				caps += a.tr("settings.contextInferred")
 			}
 			ui.Text(c, caps).SingleLine()
 		case 5:
-			test := ui.Button(c, "Test "+m.ID)
+			test := ui.Button(c, a.tr("settings.testModel", "id", m.ID))
 			if a.st.testBusy {
 				test.Disabled(true)
 			}
@@ -493,40 +493,40 @@ func (a *app) editorModelsTable(c *ui.Context, t *ui.Theme, d *providerDraft) {
 				a.testDraftModel(m.ID)
 			}
 		}
-	}).Height(t.Space(8) * float32(len(d.models)+1)).Label("Discovered models")
+	}).Height(t.Space(8) * float32(len(d.models)+1)).Label(a.tr("settings.discoveredModels"))
 }
 
 func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(8).Children(func() {
 		ui.Text(c, a.tr("chat.modelDefault")).Bold().FontSize(a.fs(textSection))
 		if a.st.availableErr != "" {
-			ui.Text(c, "Could not load the available models: "+a.st.availableErr).TextColor(t.Danger)
+			ui.Text(c, a.tr("settings.availableFailed", "error", a.st.availableErr)).TextColor(t.Danger)
 			return
 		}
 		if len(a.st.available) == 0 {
-			ui.Text(c, "No model is available: enable a provider and store its key first.").TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.noModelAvailable")).TextColor(t.TextMuted)
 			return
 		}
-		options := []string{settingsPageLabel}
+		options := []string{a.serviceDefault()}
 		for _, m := range a.st.available {
 			options = append(options, modelLabel(m))
 		}
 		choice := a.st.defChoice
 		if choice == "" {
-			choice = settingsPageLabel
+			choice = a.serviceDefault()
 		}
 		ui.Row(c).Gap(12).AlignItems(ui.End).Children(func() {
-			ui.Field(c, "Model", func() {
-				if ui.Select(c, &choice, options).Label("Choose default model").Changed() {
+			ui.Field(c, a.tr("settings.fieldModel"), func() {
+				if ui.Select(c, &choice, options).Label(a.tr("settings.chooseDefaultModel")).Changed() {
 					a.st.defChoice = ""
-					if choice != settingsPageLabel {
+					if choice != a.serviceDefault() {
 						a.st.defChoice = choice
 					}
 					a.defThinkingForChoice()
 					a.saveDefaultModel() // 选中即保存，不再另点「保存」
 				}
 			}).Grow(1)
-			ui.Field(c, "Thinking level", func() {
+			ui.Field(c, a.tr("settings.fieldThinking"), func() {
 				m := a.selectedDefaultModel()
 				var levels []string
 				if m != nil {
@@ -537,7 +537,7 @@ func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 					think = a.thinkingDefault()
 				}
 				opts := append([]string{a.thinkingDefault()}, levels...)
-				sel := ui.Select(c, &think, opts).Label("Choose thinking level")
+				sel := ui.Select(c, &think, opts).Label(a.tr("settings.chooseThinking"))
 				if len(levels) == 0 {
 					sel.Disabled(true)
 				}
@@ -555,7 +555,7 @@ func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 			}
 		})
 		if m := a.selectedDefaultModel(); m != nil && len(m.ThinkingLevels) == 0 {
-			ui.Text(c, "This model does not offer thinking levels; the service uses its own default.").FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.noThinkingLevels")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
 		if a.st.defErr != "" {
 			ui.Text(c, a.st.defErr).TextColor(t.Danger).FontSize(a.fs(textCaption))
@@ -576,25 +576,25 @@ func (a *app) confirmModal(c *ui.Context, t *ui.Theme) {
 	ui.Modal(c, &a.st.modalOpen, func() {
 		switch a.st.confirmKind {
 		case "remove":
-			ui.Text(c, "Remove provider?").Bold()
-			ui.Textf(c, "%s and its stored API key will be removed. Conversations that use its models will need another model.", p.Name).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.confirmRemoveTitle")).Bold()
+			ui.Text(c, a.tr("settings.confirmRemoveBody", "name", p.Name)).TextColor(t.TextMuted)
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if ui.Button(c, "Cancel").Clicked() {
+				if ui.Button(c, a.tr("settings.cancel")).Clicked() {
 					a.st.modalOpen = false
 				}
-				if ui.Button(c, "Confirm remove provider").Clicked() {
+				if ui.Button(c, a.tr("settings.confirmRemove")).Clicked() {
 					a.st.modalOpen = false
 					a.removeProvider(p)
 				}
 			})
 		case "clear-key":
-			ui.Text(c, "Clear the API key?").Bold()
-			ui.Textf(c, "The API key stored for %s will be deleted; the provider and its models stay.", p.Name).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.confirmClearTitle")).Bold()
+			ui.Text(c, a.tr("settings.confirmClearBody", "name", p.Name)).TextColor(t.TextMuted)
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if ui.Button(c, "Cancel").Clicked() {
+				if ui.Button(c, a.tr("settings.cancel")).Clicked() {
 					a.st.modalOpen = false
 				}
-				if ui.PrimaryButton(c, "Confirm clear key").Clicked() {
+				if ui.PrimaryButton(c, a.tr("settings.confirmClear")).Clicked() {
 					a.st.modalOpen = false
 					a.clearProviderKey(p)
 				}
@@ -607,13 +607,13 @@ func (a *app) confirmModal(c *ui.Context, t *ui.Theme) {
 
 func (a *app) usageSection(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(8).Children(func() {
-		ui.Text(c, "Usage").Bold().FontSize(a.fs(textSection))
+		ui.Text(c, a.tr("settings.usageTitle")).Bold().FontSize(a.fs(textSection))
 		if a.st.usageErr != "" {
-			ui.Text(c, "Could not load the usage: "+a.st.usageErr).TextColor(t.Danger)
+			ui.Text(c, a.tr("settings.usageFailed", "error", a.st.usageErr)).TextColor(t.Danger)
 			return
 		}
 		if a.st.usage == nil {
-			ui.Text(c, "Loading…").TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.loadingUsage")).TextColor(t.TextMuted)
 			return
 		}
 		total := usageTotals(a.st.usage)
@@ -622,12 +622,12 @@ func (a *app) usageSection(c *ui.Context, t *ui.Theme) {
 			return
 		}
 		ui.Row(c).Gap(24).Wrap().Children(func() {
-			a.usageMetric(c, t, "Input tokens", formatCount(total.Input))
-			a.usageMetric(c, t, "Output tokens", formatCount(total.Output))
-			a.usageMetric(c, t, "Cache hits", formatCount(total.CacheRead))
-			a.usageMetric(c, t, "Cache writes", formatCount(total.CacheWrite))
-			a.usageMetric(c, t, "Total tokens", formatCount(total.TotalTokens))
-			a.usageMetric(c, t, "Cost (USD)", formatCost(total.Cost.Total))
+			a.usageMetric(c, t, a.tr("settings.metricInput"), formatCount(total.Input))
+			a.usageMetric(c, t, a.tr("settings.metricOutput"), formatCount(total.Output))
+			a.usageMetric(c, t, a.tr("settings.metricCacheHits"), formatCount(total.CacheRead))
+			a.usageMetric(c, t, a.tr("settings.metricCacheWrites"), formatCount(total.CacheWrite))
+			a.usageMetric(c, t, a.tr("settings.metricTotal"), formatCount(total.TotalTokens))
+			a.usageMetric(c, t, a.tr("settings.metricCost"), formatCost(total.Cost.Total))
 		})
 		keys := make([]string, 0, len(a.st.usage.Models))
 		for key := range a.st.usage.Models {
@@ -636,7 +636,7 @@ func (a *app) usageSection(c *ui.Context, t *ui.Theme) {
 		sort.Strings(keys)
 		for _, key := range keys {
 			u := a.st.usage.Models[key]
-			ui.Textf(c, "%s · %s input · %s output · %s cache hits", key, formatCount(u.Input), formatCount(u.Output), formatCount(u.CacheRead)).
+			ui.Text(c, a.tr("settings.modelUsageLine", "model", key, "input", formatCount(u.Input), "output", formatCount(u.Output), "cache", formatCount(u.CacheRead))).
 				FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
 	})
@@ -660,18 +660,18 @@ func formatCost(v float64) string {
 
 func (a *app) serviceSection(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(6).Children(func() {
-		ui.Text(c, "Agent service").Bold().FontSize(a.fs(textSection))
+		ui.Text(c, a.tr("settings.serviceTitle")).Bold().FontSize(a.fs(textSection))
 		label := a.statusLabel()
 		if a.service.State == supervisor.StateReady {
-			ui.Textf(c, "%s: process %d", label, a.service.PID)
+			ui.Text(c, a.tr("settings.serviceProcess", "status", label, "pid", strconv.Itoa(a.service.PID)))
 		} else {
 			ui.Text(c, label)
 		}
 		if a.st.view != nil && a.st.view.CredentialBackend != "" {
-			ui.Text(c, "Credential backend: "+a.st.view.CredentialBackend).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+			ui.Text(c, a.tr("settings.credentialBackend", "backend", a.st.view.CredentialBackend)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		}
 		if a.logPath != "" {
-			ui.Text(c, "Log: "+a.logPath).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable()
+			ui.Text(c, a.tr("settings.logPath", "path", a.logPath)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Selectable()
 		}
 	})
 }
