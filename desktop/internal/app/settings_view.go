@@ -498,7 +498,7 @@ func (a *app) editorModelsTable(c *ui.Context, t *ui.Theme, d *providerDraft) {
 
 func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 	ui.Column(c).Gap(8).Children(func() {
-		ui.Text(c, "Default model").Bold().FontSize(a.fs(textSection))
+		ui.Text(c, a.tr("chat.modelDefault")).Bold().FontSize(a.fs(textSection))
 		if a.st.availableErr != "" {
 			ui.Text(c, "Could not load the available models: "+a.st.availableErr).TextColor(t.Danger)
 			return
@@ -534,15 +534,15 @@ func (a *app) defaultModelSection(c *ui.Context, t *ui.Theme) {
 				}
 				think := a.st.defThinking
 				if think == "" {
-					think = defaultThinkingLabel
+					think = a.thinkingDefault()
 				}
-				opts := append([]string{defaultThinkingLabel}, levels...)
+				opts := append([]string{a.thinkingDefault()}, levels...)
 				sel := ui.Select(c, &think, opts).Label("Choose thinking level")
 				if len(levels) == 0 {
 					sel.Disabled(true)
 				}
 				if sel.Changed() {
-					if think == defaultThinkingLabel {
+					if think == a.thinkingDefault() {
 						a.st.defThinking = ""
 					} else {
 						a.st.defThinking = think
