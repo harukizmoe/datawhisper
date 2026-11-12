@@ -106,11 +106,12 @@ type askUI struct {
 	err    string
 }
 
-// modelDefault 是“会话还没有模型”时下拉框显示的值；它不对应任何真实模型，选中它不会调用 setModel。
-const modelDefault = "Default model"
+// modelDefault 是“会话还没有模型”时下拉框显示的文字；它不对应任何真实模型，选中它不会调用 setModel。
+// 按界面语言取文案：这串文字同时也是下拉框的值，所以比较处都必须走 modelDefault()。
+func (a *app) modelDefault() string { return a.tr("chat.modelDefault") }
 
 // thinkingDefault 表示思考强度未设置；服务端用 ThinkingLevel=nil 清空。
-const thinkingDefault = "Default"
+func (a *app) thinkingDefault() string { return a.tr("chat.thinkingDefault") }
 
 // internalAskInstruction 是服务端写在 ask_user 工具结果正文里的内部指令
 // （server/src/tools/app/interaction.ts：`问题已展示给用户，等待用户回答后继续。请不要输出任何文字。`）。
@@ -466,9 +467,10 @@ func refLabel(ref *service.ModelRef) string {
 	return ref.Provider + "/" + ref.ModelID
 }
 
-func thinkingLabel(level string) string {
+// thinkingLabel 把服务端的强度换成下拉框里的值；未设置时用当前语言的「默认」。
+func (a *app) thinkingLabel(level string) string {
 	if level == "" {
-		return thinkingDefault
+		return a.thinkingDefault()
 	}
 	return level
 }
@@ -478,7 +480,7 @@ func thinkingLabel(level string) string {
 func (a *app) modelOptions() []string {
 	var options []string
 	if a.chat.Model == nil {
-		options = append(options, modelDefault)
+		options = append(options, a.modelDefault())
 	}
 	for _, m := range a.cv.models {
 		options = append(options, m.Provider+"/"+m.ID)
@@ -496,7 +498,7 @@ func (a *app) thinkingOptions() []string {
 	if len(levels) == 0 {
 		return nil
 	}
-	return append([]string{thinkingDefault}, levels...)
+	return append([]string{a.thinkingDefault()}, levels...)
 }
 
 func (a *app) thinkingLevels() []string {
@@ -516,15 +518,15 @@ func (a *app) syncModelControls() {
 	}
 	choice := refLabel(a.chat.Model)
 	if a.chat.Model == nil {
-		choice = modelDefault
+		choice = a.modelDefault()
 	}
 	if a.cv.modelChoice != choice {
 		a.cv.modelChoice = choice
 	}
 	if options := a.thinkingOptions(); len(options) > 1 {
-		want := thinkingLabel(a.chat.ThinkingLevel)
+		want := a.thinkingLabel(a.chat.ThinkingLevel)
 		if !hasString(options, want) {
-			want = thinkingDefault
+			want = a.thinkingDefault()
 		}
 		if a.cv.thinkingChoice != want {
 			a.cv.thinkingChoice = want
@@ -543,7 +545,7 @@ func (a *app) syncFromState(switched bool) {
 
 // chooseModel 处理下拉框的新选择，调用 conversation.setModel。
 func (a *app) chooseModel(label string) {
-	if label == "" || label == modelDefault {
+	if label == "" || label == a.modelDefault() {
 		return
 	}
 	var ref service.ModelRef
@@ -580,7 +582,7 @@ func (a *app) chooseThinking(label string) {
 		return
 	}
 	level := ""
-	if label != thinkingDefault {
+	if label != a.thinkingDefault() {
 		level = label
 	}
 	a.setModel(ref, level)
@@ -596,7 +598,7 @@ func (a *app) setModel(ref service.ModelRef, level string) {
 		a.cv.draftModel, a.cv.draftLevel = &ref, level
 		a.cv.modelsTouched, a.cv.modelsErr = true, ""
 		a.cv.modelChoice = ref.Provider + "/" + ref.ModelID
-		a.cv.thinkingChoice = thinkingLabel(level)
+		a.cv.thinkingChoice = a.thinkingLabel(level)
 		return
 	}
 	client, conv := a.client, a.conv
@@ -621,7 +623,7 @@ func (a *app) setModel(ref service.ModelRef, level string) {
 			a.chat.Model = resp.Model
 			a.chat.ThinkingLevel = resp.ThinkingLevel
 			a.cv.modelChoice = refLabel(resp.Model)
-			a.cv.thinkingChoice = thinkingLabel(resp.ThinkingLevel)
+			a.cv.thinkingChoice = a.thinkingLabel(resp.ThinkingLevel)
 		})
 	}()
 }

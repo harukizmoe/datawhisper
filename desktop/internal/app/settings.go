@@ -80,9 +80,6 @@ type providerDraft struct {
 // settingsPageLabel 是默认模型下拉框里「不指定」的选项。
 const settingsPageLabel = "Service default (first available model)"
 
-// defaultThinkingLabel 是思考强度下拉框里「跟随模型」的选项。
-const defaultThinkingLabel = "Default"
-
 // loadSettings 只刷新设置页需要的数据（模型设置、可用模型、用量），不重建窗口，也不影响正在显示的会话。
 func (a *app) loadSettings() {
 	client := a.client
