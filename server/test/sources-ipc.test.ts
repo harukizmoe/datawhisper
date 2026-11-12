@@ -1130,6 +1130,21 @@ describe("入参形状在方法体之前被拦下", () => {
     const badActive = await server.call("source.toggle", { conversationId: 1, sourceId: "s_00000001", active: "yes" });
     expect(badActive.error?.message).toBe("'active' must be a boolean");
   });
+
+  test("workspace.importFiles 的 paths：非数组、空、超上限、非字符串各有原话", async () => {
+    const workspaceId = "ws_0123456789abcdef";
+    const notArray = await server.call("workspace.importFiles", { workspaceId, paths: "a.csv" });
+    expect(notArray.error?.message).toBe("'paths' must be a non-empty array");
+    const empty = await server.call("workspace.importFiles", { workspaceId, paths: [] });
+    expect(empty.error?.message).toBe("'paths' must be a non-empty array");
+    const tooMany = await server.call("workspace.importFiles", {
+      workspaceId,
+      paths: Array.from({ length: 201 }, (_value, index) => `f${index}.csv`),
+    });
+    expect(tooMany.error?.message).toBe("'paths' accepts at most 200 files");
+    const notString = await server.call("workspace.importFiles", { workspaceId, paths: ["a.csv", 2] });
+    expect(notString.error?.message).toBe("'paths' must contain only strings");
+  });
 });
 
 describe("抓取工具登记来源", () => {

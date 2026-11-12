@@ -23,7 +23,7 @@ import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { BitableRead } from "../feishu/bitable.ts";
 import { ComputeError, type SourceDescriptor } from "../compute/client.ts";
 import { APP_ERROR, INVALID_PARAMS, RpcError, appError, invalidParams } from "./errors.ts";
-import { checkParams, CONVERSATION_ID_RULE, SOURCE_ID_RULE, workspaceIdParam, type ParamRules } from "./params.ts";
+import { checkParams, CONVERSATION_ID_RULE, SOURCE_ID_RULE, WORKSPACE_ID_RULE, workspaceIdParam, type ParamRules } from "./params.ts";
 import type { MethodParams, RpcMethod } from "./rpc.ts";
 import {
   ARTIFACT_CONTENT_TYPES,
@@ -1118,6 +1118,19 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     }
   };
 
+  // 只导入指定文件：形状与上限在这里挡住，路径是否越界仍由下面的循环判断（越界是业务错误）。
+  const IMPORT_FILES_SHAPE: ParamRules = {
+    workspaceId: WORKSPACE_ID_RULE,
+    paths: {
+      type: "array",
+      minItems: 1,
+      maxItems: 200,
+      message: "'paths' must be a non-empty array",
+      maxItemsMessage: "'paths' accepts at most 200 files",
+      items: { type: "string", message: "'paths' must contain only strings" },
+    },
+  };
+
   // 入参形状集中声明：方法体里仍做语义检查（来源是否存在、配置是否匹配），这里只挡形状。
   const SHAPES: Record<string, ParamRules> = {
     "source.list": { conversationId: CONVERSATION_ID_RULE },
@@ -1605,13 +1618,10 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     /** 建对话之前先确认工作区可用、共享来源已打开：失败时不会留下一个空对话。 */
     /** 只导入指定文件（界面里的「Import」）；路径是相对工作区根的文件名。 */
     "workspace.importFiles": async (params) => {
-      const record = await requireWorkspaceRecord(workspaceIdParam(params));
+      checkParams(params, IMPORT_FILES_SHAPE);
+      const record = await requireWorkspaceRecord(params.workspaceId as string);
       requireAvailable(record);
-      const raw = params.paths;
-      if (!Array.isArray(raw) || raw.length === 0) throw invalidParams("'paths' must be a non-empty array");
-      if (raw.length > 200) throw invalidParams("'paths' accepts at most 200 files");
-      const paths = raw.map((item) => {
-        if (typeof item !== "string") throw invalidParams("'paths' must contain only strings");
+      const paths = (params.paths as string[]).map((item) => {
         const rel = item.replace(/\\/g, "/").trim();
         if (rel === "" || rel.startsWith("/") || rel.split("/").some((part) => part === "" || part === "..")) {
           throw invalidReason(say(`Not a path inside the workspace: ${item}`, `不是工作区内的路径：${item}`), "invalid_path");
