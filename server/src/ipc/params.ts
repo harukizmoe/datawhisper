@@ -21,9 +21,10 @@ export type ParamRule = {
   readonly pattern?: RegExp;
   /** 只对字符串生效：最短长度。 */
   readonly minLength?: number;
-  /** 只对数组生效：最少/最多项数。 */
+  /** 只对数组生效：最少/最多项数；`maxItemsMessage` 让「太多」与「类型不对」用不同句子。 */
   readonly minItems?: number;
   readonly maxItems?: number;
+  readonly maxItemsMessage?: string;
   /** 数组元素的形状；省略时元素不做进一步检查。 */
   readonly items?: ParamRule;
   readonly optional?: boolean;
@@ -55,7 +56,7 @@ function failure(rule: ParamRule, value: unknown, key: string): string | undefin
     case "array": {
       if (!Array.isArray(value)) return message;
       if (rule.minItems !== undefined && value.length < rule.minItems) return message;
-      if (rule.maxItems !== undefined && value.length > rule.maxItems) return message;
+      if (rule.maxItems !== undefined && value.length > rule.maxItems) return rule.maxItemsMessage ?? message;
       for (const item of value) {
         const inner = rule.items === undefined ? undefined : failure(rule.items, item, key);
         if (inner !== undefined) return inner;
