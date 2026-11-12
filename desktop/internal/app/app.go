@@ -347,6 +347,8 @@ func (a *app) send() {
 					a.show(id)
 				}
 				a.refreshConversations()
+				// 新对话可能落在某个工作区：侧栏分组读的是工作区索引，创建后要重新拉一次归属。
+				a.loadWorkspaces()
 			})
 		}
 		_, err := client.Submit(ctx, strconv.Itoa(conv), service.SubmitRequest{

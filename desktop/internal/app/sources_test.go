@@ -215,6 +215,19 @@ func (f *sourceFake) serve(in io.Reader, out io.Writer) {
 			respond(req.ID, map[string]any{"conversations": sessions})
 		case "conversation.create":
 			f.record(req.Method, req.Params)
+			var createParams struct {
+				WorkspaceID string `json:"workspaceId"`
+			}
+			_ = json.Unmarshal(req.Params, &createParams)
+			f.mu.Lock()
+			if createParams.WorkspaceID != "" {
+				if f.scopes == nil {
+					f.scopes = map[int]string{}
+				}
+				f.scopes[3] = createParams.WorkspaceID
+			}
+			f.sessions = append(f.sessions, service.Session{ID: 3, Title: "hello"})
+			f.mu.Unlock()
 			respond(req.ID, map[string]any{"id": 3})
 		case "conversation.scopes":
 			f.mu.Lock()
@@ -1571,6 +1584,20 @@ func TestNewChatGoesIntoTheChosenWorkspace(t *testing.T) {
 	q.pump(t, tt, "the created conversation", func() bool { return f.call("conversation.create") != nil })
 	if call := f.call("conversation.create"); call["workspaceId"] != "ws_0000000000000001" {
 		t.Errorf("conversation.create params: %v", call)
+	}
+	// 侧栏分组读工作区索引：创建后要重新拉一次归属，新对话才会出现在工作区下面。
+	q.pump(t, tt, "the created chat's workspace", func() bool { return a.scopeOf(3) == "ws_0000000000000001" })
+	rows := a.workspaceRows()
+	grouped := len(rows) == 1
+	if grouped {
+		found := false
+		for _, session := range rows[0].sessions {
+			found = found || session.ID == 3
+		}
+		grouped = found
+	}
+	if !grouped {
+		t.Fatalf("the new chat is not grouped under the workspace: rows=%v", rows)
 	}
 }
 
