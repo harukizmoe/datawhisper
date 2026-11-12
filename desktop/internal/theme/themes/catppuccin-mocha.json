@@ -20,7 +20,7 @@
     "surfaceHover": "surface1", "surfacePressed": "surface2", "border": "surface0", "text": "text",
     "textMuted": "subtext0", "accent": "mauve", "link": "blue", "focus": "lavender/0.6",
     "selection": "overlay2/0.25", "success": "green", "warning": "yellow", "danger": "red",
-    "userBubble": "surface0", "codeBackground": "mantle", "card": "mantle", "cardBorder": "surface0",
+    "codeBackground": "mantle", "card": "mantle", "cardBorder": "surface0",
     "canvas": "crust"
   },
   "syntax": {

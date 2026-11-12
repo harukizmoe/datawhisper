@@ -22,7 +22,7 @@
     "surfaceHover": "light2", "surfacePressed": "light3", "border": "light2", "text": "dark1",
     "textMuted": "dark4", "accent": "faded-orange", "link": "faded-blue", "focus": "faded-orange/0.6",
     "selection": "faded-yellow/0.25", "success": "faded-green", "warning": "faded-yellow", "danger": "faded-red",
-    "userBubble": "light1", "codeBackground": "light0-soft", "card": "light0-soft", "cardBorder": "light2",
+    "codeBackground": "light0-soft", "card": "light0-soft", "cardBorder": "light2",
     "canvas": "light1"
   },
   "syntax": {

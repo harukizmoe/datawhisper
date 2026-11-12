@@ -17,7 +17,7 @@
     "surfaceHover": "base1/0.4", "surfacePressed": "base1/0.7", "border": "base1/0.5", "text": "base01",
     "textMuted": "base00", "accent": "blue", "link": "blue", "focus": "blue/0.6",
     "selection": "base2", "success": "green", "warning": "yellow", "danger": "red",
-    "userBubble": "base2", "codeBackground": "base2", "card": "base2", "cardBorder": "base1/0.5",
+    "codeBackground": "base2", "card": "base2", "cardBorder": "base1/0.5",
     "canvas": "base2"
   },
   "syntax": {

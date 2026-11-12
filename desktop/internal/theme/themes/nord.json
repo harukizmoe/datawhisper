@@ -17,7 +17,7 @@
     "surfaceHover": "nord3", "surfacePressed": "nord3", "border": "nord2", "text": "nord6",
     "textMuted": "nord4/0.7", "accent": "nord8", "link": "nord8", "focus": "nord8/0.6",
     "selection": "nord8/0.3", "success": "nord14", "warning": "nord13", "danger": "nord11",
-    "userBubble": "nord2", "codeBackground": "nord0", "card": "nord0", "cardBorder": "nord2",
+    "codeBackground": "nord0", "card": "nord0", "cardBorder": "nord2",
     "canvas": "nord0"
   },
   "syntax": {

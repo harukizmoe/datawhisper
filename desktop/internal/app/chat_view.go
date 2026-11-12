@@ -193,9 +193,10 @@ func (a *app) message(c *ui.Context, m conversation.Message) {
 	t := c.Theme()
 	switch {
 	case m.Role == "user":
-		ui.Row(c).Children(func() {
-			ui.Spacer(c)
-			ui.Text(c, m.Text).Selectable().Padding(10, 14).Radius(radiusBubble).Background(a.tokens().Tok.UserBubble).MaxWidth(600)
+		// 扁平风格（参考 Tern）：提问不再是一块气泡，而是与助手正文同一套排版，左侧一条细线做区分。
+		ui.Row(c).Gap(12).AlignItems(ui.Stretch).Children(func() {
+			ui.Box(c).Width(3).Radius(2).Background(t.Accent.Alpha(0.55)).Shrink(0)
+			ui.Text(c, m.Text).Selectable().Padding(1, 0).Grow(1).MinWidth(0)
 		})
 	case m.Role == "note":
 		// 宿主写给模型的旁注（质量闸门、系统提醒）：展示成可折叠的灰色提示，不当成用户发言。
