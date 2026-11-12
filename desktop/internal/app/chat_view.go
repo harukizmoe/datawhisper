@@ -35,6 +35,12 @@ func (a *app) chatColumnWidth() float32 {
 // toolPreviewLines 是工具卡片默认显示的输出行数（末尾几行）；更早的行折叠成「前面还有 N 行」。
 const toolPreviewLines = 6
 
+// composerRadius 是输入区卡片的圆角，composerInner 是卡片里实色内容板的圆角（参考 Tern）。
+const (
+	composerRadius = 24
+	composerInner  = 18
+)
+
 // chatPage 构建对话页：标题栏、横幅、消息列与导航轨、错误提示和输入区。
 func (a *app) chatPage(c *ui.Context) {
 	t := c.Theme()
@@ -687,9 +693,9 @@ func (a *app) navRail(c *ui.Context, messages []conversation.Message) {
 	})
 }
 
-// composer 是输入区（参考 Tern）：上方是状态行（处理中与已用时）、上下文用量与排队的消息；下方是一张圆角
-// 卡片，里面是随内容长高的多行输入，以及模型、思考强度、回复中的 Enter 行为和圆形的发送/停止按钮。
-// Enter 发送，Shift+Enter 换行；输入还只是 /命令前缀时 Enter 先补全。
+// composer 是输入区（参考 Tern）：外层是一张磨砂卡片，背后滚过的消息被模糊后透出来；卡片里从上到下是
+// 状态行与用量条、一块实色的内容板（回复中先引这一轮的提问，然后是随内容长高的输入框），以及模型、思考
+// 强度、范围/权限、费用与圆形的发送/停止按钮。Enter 发送，Shift+Enter 换行；输入还只是 /命令前缀时 Enter 先补全。
 func (a *app) composer(c *ui.Context) {
 	t := c.Theme()
 	busy := a.chat.Busy && a.connected
@@ -699,11 +705,10 @@ func (a *app) composer(c *ui.Context) {
 				a.slashMenu(c)
 			}
 			a.permissionCards(c)
-			if busy || len(a.chat.QueuedInputs) > 0 {
-				a.statusLine(c, busy)
+			if len(a.chat.QueuedInputs) > 0 {
+				a.queueChips(c)
 			}
 			a.taskPanel(c)
-			a.contextMeter(c)
 			// 没有焦点、没有草稿时折叠成一行（参考 Tern）：点一下展开并取得焦点。失焦要持续一小会儿才折叠：
 			// 选了下拉框的一项后焦点会短暂离开卡片，当场折叠会让还没处理的选择丢掉。
 			menuOpen := a.cv.menuOpen
@@ -723,25 +728,33 @@ func (a *app) composer(c *ui.Context) {
 					return
 				}
 			}
-			frosted(ui.Column(c).Radius(radiusBubble).BorderWidth(1).BorderColor(t.Border), t.Surface, radiusBubble).Padding(10, 12, 8, 12).Gap(6).Bind(&a.cv.cardRef).Children(func() {
-				area := ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
-					BorderWidth(0).Background(t.Surface.Alpha(0)).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
-					if k.Key != ui.KeyEnter || k.Mods != 0 {
-						return false // Shift+Enter 换行
+			frosted(ui.Column(c).Radius(composerRadius).BorderWidth(1).BorderColor(t.Border), t.Surface, composerRadius).
+				Padding(12, 14, 10, 14).Gap(10).Bind(&a.cv.cardRef).Children(func() {
+				a.cardStatus(c, busy)
+				// 实色内容板：卡片是磨砂的，输入与引用放在这里才清晰。
+				ui.Column(c).Radius(composerInner).BorderWidth(1).BorderColor(t.Border).Background(t.Surface).Padding(8, 12).Gap(6).Children(func() {
+					if busy {
+						a.quotedPrompt(c)
 					}
-					a.input = k.Text()
-					if !a.completeSlash() {
-						if a.canSend() {
-							a.send()
+					area := ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
+						BorderWidth(0).Background(t.Surface.Alpha(0)).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
+						if k.Key != ui.KeyEnter || k.Mods != 0 {
+							return false // Shift+Enter 换行
 						}
+						a.input = k.Text()
+						if !a.completeSlash() {
+							if a.canSend() {
+								a.send()
+							}
+						}
+						k.SetText(a.input)
+						return true
+					})
+					if a.cv.wantFocus {
+						area.Focus()
+						a.cv.wantFocus = false
 					}
-					k.SetText(a.input)
-					return true
 				})
-				if a.cv.wantFocus {
-					area.Focus()
-					a.cv.wantFocus = false
-				}
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 					if options := a.modelOptions(); len(options) > 0 {
 						sel := ui.Select(c, &a.cv.modelChoice, options).MaxWidth(240).MinWidth(0).FontSize(a.fs(textCaption))
@@ -768,7 +781,7 @@ func (a *app) composer(c *ui.Context) {
 						a.buffer(ui.Text(c, formatCost(cost))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0).Tooltip(a.tr("chat.costTip"))
 					}
 					if busy {
-						if iconButton(c, icons.Stop, a.tr("chat.stop")).Radius(999).Tooltip(a.tr("chat.stopTip")).Shrink(0).Clicked() {
+						if a.stopButton(c) {
 							a.abort()
 						}
 					}
@@ -783,39 +796,13 @@ func (a *app) composer(c *ui.Context) {
 	})
 }
 
-// statusLine 是输入框上方的一行：回复进行中时显示「处理中 │ 已用时」，右侧是排队等待的消息（每条一个
-// 小标签，悬停看全文与它是排队还是引导）。
-func (a *app) statusLine(c *ui.Context, busy bool) {
+// stopButton 是参考图里那颗深色圆钮：白方块图标，点一下停止这一轮。
+func (a *app) stopButton(c *ui.Context) bool {
 	t := c.Theme()
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(0, 4).Children(func() {
-		if busy {
-			ui.Spinner(c)
-			// 正在跑工具时说出是哪个：模型在等结果的那段时间里，只有「Working」看不出卡在哪。
-			label := a.tr("chat.working")
-			if action := a.currentAction(); action != "" {
-				label = a.tr("chat.actionTool", "name", action)
-			}
-			ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-			if !a.cv.busySince.IsZero() {
-				elapsed := c.Now().Sub(a.cv.busySince)
-				if elapsed < 0 {
-					elapsed = 0
-				}
-				ui.Text(c, "│").FontSize(a.fs(textCaption)).TextColor(t.Border)
-				a.buffer(ui.Text(c, formatElapsed(elapsed))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
-				c.After(time.Second - elapsed%time.Second)
-			}
-		}
-		ui.Spacer(c)
-		for _, q := range a.chat.QueuedInputs {
-			tip := a.tr("chat.queuedTip")
-			if q.Mode == "steer" {
-				tip = a.tr("chat.steerTip")
-			}
-			ui.Text(c, oneLine(q.Text, 28)).FontSize(a.fs(textCaption)).Padding(3, 10).Radius(999).Background(a.tokens().Tok.Card).
-				BorderWidth(1).BorderColor(t.Border).Tooltip(tip + "\n" + q.Text).Shrink(1).MinWidth(0).SingleLine()
-		}
-	})
+	return ui.Button(c, "").Label(a.tr("chat.stop")).Tooltip(a.tr("chat.stopTip")).Radius(999).
+		Background(t.Text).Width(32).Height(32).Padding(0).Shrink(0).Children(func() {
+		ui.Icon(c, icons.Stop).Size(13, 13).TextColor(t.Surface)
+	}).Clicked()
 }
 
 // currentAction 是当前正在运行的工具名；没有在跑的工具时返回空串（思考或写正文阶段）。
@@ -830,13 +817,9 @@ func (a *app) currentAction() string {
 	return ""
 }
 
-// contextMeter 是输入框上方的一条细进度条：最近一次回复用掉的上下文占当前模型上下文窗口的比例。
-// 不知道模型的上下文窗口、还没有回复，或用量不到 1% 时不画。
-func (a *app) contextMeter(c *ui.Context) {
+// contextUsage 返回最近一次回复占用的 token（输入、缓存与输出之和）与当前模型的上下文窗口；未知时为 0。
+func (a *app) contextUsage() (int, int) {
 	window := a.contextWindow()
-	if window <= 0 {
-		return
-	}
 	used := 0
 	for i := len(a.chat.Messages) - 1; i >= 0; i-- {
 		if u := a.chat.Messages[i].Usage; u != nil {
@@ -844,27 +827,104 @@ func (a *app) contextMeter(c *ui.Context) {
 			break
 		}
 	}
-	if used <= 0 {
+	return used, window
+}
+
+// queueChips 是排队与引导中的消息：每条一个小标签，悬停看全文与投放方式。
+func (a *app) queueChips(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).Gap(6).Wrap().Padding(0, 4).Children(func() {
+		for _, q := range a.chat.QueuedInputs {
+			tip := a.tr("chat.queuedTip")
+			if q.Mode == "steer" {
+				tip = a.tr("chat.steerTip")
+			}
+			ui.Text(c, oneLine(q.Text, 28)).FontSize(a.fs(textCaption)).Padding(3, 10).Radius(999).Background(a.tokens().Tok.Card).
+				BorderWidth(1).BorderColor(t.Border).Tooltip(tip + "\n" + q.Text).Shrink(1).MinWidth(0).SingleLine()
+		}
+	})
+}
+
+// cardStatus 是卡片里最上面的状态区（参考 Tern）：回复中左边是转圈、已用时与正在做的事；下面一条细
+// 进度条，条下左边是用量百分比、右边是上下文窗口。没有在回复、也不知道窗口时不画，免得新对话多一块空行。
+func (a *app) cardStatus(c *ui.Context, busy bool) {
+	t := c.Theme()
+	used, window := a.contextUsage()
+	if !busy && window == 0 {
 		return
 	}
-	t := c.Theme()
-	frac := float32(used) / float32(window)
-	if frac < 0.01 {
-		return // 不到 1% 时一条空进度条加「0%」没有信息量
+	pct := ""
+	frac := float32(0)
+	if used > 0 && window > 0 {
+		frac = float32(used) / float32(window)
+		if frac > 1 {
+			frac = 1
+		}
+		pct = fmt.Sprintf("%.0f%%", frac*100)
 	}
-	if frac > 1 {
-		frac = 1
-	}
-	pct := fmt.Sprintf("%.0f%%", frac*100)
 	color := t.Accent
 	if frac > 0.8 {
 		color = t.Warning
 	}
-	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(0, 4, 4, 4).Tooltip(a.tr("chat.context", "percent", pct, "window", formatCount(window))).Children(func() {
-		ui.Row(c).Grow(1).Height(3).Radius(2).Background(t.Border).Clip().Children(func() {
-			ui.Box(c).WidthPercent(frac * 100).Height(3).Background(color)
-		})
-		a.buffer(ui.Text(c, pct)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+	ui.Column(c).Gap(4).Children(func() {
+		if busy {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Spinner(c)
+				if !a.cv.busySince.IsZero() {
+					elapsed := c.Now().Sub(a.cv.busySince)
+					if elapsed < 0 {
+						elapsed = 0
+					}
+					a.buffer(ui.Text(c, formatElapsed(elapsed))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+					c.After(time.Second - elapsed%time.Second)
+				}
+				label := a.tr("chat.working")
+				if action := a.currentAction(); action != "" {
+					label = a.tr("chat.actionTool", "name", action)
+				}
+				ui.Text(c, label).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+			})
+		}
+		if window > 0 {
+			ui.Row(c).Grow(1).Height(3).Radius(2).Background(t.Border).Clip().Children(func() {
+				if frac > 0 {
+					ui.Box(c).WidthPercent(frac * 100).Height(3).Background(color)
+				}
+			})
+			ui.Row(c).Children(func() {
+				a.buffer(ui.Text(c, pct)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+				ui.Spacer(c)
+				windowText := formatWindow(window)
+				a.buffer(ui.Text(c, windowText)).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0).
+					Tooltip(a.tr("chat.context", "percent", pct, "window", windowText))
+			})
+		}
+	})
+}
+
+// formatWindow 把上下文窗口写成参考图的样子：512K、1M。
+func formatWindow(tokens int) string {
+	text := strings.ToUpper(formatCount(tokens))
+	return text
+}
+
+// quotedPrompt 在回复进行中把这一轮的提问引在卡片里（参考 Tern 的引用块）：消息列滚走后仍能看到在回答什么。
+func (a *app) quotedPrompt(c *ui.Context) {
+	t := c.Theme()
+	text := ""
+	for i := len(a.chat.Messages) - 1; i >= 0; i-- {
+		if m := a.chat.Messages[i]; m.Role == "user" && strings.TrimSpace(m.Text) != "" {
+			text = m.Text
+			break
+		}
+	}
+	if text == "" {
+		return
+	}
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(6, 10).Radius(radiusBubble).BorderWidth(1).BorderColor(t.Border).
+		Background(a.tokens().Tok.Card).Children(func() {
+		ui.Icon(c, icons.Sparkles).Size(13, 13).TextColor(t.Accent)
+		ui.Text(c, oneLine(text, 160)).Italic().FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
 	})
 }
 

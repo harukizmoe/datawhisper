@@ -1,8 +1,8 @@
 package app
 
-// 磨砂玻璃：输入区浮在消息文字之上时，卡片背后的内容要被模糊后透出来（参考 Tern），而不是被一块实色挡住。
-// 靠 MyGo 着色器读窗口已经画好的背景（backdropSample）。没有 GPU 加速（虚拟机、测试）时着色器会逐像素在
-// CPU 上跑，框架建议不画，所以退回成近乎不透明的纯色。
+// 磨砂玻璃（参考 Tern）：输入区卡片是半透明的，背后的消息文字被模糊后透出来；卡片里再放一块实色的
+// 内容板（输入框与引用）。靠 MyGo 着色器读窗口已经画好的背景（backdropSample）。没有 GPU 加速
+// （虚拟机、测试）时着色器会逐像素在 CPU 上跑，框架建议不画，所以退回成近乎不透明的纯色。
 
 import (
 	"github.com/egoist/mygo/ui"
@@ -12,7 +12,7 @@ import (
 var frostShader = shader.MustCompile(`package main
 
 var Tint vec4
-// Corner 与 EdgeFade 让磨砂在圆角边缘向内渐隐：边缘处只留模糊，不铺实色，卡片看起来才像浮在内容上。
+// Corner 与 EdgeFade 让磨砂在圆角边缘向内渐隐：边缘处只留模糊，不铺实色，卡片才像浮在内容上。
 var Corner float
 var EdgeFade float
 
@@ -26,13 +26,13 @@ func Fragment(dst vec4, pos vec2) vec4 {
 `)
 
 const (
-	frostBlur = 14 // 背景模糊的标准差（DIP）
+	frostBlur = 16 // 背景模糊的标准差（DIP）
 	// 磨砂层的不透明度：越小透出的文字越清楚。深色配色需要更实的层——浅色文字透过低透明度的
 	// 深色磨砂会糊成一片，所以按底色的亮度分两档。
-	frostAlphaLight = 0.62
-	frostAlphaDark  = 0.72
+	frostAlphaLight = 0.70
+	frostAlphaDark  = 0.78
 	// frostEdgeFade 是边缘渐隐的宽度（DIP）：磨砂的不透明度在这段距离内从满值降到 0。
-	frostEdgeFade = 10
+	frostEdgeFade = 14
 )
 
 /** frostAlpha 按底色亮度挑不透明度。 */
