@@ -1119,6 +1119,19 @@ describe("工作目录校验文案跟随界面语言", () => {
   });
 });
 
+describe("入参形状在方法体之前被拦下", () => {
+  test("来源 id、会话 id、上传参数各自给出旧实现的原话", async () => {
+    const badId = await server.call("source.toggle", { conversationId: 1, sourceId: "nope" });
+    expect(badId.error?.message).toBe("'sourceId' must look like s_xxxxxxxx");
+    const noConversation = await server.call("source.list", {});
+    expect(noConversation.error?.message).toBe("'conversationId' must be a positive integer");
+    const noSize = await server.call("source.upload.begin", { conversationId: 1, filename: "a.csv" });
+    expect(noSize.error?.message).toBe("'size' must be an integer");
+    const badActive = await server.call("source.toggle", { conversationId: 1, sourceId: "s_00000001", active: "yes" });
+    expect(badActive.error?.message).toBe("'active' must be a boolean");
+  });
+});
+
 describe("抓取工具登记来源", () => {
   test("解析结果落盘后逐张登记成 csv 来源，临时内存来源被关掉", async () => {
     const port = ingestPort.ingest;

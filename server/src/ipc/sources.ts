@@ -23,7 +23,7 @@ import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { BitableRead } from "../feishu/bitable.ts";
 import { ComputeError, type SourceDescriptor } from "../compute/client.ts";
 import { APP_ERROR, INVALID_PARAMS, RpcError, appError, invalidParams } from "./errors.ts";
-import { workspaceIdParam } from "./params.ts";
+import { checkParams, CONVERSATION_ID_RULE, SOURCE_ID_RULE, workspaceIdParam, type ParamRules } from "./params.ts";
 import type { MethodParams, RpcMethod } from "./rpc.ts";
 import {
   ARTIFACT_CONTENT_TYPES,
@@ -1118,7 +1118,33 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
     }
   };
 
-  return {
+  // 入参形状集中声明：方法体里仍做语义检查（来源是否存在、配置是否匹配），这里只挡形状。
+  const SHAPES: Record<string, ParamRules> = {
+    "source.list": { conversationId: CONVERSATION_ID_RULE },
+    "source.removeAll": { conversationId: CONVERSATION_ID_RULE },
+    "source.open": { conversationId: CONVERSATION_ID_RULE },
+    "source.close": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    "source.remove": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    "source.toggle": {
+      conversationId: CONVERSATION_ID_RULE,
+      sourceId: SOURCE_ID_RULE,
+      active: { type: "boolean", optional: true, message: "'active' must be a boolean" },
+    },
+    "source.rename": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    "source.schema": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    "source.tables": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    // 不带 sourceId 时是「所有参与分析的来源」的汇总预览，所以这个 id 是可选的。
+    "source.preview": { conversationId: CONVERSATION_ID_RULE, sourceId: { ...SOURCE_ID_RULE, optional: true } },
+    "source.previewTable": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    "source.setAnalysisTables": { conversationId: CONVERSATION_ID_RULE, sourceId: SOURCE_ID_RULE },
+    "source.upload.begin": {
+      conversationId: CONVERSATION_ID_RULE,
+      filename: { type: "string", minLength: 1, message: "'filename' must be a non-empty string" },
+      size: { type: "integer", message: "'size' must be an integer" },
+    },
+  };
+
+  const methods: Record<string, RpcMethod> = {
     "source.upload.begin": async (params) => {
       const conversationId = conversationIdParam(params);
       await state.read(conversationId);
@@ -1735,4 +1761,15 @@ export function sourceMethods(deps: SourcesDeps, ports: IngestPortHolder = {}): 
       return { ...base, text: readFileSync(resolved.path, "utf8") };
     },
   };
+
+  // 统一入口校验：声明过的形状先过一遍，再过方法体自己的语义检查。
+  for (const [name, rules] of Object.entries(SHAPES)) {
+    const handler = methods[name];
+    if (handler === undefined) continue;
+    methods[name] = (params) => {
+      checkParams(params, rules);
+      return handler(params);
+    };
+  }
+  return methods;
 }

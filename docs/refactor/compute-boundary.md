@@ -92,7 +92,7 @@ server ──stdio JSON-RPC 2.0──▶ compute (Python)
 
 目标（handoff step 1）：把 server 每个 RPC 的入参整理成一份声明，在方法入口统一校验一次，把手写校验收敛成「形状 + 语义」两层。收益是错误信息一致、桌面端不需要逐个方法猜参数名；风险是方法多（50+），两套规则并存期间容易漂移。
 
-进展：`server/src/ipc/params.ts` 提供 `checkParams(params, rules)`、`WORKSPACE_ID_RULE` 与 `workspaceIdParam`，只做形状校验（类型、必填、`pattern`、`minLength`、数组项数与元素形状），语义仍留在方法里；错误文案可按旧实现逐字覆盖（含「没传」与「传错」两句不同的情形），避免界面提示漂移。已采用：`workspace.tree/pending/readFile`，以及 `workspace.*` 其它方法与 `conversation.moveToWorkspace` 的工作区 id 校验（`test/params.test.ts`、`test/workspace-tree.test.ts`）。未采用：`source.*` 组、`workspace.importFiles` 的 `paths` 细节校验仍是手写。
+进展：`server/src/ipc/params.ts` 提供 `checkParams(params, rules)`、`WORKSPACE_ID_RULE` 与 `workspaceIdParam`，只做形状校验（类型、必填、`pattern`、`minLength`、数组项数与元素形状），语义仍留在方法里；错误文案可按旧实现逐字覆盖（含「没传」与「传错」两句不同的情形），避免界面提示漂移。已采用：`workspace.tree/pending/readFile`，以及 `workspace.*` 其它方法与 `conversation.moveToWorkspace` 的工作区 id 校验（`test/params.test.ts`、`test/workspace-tree.test.ts`）。`source.*` 组也有一张 `SHAPES` 表：声明过的形状由包装器在方法体之前校验（`conversationId`、`sourceId`、`active`、上传的 `filename`/`size`），方法体保留语义检查。未采用：`workspace.importFiles` 的 `paths` 细节校验、`source.open/update/test` 的连接参数仍是手写。
 
 ## 验证方式
 
