@@ -22,7 +22,7 @@
     "surfaceHover": "dark2", "surfacePressed": "dark3", "border": "dark2", "text": "light1",
     "textMuted": "light4", "accent": "bright-orange", "link": "bright-blue", "focus": "bright-orange/0.6",
     "selection": "bright-yellow/0.25", "success": "bright-green", "warning": "bright-yellow", "danger": "bright-red",
-    "userBubble": "dark1", "codeBackground": "dark0-hard", "card": "dark0-hard", "cardBorder": "dark2",
+    "codeBackground": "dark0-hard", "card": "dark0-hard", "cardBorder": "dark2",
     "canvas": "dark0-hard"
   },
   "syntax": {

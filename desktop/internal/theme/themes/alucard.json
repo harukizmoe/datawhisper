@@ -19,7 +19,7 @@
     "surfaceHover": "background-light", "surfacePressed": "background-dark", "border": "background-dark", "text": "foreground",
     "textMuted": "comment", "accent": "purple", "link": "functional-cyan", "focus": "functional-purple/0.6",
     "selection": "selection", "success": "functional-green", "warning": "functional-orange", "danger": "functional-red",
-    "userBubble": "background-lighter", "codeBackground": "background-lighter", "card": "background-lighter", "cardBorder": "background-dark",
+    "codeBackground": "background-lighter", "card": "background-lighter", "cardBorder": "background-dark",
     "canvas": "background-light"
   },
   "syntax": {

@@ -441,7 +441,6 @@ type Tokens struct {
 	// Canvas 是 Islands 界面风格下各区域背后的窗口底色。
 	Canvas             ui.Color
 	Sidebar, Inspector ui.Color
-	UserBubble         ui.Color
 	CodeBackground     ui.Color
 	Card, CardBorder   ui.Color
 	Link               ui.Color
@@ -549,7 +548,6 @@ func Resolve(scheme *Scheme, dark bool, accent string, fonts Fonts) *Resolved {
 
 	tok := Tokens{
 		Sidebar:        get("sidebar", t.Background.Mix(t.Text, 0.03)),
-		UserBubble:     get("userBubble", t.Surface),
 		CodeBackground: get("codeBackground", t.Background.Mix(t.Text, 0.04)),
 		Link:           get("link", t.Accent),
 	}

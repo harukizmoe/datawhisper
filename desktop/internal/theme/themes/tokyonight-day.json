@@ -21,7 +21,7 @@
     "surfaceHover": "bg_visual", "surfacePressed": "fg_gutter", "border": "border", "text": "fg",
     "textMuted": "fg_dark", "accent": "blue", "link": "blue", "focus": "blue/0.6",
     "selection": "bg_visual", "success": "green", "warning": "yellow", "danger": "red",
-    "userBubble": "bg_highlight", "codeBackground": "bg_dark", "card": "bg_dark", "cardBorder": "border",
+    "codeBackground": "bg_dark", "card": "bg_dark", "cardBorder": "border",
     "canvas": "bg_dark1"
   },
   "syntax": {

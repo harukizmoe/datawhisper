@@ -12,10 +12,16 @@ import (
 var frostShader = shader.MustCompile(`package main
 
 var Tint vec4
+// Corner 与 EdgeFade 让磨砂在圆角边缘向内渐隐：边缘处只留模糊，不铺实色，卡片看起来才像浮在内容上。
+var Corner float
+var EdgeFade float
 
 func Fragment(dst vec4, pos vec2) vec4 {
+	half := rectSize() * 0.5
+	q := abs(pos-half) - (half - vec2(Corner, Corner))
+	dist := length(max(q, vec2(0, 0))) + min(max(q.x, q.y), 0) - Corner
 	b := backdropSample(pos)
-	return mix(b, vec4(Tint.rgb, 1), Tint.a)
+	return mix(b, vec4(Tint.rgb, 1), Tint.a*smoothstep(0, EdgeFade, -dist))
 }
 `)
 
@@ -25,6 +31,8 @@ const (
 	// 深色磨砂会糊成一片，所以按底色的亮度分两档。
 	frostAlphaLight = 0.62
 	frostAlphaDark  = 0.72
+	// frostEdgeFade 是边缘渐隐的宽度（DIP）：磨砂的不透明度在这段距离内从满值降到 0。
+	frostEdgeFade = 10
 )
 
 /** frostAlpha 按底色亮度挑不透明度。 */
@@ -45,8 +53,12 @@ func frosted(el ui.Element, tint ui.Color, radius float32) ui.Element {
 		}
 		frostShader.Draw(p, r, shader.Options{
 			BackdropBlur: frostBlur,
-			Uniforms:     map[string]any{"Tint": tint.Alpha(frostAlpha(tint))},
-			Radius:       radius,
+			Uniforms: map[string]any{
+				"Tint":     tint.Alpha(frostAlpha(tint)),
+				"Corner":   radius,
+				"EdgeFade": frostEdgeFade,
+			},
+			Radius: radius,
 		})
 	})
 }

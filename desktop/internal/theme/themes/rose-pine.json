@@ -17,7 +17,7 @@
     "surfaceHover": "highlight-med", "surfacePressed": "highlight-high", "border": "highlight-med/0.6", "text": "text",
     "textMuted": "subtle", "accent": "iris", "link": "foam", "focus": "iris/0.6",
     "selection": "highlight-med", "success": "foam", "warning": "gold", "danger": "love",
-    "userBubble": "overlay", "codeBackground": "surface", "card": "surface", "cardBorder": "highlight-med/0.6",
+    "codeBackground": "surface", "card": "surface", "cardBorder": "highlight-med/0.6",
     "canvas": "nc"
   },
   "syntax": {
