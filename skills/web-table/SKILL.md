@@ -21,6 +21,6 @@ allowedTools: [fetch_table, browser_navigate, browser_extract_tables, browse_web
 ## Implementation reference
 
 - 抓取与归一化管线：`data/table_extract.py`（上限常量、垃圾表过滤、表头识别、数值提升）
-- 多表数据源：`data/sources/extracted.py`（`ExtractedTableDataSource`）
+- 多表数据源：`compute/data/sources/extracted.py`（`ExtractedTableDataSource`）
 - Agent 分发与实时刷新：`agent/agent.py` 中 `fetch_table` / `browser_extract_tables` 分支
 - PDF 上传入口：`api/datasource.py` 的 `upload_file`

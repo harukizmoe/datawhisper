@@ -66,7 +66,7 @@ mkdir -p "$WORK" "$OUT_DIR"
 
 echo "bundle-compute: $PYTHON -> $OUT"
 # compute/tools/__init__.py 在运行期把 _MEIPASS/Function 等目录加进 sys.path，所以 Function 要随包带源码与
-# HTML/字体等资源；Information 是知识库的只读资料。data/ 是普通 Python 包，PyInstaller 会静态收集。
+# HTML/字体等资源；Information 是知识库的只读资料。compute/data 与 compute/infrastructure 是 compute 内的普通 Python 包，PyInstaller 会静态收集。
 "$PYTHON" -m PyInstaller \
   --noconfirm --clean --onefile \
   --name datawhisper-compute \

@@ -59,7 +59,7 @@ ASK_USER_OPTION_COUNT = "ASKU-002"
 ASK_USER_INVALID_ARGUMENT = "ASKU-003"
 
 if TYPE_CHECKING:
-    from data.workspace import WorkspacePathAuthorization
+    from compute.data.workspace import WorkspacePathAuthorization
 
 log = logging.getLogger(__name__)
 
@@ -526,7 +526,7 @@ def _default_allowed_roots() -> List[Path]:
     包含 uploads/ 和 Information/，让 read_csv 能读已上传文件。
     不包含工作目录（未挂载时不存在）。
     """
-    from infrastructure.paths import content_data_path, resource_path
+    from compute.infrastructure.paths import content_data_path, resource_path
     return [content_data_path("uploads"), resource_path("Information")]
 
 

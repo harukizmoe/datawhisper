@@ -13,7 +13,7 @@ import os
 import re
 import uuid
 
-from infrastructure.paths import content_data_path
+from compute.infrastructure.paths import content_data_path
 
 from .i18n import language
 from .validate import validate_tool_args

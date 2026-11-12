@@ -27,7 +27,7 @@ import os
 import re
 from pathlib import Path
 from compute.i18n import say
-from infrastructure.paths import content_data_path
+from compute.infrastructure.paths import content_data_path
 import jieba
 from Function.Knowledge.neural_embedder import (
     embed as _neural_embed,

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Iterator, Sequence
 from urllib.parse import quote
 
-from data.sources import (
+from compute.data.sources import (
     CSVDataSource,
     DataSource,
     ExcelDataSource,
@@ -27,7 +27,7 @@ from data.sources import (
     HTTPAPIDataSource,
     SQLDataSource,
 )
-from data.sources.workspace_persistent import WorkspacePersistentSource
+from compute.data.sources.workspace_persistent import WorkspacePersistentSource
 
 from .i18n import say
 from .rpc import INVALID_PARAMS, RpcError
@@ -87,7 +87,7 @@ def build_merged_source(sources: Sequence[DataSource]):
     if len(sources) < 2:
         return None
     try:
-        from data.merged_source import MergedDataSource
+        from compute.data.merged_source import MergedDataSource
         return MergedDataSource(list(sources))
     except Exception as exc:
         log.warning("[sources] MergedDataSource build failed: %s", exc)
@@ -272,8 +272,8 @@ def open_failed(descriptor: dict, exc: Exception) -> RpcError:
 
 def pdf_source(file_path: str, name: str) -> DataSource:
     """把文本型 PDF 中的表作为内存 source 返回。"""
-    from data.sources.extracted import ExtractedTableDataSource
-    from data.table_extract import MAX_PDF_BYTES, normalize_grids, parse_pdf_tables
+    from compute.data.sources.extracted import ExtractedTableDataSource
+    from compute.data.table_extract import MAX_PDF_BYTES, normalize_grids, parse_pdf_tables
 
     pdf_bytes = Path(file_path).read_bytes()
     if len(pdf_bytes) > MAX_PDF_BYTES:

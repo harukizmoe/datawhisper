@@ -22,7 +22,8 @@ class PersistentAccountStorageError(RuntimeError):
 
 
 def source_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    # 本文件在 compute/infrastructure/ 下，仓库根是上两级。
+    return Path(__file__).resolve().parents[2]
 
 
 def _absolute_override(name: str) -> Path | None:

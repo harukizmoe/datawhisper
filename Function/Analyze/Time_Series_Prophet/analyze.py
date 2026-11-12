@@ -619,7 +619,7 @@ def _rolling_backtest(series: pd.Series, day_scale: float, n_folds: int = 3, hor
         return {"ok": False}
 
     # CPU 密集：每折独立拟合，用进程池绕开 GIL；失败自动降级为同步
-    from infrastructure.cpu_pool import map_cpu_bound
+    from compute.infrastructure.cpu_pool import map_cpu_bound
     raw_metrics = map_cpu_bound(_backtest_fold, fold_args)
     fold_metrics = [m for m in raw_metrics if m]
 

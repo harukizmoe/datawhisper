@@ -41,7 +41,7 @@ def _try_cuda_torch_gru(
     while allowing the same public analysis contract to use CUDA automatically.
     """
     try:
-        from infrastructure.training_device import select_training_device
+        from compute.infrastructure.training_device import select_training_device
 
         choice = select_training_device()
         if not str(choice.get("device") or "").startswith("cuda"):

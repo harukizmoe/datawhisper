@@ -34,12 +34,12 @@ from ._utils import (
 from .excel import _excel_engine, _parse_sheets_parallel
 from compute.i18n import say
 from .base import DataSource
-from data.workspace import file_signature
-from data.workspace_write_lease import (
+from compute.data.workspace import file_signature
+from compute.data.workspace_write_lease import (
     acquire_synchronous_workspace_write_lease,
     acquire_workspace_write_lease,
 )
-from data.large_import_limiter import acquire_large_import_slot
+from compute.data.large_import_limiter import acquire_large_import_slot
 
 log = logging.getLogger(__name__)
 

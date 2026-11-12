@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from compute.i18n import say
-from infrastructure.training_device import select_training_device
+from compute.infrastructure.training_device import select_training_device
 
 
 def select_training_target(

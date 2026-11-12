@@ -48,8 +48,8 @@ def fetch_error_text(code: str, message: str) -> str:
 def extracted_source(grids: list, source_name: str, origin_label: str):
     """为提取出的 grids 返回 ``(source, tables, meta)``；归一化后没有任何可用表时
     ``source`` 为 None（此时用 ``no_tables_text()`` 应答）。"""
-    from data.sources.extracted import ExtractedTableDataSource
-    from data.table_extract import normalize_grids
+    from compute.data.sources.extracted import ExtractedTableDataSource
+    from compute.data.table_extract import normalize_grids
 
     tables, meta = normalize_grids(grids)
     if not tables:
@@ -89,7 +89,7 @@ def extracted_source_text(source_id: str, source, tables: dict, meta: dict, sche
 def bitable_source(read_result: dict[str, Any], source_name: str):
     """为 server 侧 ``readBitableRecords`` 返回的记录给出
     ``(source, 显示名)``。"""
-    from data.sources.feishu_bitable import FeishuBitableDataSource
+    from compute.data.sources.feishu_bitable import FeishuBitableDataSource
 
     name = str(source_name or "").strip() or say(f"Feishu Bitable {read_result['table_id']}", f"飞书多维表格 {read_result['table_id']}")
     return FeishuBitableDataSource(read_result["records"], name, read_result["table_id"]), name

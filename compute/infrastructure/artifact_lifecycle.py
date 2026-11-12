@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from compute.i18n import say
-from infrastructure.paths import content_data_path
+from compute.infrastructure.paths import content_data_path
 
 log = logging.getLogger(__name__)
 _LOCK = threading.RLock()

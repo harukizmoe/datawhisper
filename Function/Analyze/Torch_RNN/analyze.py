@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from compute.i18n import say
-from infrastructure.training_router import select_training_target
+from compute.infrastructure.training_router import select_training_target
 
 
 ANALYSIS_ID = "Torch_RNN"

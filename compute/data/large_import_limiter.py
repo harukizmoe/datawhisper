@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterator
 
 from compute.i18n import say
-from infrastructure.paths import content_data_path
+from compute.infrastructure.paths import content_data_path
 
 
 MAX_CONCURRENT_IMPORTS = max(1, int(os.environ.get("BAA_MAX_CONCURRENT_IMPORTS", "2")))

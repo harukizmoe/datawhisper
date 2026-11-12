@@ -68,7 +68,7 @@ def _select_cuda_device() -> Optional[str]:
     VRAM guard used by the Torch analysis modules.
     """
     try:
-        from infrastructure.training_device import select_training_device
+        from compute.infrastructure.training_device import select_training_device
 
         choice = select_training_device()
         device = str(choice.get("device") or "")

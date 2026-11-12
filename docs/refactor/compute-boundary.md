@@ -1,13 +1,13 @@
 # compute 边界：哪些逻辑留在 Python，为什么
 
-本文说明重构后 compute 进程的职责范围、它与 server 的协议、`data/` 整包的去留，以及还没补齐的缺口。
+本文说明重构后 compute 进程的职责范围、它与 server 的协议、Python 代码的位置，以及还没补齐的缺口。
 判断依据是代码里实际的调用关系，不是计划里的意图。
 
 ## 一句话结论
 
 - **Python 只保留「算」**：数据源实现（DuckDB / pandas / 各种连接器）、SQL、统计分析、机器学习、图表模板与导出。
 - **其余全部在 Bun**：模型回合、工具编排、权限、工作区、知识库索引与检索、飞书、MCP、持久化。Python 不碰网络、不碰凭据、不碰会话状态。
-- `data/` **继续作为 Python 包保留**，它被 compute 直接 import（数据源实现、工作区持久化、导入限流），没有第二份实现，也没有迁移收益。
+- Python 代码只有一个包根 `compute/`：数据源、工作区运行时、导入限流在 `compute/data/`，路径与产物生命周期、训练设备路由在 `compute/infrastructure/`。
 - 三个注册表里声明了但**没有执行器**的工具（`fetch_table`、`browser_extract_tables`、`load_feishu_bitable`）目前是死声明；处理方式见「已知缺口」。
 
 ## 进程边界
@@ -47,18 +47,16 @@ server ──stdio JSON-RPC 2.0──▶ compute (Python)
 
 留在 Python 的判据是「需要 Python 生态的数值/文件能力」，不是「以前在 Python 里」。纯逻辑（校验、编排、文案、协议）一律在 server，避免同一规则两处实现。
 
-## `data/` 整包的去留
+## `data/` 与 `infrastructure/` 的位置
 
-结论：**保留**，不作为迁移对象。
+结论：两者已并入 `compute/`，作为 compute 的私有包；Python 侧不再有与进程无关的顶层包。
 
 理由（按证据）：
 
-1. `compute/` 直接 import `data.workspace`、`data.sources.*`、`data.table_extract`、`data.shape_libs` 之外的实现；`data/` 不是旧 agent 的残留外壳。
-2. `data/sources/workspace_persistent.py` 同时用到 `data/workspace.py`（工作区运行时）与 `data/large_import_limiter.py`（导入限流），两者都在这条路径上，删掉任何一侧都要重写工作区持久化。
-3. 反向看：`data/` 里**没有**任何 server 侧已有实现的重复品（模型调用、工具编排、权限都不在里面）。
-4. 迁移到 `compute/` 只是目录搬家，会让 compute 与「compute 的测试」的 import 路径全部变化，收益是目录整齐，风险是几百处相对 import 与打包路径。
-
-因此「评估 data/ 整包」的结论是保持现状；真正的清理只做**混在代码目录里的数据文件**与**已无引用的依赖**，见下。
+1. `data/`、`infrastructure/` 不是旧 agent 的残留外壳：前者是数据源连接器、工作区运行时与导入限流，后者是 compute 与 `Function/` 共用的路径、产物生命周期与训练设备路由，全部由 Python 侧直接 import。
+2. 它们已经并进 `compute/`（`compute/data/`、`compute/infrastructure/`），Python 侧不再有与进程无关的顶层包；`Function/*` 里的 7 处 import 一并改为 `compute.infrastructure.*`。
+3. 迁移只改了 import 路径与 `paths.source_root()` 的深度（`compute/infrastructure/paths.py` 在仓库根下两级）；打包（PyInstaller 静态收集）与 `python -m compute` 的启动方式不变。
+4. 反向看：这些包里**没有**任何 server 侧已有实现的重复品（模型调用、工具编排、权限都不在里面）；真正的清理只做**混在代码目录里的数据文件**与**已无引用的依赖**，见下。
 
 ## 本轮清理
 
@@ -66,7 +64,7 @@ server ──stdio JSON-RPC 2.0──▶ compute (Python)
 |---|---|---|
 | `openai` Python 依赖 | 删除 | 全仓 Python 代码无 `import openai`；模型调用早已在 Bun 侧 |
 | `data/shape_libs`（168 KB 的 draw.io 形状库） | 移到 `server/assets/shape_libs` | 它是数据文件而不是代码；唯一引用在 server 的画图工具（`AppToolDeps.shapeLibsDir`） |
-| `infrastructure/*` | **保留** | `paths`、`artifact_lifecycle` 被 compute 与 `data/` 直接使用；`gpu_detect` 被 `training_device` 使用；`cpu_pool`、`training_router` 被 `Function/Analyze/*` 使用 |
+| `compute/infrastructure/*` | **保留** | `paths`、`artifact_lifecycle` 被 compute 与 `compute/data/` 直接使用；`gpu_detect` 被 `training_device` 使用；`cpu_pool`、`training_router` 被 `Function/Analyze/*` 使用 |
 | `chart.png` | 不存在，无需处理 | 图表以模板与内联数据生成 |
 
 ## 网表/飞书表的入口（原「没有执行器」的三个工具）

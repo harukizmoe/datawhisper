@@ -7,7 +7,7 @@
 import sys
 from pathlib import Path
 
-from infrastructure.paths import resource_root
+from compute.infrastructure.paths import resource_root
 
 _ROOT = Path(resource_root())
 for _path in (_ROOT, _ROOT / "Function" / "Charts_generation", _ROOT / "Function" / "Output"):

@@ -132,7 +132,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
   const compute = new ComputeClient({
     python: config.python,
     cwd: config.computeCwd,
-    // Python 侧的数据根（`infrastructure/paths.py::data_root`）必须与 Bun 的 `dataDir` 相同：
+    // Python 侧的数据根（`compute/infrastructure/paths.py::data_root`）必须与 Bun 的 `dataDir` 相同：
     // 否则仪表盘、图表、上传文件会写进仓库目录而不是应用数据目录。
     env: { BAA_DATA_DIR: config.dataDir },
     onStderr: (line) => console.error(`[compute] ${line}`),
