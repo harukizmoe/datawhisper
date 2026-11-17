@@ -144,6 +144,11 @@ func (a *app) homeView(c *ui.Context) {
 			if a.conv == 0 {
 				a.newChatChooser(c, t)
 			}
+			// 首次使用：还没有任何可用模型时，示例问题点了也发不出去，先引导去配置。
+			if a.conv == 0 && a.cv.modelsLoaded && len(a.cv.models) == 0 {
+				a.firstRunCard(c, t)
+				return
+			}
 			ui.Text(c, a.tr("chat.suggestions")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Margin(12, 0, 0, 0)
 			for _, text := range []string{a.tr("chat.suggest1"), a.tr("chat.suggest2"), a.tr("chat.suggest3"), a.tr("chat.suggest4")} {
 				if ui.Button(c, "").Label(text).Justify(ui.Start).Children(func() {
@@ -158,6 +163,23 @@ func (a *app) homeView(c *ui.Context) {
 					a.toggleSources()
 				}
 			})
+		})
+	})
+}
+
+// firstRunCard 是首次使用的引导：没有可用模型时，先给一条直达设置的路。
+func (a *app) firstRunCard(c *ui.Context, t *ui.Theme) {
+	ui.Column(c).Gap(8).Padding(16).Margin(12, 0, 0, 0).Radius(12).BorderWidth(1).BorderColor(t.Border).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Icon(c, icons.Plug).TextColor(t.Accent)
+			ui.Text(c, a.tr("chat.firstRunTitle")).Bold()
+		})
+		ui.Text(c, a.tr("chat.firstRunHint")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(4, 0, 0, 0).Children(func() {
+			if ui.PrimaryButton(c, a.tr("chat.firstRunAction")).Clicked() {
+				a.openSettings()
+			}
+			ui.Text(c, a.tr("chat.firstRunLocal")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		})
 	})
 }
