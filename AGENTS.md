@@ -80,3 +80,17 @@ scripts/build/build-app.sh
 - 子代理不提交、不切换分支、不 pop/drop stash；由整合者检查后统一提交。
 - 重构在 `refactor/pi-durable` 分支上完成并以 v0.1.0 合入 `main`；`87489fb` 是重构前的最后一个提交，可用 `git show 87489fb` 取回。
 - 提交信息用中文，写清「做了什么 + 证据」。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `harukizmoe/datawhisper`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five roles, label string = role: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
