@@ -2,23 +2,49 @@
 
 [简体中文](./README_CN.md)
 
-A local, single-user desktop app for business data analysis. Ask questions in natural language; the agent
-queries your data, draws charts, and writes the conclusions down.
+A local, single-user desktop app for business data analysis. Ask in natural language; the agent queries your
+data, draws the chart, and writes the conclusion down.
 
-No account, no hosted model, no cloud storage: you bring your own model endpoint and key, and everything
-(sessions, charts, credentials) stays on this machine.
+No account, no hosted model, no telemetry. You bring an OpenAI-compatible endpoint or a local gateway, and
+everything — sessions, imported files, charts, credentials — stays on this machine.
 
-## What it is
+![A chat that imported a CSV, ran SQL, and rendered a bar chart](docs/images/chat-light.png)
+
+## What you can do
+
+- **Ask in natural language.** The agent picks tools, runs SQL over DuckDB, profiles columns, draws one of 41
+  chart templates, and explains the result with numbers traceable back to tool output.
+- **Bring your own data.** Drag CSVs/XLSX/PDF onto the composer, import from the data panel, mount a folder as
+  a workspace, or connect SQL / Google Sheets / Feishu Bitable / HTTP sources.
+- **Keep working across turns.** Long tasks, workflow runs, team delegations, approval cards, and MCP tool
+  servers all show up in the same chat and the Runs tab.
+- **Stay local.** The desktop app, the agent service, and the Python compute worker talk over pipes only — no
+  ports, no HTTP server, no cloud storage.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Data panel with a preview table](docs/images/data-panel.png) | ![Model and provider settings](docs/images/settings-models.png) |
+| Data panel: sources, tables, artifacts, runs | Settings: providers, models, context limits, usage |
+| ![Dark theme chat with an inline chart](docs/images/chat-dark.png) | |
+
+## How it works
 
 | Piece | Technology | Role |
 |---|---|---|
-| Desktop app | Go + [MyGo](https://mygo.egoist.dev) native UI | Windows drawing, chat, data panel, settings |
-| Agent service | Bun + `@earendil-works/pi-durable` | Model turns, tools, durable tasks, MCP, Feishu bot |
+| Desktop app | Go + [MyGo](https://mygo.egoist.dev) native UI | Chat, data panel, settings, workspaces |
+| Agent service | Bun + `@earendil-works/pi-durable` | Model turns, tools, permissions, durable tasks, workflows, MCP, Feishu bot |
 | Compute worker | Python (pandas / DuckDB / Plotly) | Data loading, SQL, statistics, charts, exports |
-| Charts & dashboards | Web view (Plotly, ECharts, D3) | Rendered inside the chat and the artifact panel |
 
-The three processes talk over pipes: the desktop app spawns the service, the service spawns the compute
-worker. Every boundary is JSON-RPC 2.0 over stdin/stdout — no ports, no tokens, no HTTP server.
+```
+desktop (Go/MyGo) ──stdio JSON-RPC 2.0──▶ server (Bun)
+server ──stdio JSON-RPC 2.0──▶ compute (Python)
+```
+
+The desktop app spawns the service; the service spawns the compute worker. The service is the only state
+holder (SQLite per data directory); compute is stateless and restarts cleanly. Charts are rendered in the app's
+web view with the bundled Plotly / ECharts / D3 assets.
 
 ## Quick start (from source)
 
@@ -30,28 +56,31 @@ python3 -m venv .venv
 .venv/bin/pip install -r compute/requirements.txt
 bun install --cwd server
 
-# Desktop app in development mode (it starts the service itself)
 cd desktop && go run .
 ```
 
-First run: open **Settings → Models**, pick a provider preset (local Ollama, a local OpenAI-compatible
-gateway, AtlasCloud) or add any OpenAI-compatible endpoint, paste the key, then **Discover models** to pull
-the context limits from the endpoint instead of typing them by hand. Use **Test** before saving.
+First run: the home screen points you to **Settings → Models**. Pick a preset (local Ollama, any
+OpenAI-compatible gateway, AtlasCloud) or add your own endpoint, paste the key if the endpoint needs one, then
+**Discover models** to pull context limits instead of typing them by hand. New chats then use the default
+model you choose.
 
-Then **File → New chat**, type a question, and drag a CSV/XLSX/PDF into the window to import it.
+Ask a question, or drop a CSV/XLSX/PDF onto the composer. The **Data** button opens the panel with sources,
+workspace files, artifacts, and runs.
 
 ## Features
 
-- **Chat** — streaming Markdown, thinking steps, tool calls collapsed to one line (expandable), inline charts,
-  slash commands, interrupt/queue, `ask_user` question cards.
-- **Data panel** — import files, connect SQL / Google Sheets / Feishu / HTTP sources, preview tables and schemas,
-  choose which columns tables take part in analysis, mount a workspace folder.
-- **Analysis** — SQL over DuckDB, 41 chart types, statistical templates, cleaning, Excel/report/PPT/dashboard
-  exports, knowledge base (metrics, rules, notes) with local embeddings.
-- **Trust** — a numeric provenance gate rejects numbers in the final answer that no tool result supports;
-  long tool results spill to artifacts the model must re-read explicitly; write tools ask for confirmation.
-- **Local by default** — one SQLite database per user data directory, credentials in the OS keychain (or a
-  `0600` file when there is none), no telemetry.
+- **Chat** — streaming Markdown, collapsible thinking and tool calls, inline charts, slash commands,
+  interrupt/queue, `ask_user` question cards, first-token latency while replying.
+- **Data panel** — import files, connect remote sources, preview tables and schemas, choose which columns take
+  part in analysis, mount a workspace folder, review runs and artifacts.
+- **Analysis** — SQL over DuckDB, 41 chart templates, statistical templates, cleaning, Excel/report/PPT/
+  dashboard exports, knowledge base (metrics, rules, notes) with local embeddings.
+- **Trust** — numbers in the final answer are checked against tool results; long tool output spills to
+  artifacts the model must re-read; write tools ask for confirmation; workspace chats run in a permission mode.
+- **Integrations** — MCP servers (stdio/SSE) with per-turn discovery, Feishu bot (long connection or webhook),
+  provider presets including local gateways.
+- **Local by default** — one SQLite database per data directory, credentials in the OS keychain (or a `0600`
+  file fallback), no telemetry, no accounts.
 
 ## Data locations
 
@@ -69,11 +98,27 @@ outputs).
 
 ```bash
 scripts/build/build-app.sh              # Linux: deb + tar.gz + PKGBUILD under desktop/build/
-scripts/build/build-app.sh -platform darwin/universal
 ```
 
-See [`docs/refactor/packaging.md`](docs/refactor/packaging.md) for per-platform prerequisites, signing and
-auto-update keys. CI (`.github/workflows/`) runs the three test suites and the packaging matrix.
+Linux packaging is what the release workflow builds today; macOS/Windows packaging is not maintained. See
+[`docs/refactor/packaging.md`](docs/refactor/packaging.md) for prerequisites, signing and update keys.
+
+## Development
+
+```bash
+# agent service
+cd server && bunx tsc --noEmit -p . && bun test
+
+# desktop
+cd desktop && gofmt -l . && go vet ./... && go test -race -count=1 ./...
+
+# compute (repository-root .venv)
+.venv/bin/python -m unittest compute.tests.test_rpc compute.tests.test_tools \
+  compute.tests.test_ui_methods compute.tests.test_chart_templates compute.tests.test_chart_snapshots
+```
+
+CI runs the same three suites. Design notes live in [`docs/refactor/`](docs/refactor/):
+the pipe protocol, upload hand-off, tool exposure rules and the refactor evidence.
 
 ## Upgrading from the old web app
 
@@ -86,12 +131,12 @@ cd server && bun run scripts/migrate-old-data.ts --from <old repo> --to <data di
 
 Drop `--dry-run` once the report looks right. Old job and workflow records become read-only archives.
 
-## Documentation
+## Non-goals
 
-- [`docs/refactor/pi-durable-plan.md`](docs/refactor/pi-durable-plan.md) — the refactor plan and its evidence
-- [`docs/refactor/ui-protocol.md`](docs/refactor/ui-protocol.md) — the pipe protocol between app and service
-- [`docs/refactor/ipc-uploads.md`](docs/refactor/ipc-uploads.md) — how file imports cross the pipe
-- [`docs/refactor/packaging.md`](docs/refactor/packaging.md) — installers, signing, release
+- No web or cloud edition, no multi-user accounts, no telemetry.
+- No browser automation: `browser_extract_tables` answers with an explicit “not available in this build” and
+  points at `fetch_table` / file import instead.
+- Model endpoints must be OpenAI-compatible; provider-specific SDKs are not embedded.
 
 ## License
 
