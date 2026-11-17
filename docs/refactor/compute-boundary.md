@@ -35,6 +35,21 @@ server ──stdio JSON-RPC 2.0──▶ compute (Python)
 
 模型调用、工具暴露、结果整形、权限检查都不在这 50 个里——它们属于 server。
 
+## 性能基线（2026-11 实测）
+
+机器：Linux x64 开发机，`.venv/bin/python`（仓库根虚拟环境），页面缓存已热。测法：直接拉起
+`python -m compute`，用 stdio JSON-RPC 发请求并计时；CSV 为 100k 行 × 5 列（2.6 MB），
+`source.open` 后读 `/proc/<pid>/status` 的 `VmHWM`。
+
+| 指标 | 实测 | 回归护栏 |
+|---|---|---|
+| 冷启动到首个 `ping` 应答 | 365 ms（5 次中位数；首次 548 ms） | < 1 s |
+| 100k 行 CSV `source.open` | 123 ms | < 2 s |
+| 同一次导入后的峰值 RSS（VmHWM） | 164 MB（含 pandas/DuckDB 固定开销） | < 400 MB |
+| 同一来源 `source.preview` | 1 ms | — |
+
+数字用于发现数量级退化，不是跨机器承诺；换机器或依赖版本时按同样方法重测，更新本表。
+
 ## 为什么这些留在 Python
 
 | 能力 | 现状依赖 | 迁到 TypeScript 的代价 |
