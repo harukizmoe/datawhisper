@@ -24,7 +24,8 @@
 |---|---|
 | ![带预览表格的数据面板](docs/images/data-panel.png) | ![模型与提供方设置](docs/images/settings-models.png) |
 | 数据面板：来源、表、产物、运行 | 设置：提供方、模型、上下文上限、用量 |
-| ![深色主题下的图表对话](docs/images/chat-dark.png) | |
+
+![深色主题下的图表对话](docs/images/chat-dark.png)
 
 ## 工作方式
 

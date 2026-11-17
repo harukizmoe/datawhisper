@@ -27,7 +27,8 @@ everything — sessions, imported files, charts, credentials — stays on this m
 |---|---|
 | ![Data panel with a preview table](docs/images/data-panel.png) | ![Model and provider settings](docs/images/settings-models.png) |
 | Data panel: sources, tables, artifacts, runs | Settings: providers, models, context limits, usage |
-| ![Dark theme chat with an inline chart](docs/images/chat-dark.png) | |
+
+![Dark theme with an inline chart](docs/images/chat-dark.png)
 
 ## How it works
 
