@@ -14,6 +14,7 @@ import (
 	"datawhisper/desktop/internal/conversation"
 	"datawhisper/desktop/internal/icons"
 	"datawhisper/desktop/internal/prefs"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
@@ -728,7 +729,16 @@ func (a *app) composer(c *ui.Context) {
 					return
 				}
 			}
-			frosted(ui.Column(c).Radius(composerRadius).BorderWidth(1).BorderColor(t.Border), t.Surface, composerRadius).
+			// 附件进度与错误放在卡片上方：数据面板收起时也能看见导入结果。
+			if a.src.uploading && a.src.uploadName != "" {
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(0, 4).Children(func() {
+					ui.Spinner(c)
+					a.buffer(ui.Text(c, a.tr("data.copying", "name", a.src.uploadName))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).SingleLine().MinWidth(0)
+				})
+			} else if a.src.uploadErr != "" && !a.src.open {
+				ui.Text(c, a.src.uploadErr).FontSize(a.fs(textCaption)).TextColor(t.Danger).Padding(0, 4).Selectable()
+			}
+			card := frosted(ui.Column(c).Radius(composerRadius).BorderWidth(1).BorderColor(t.Border), t.Surface, composerRadius).
 				Padding(12, 14, 10, 14).Gap(10).Bind(&a.cv.cardRef).Children(func() {
 				a.cardStatus(c, busy)
 				// 实色内容板：卡片是磨砂的，输入与引用放在这里才清晰。
@@ -756,6 +766,11 @@ func (a *app) composer(c *ui.Context) {
 					}
 				})
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					if ui.Button(c, "").Label(a.tr("chat.attach")).Tooltip(a.tr("chat.attachTip")).Children(func() {
+						ui.Icon(c, icons.Upload)
+					}).Clicked() {
+						a.pickAttachments()
+					}
 					a.modelChip(c)
 					if options := a.thinkingOptions(); len(options) > 1 {
 						sel := ui.Select(c, &a.cv.thinkingChoice, options).MaxWidth(120).MinWidth(0).FontSize(a.fs(textCaption))
@@ -787,6 +802,13 @@ func (a *app) composer(c *ui.Context) {
 					}
 				})
 			})
+			// 原生文件拖放：只接本地文件列表，远程 URL 被 transfer.Files 过滤掉。
+			dropOptions := transfer.DropOptions{Formats: []transfer.Format{transfer.FileList}}
+			if drop, ok := ui.DropData(card, dropOptions); ok {
+				if paths, err := drop.Data.Files(); err == nil {
+					a.attachPaths(paths)
+				}
+			}
 		})
 	})
 }
