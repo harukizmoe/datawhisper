@@ -109,6 +109,29 @@ func TestStatusLineFallsBackToWorkingAfterTheToolFinishes(t *testing.T) {
 	expectTexts(t, tt, []string{"Working"}, []string{"Running query_data…"})
 }
 
+// 芯片显示提供方的展示名；名称为空时退回 provider/id。选择键始终是 provider/id。
+func TestModelChipShowsDisplayNameAndFallsBackToTheKey(t *testing.T) {
+	f := newSourceFake(t)
+	a, _, tt := openChat(t, f)
+	a.cv.models = []service.AvailableModel{
+		{Provider: "gw", ID: "flash", Name: "DeepSeek V4.1 Flash"},
+		{Provider: "gw", ID: "plain"},
+	}
+	a.chat.Model = &service.ModelRef{Provider: "gw", ModelID: "flash"}
+	tt.Frame()
+	expectTexts(t, tt, []string{"DeepSeek V4.1 Flash"}, nil)
+	if got := a.modelTitle("gw/plain"); got != "gw/plain" {
+		t.Errorf("empty name falls back to the key: %q", got)
+	}
+	if got := a.modelTitle("missing/model"); got != "missing/model" {
+		t.Errorf("unknown model falls back to the key: %q", got)
+	}
+	// 展示名不改变选择键：菜单值与 chooseModel 仍按 provider/id。
+	if !hasString(a.modelOptions(), "gw/flash") || !hasString(a.modelOptions(), "gw/plain") {
+		t.Errorf("options must stay provider/id: %v", a.modelOptions())
+	}
+}
+
 // 失败的调用一直完整展开。
 func TestLongToolOutputIsTruncated(t *testing.T) {
 	q := newQueue()

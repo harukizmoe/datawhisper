@@ -263,7 +263,8 @@ func TestLiveAppSurvivesAServiceKill(t *testing.T) {
 		title := a.sessionTitle(a.conv)
 		return title != "New chat" && tt.HasText(title)
 	})
-	expectTexts(t, tt, []string{"Summarize the data", "Hello", "streamed", "metric", "custom-stub/stub-chat"}, []string{"Chat " + strconv.Itoa(a.conv)})
+	// 芯片显示提供方给的展示名；provider/id 仍在 tooltip 与选择键里。
+	expectTexts(t, tt, []string{"Summarize the data", "Hello", "streamed", "metric", "stub-chat"}, []string{"Chat " + strconv.Itoa(a.conv)})
 	before := append([]conversation.Message(nil), a.chat.Messages...)
 	conv, pid := a.conv, a.service.PID
 
