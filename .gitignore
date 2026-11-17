@@ -80,3 +80,6 @@ desktop.ini
 /memory/
 Test/
 .pnpm-store/
+
+# 本机的 agent 约定只在本地维护，不进仓库。
+AGENTS.md
