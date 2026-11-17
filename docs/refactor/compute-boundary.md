@@ -8,7 +8,7 @@
 - **Python 只保留「算」**：数据源实现（DuckDB / pandas / 各种连接器）、SQL、统计分析、机器学习、图表模板与导出。
 - **其余全部在 Bun**：模型回合、工具编排、权限、工作区、知识库索引与检索、飞书、MCP、持久化。Python 不碰网络、不碰凭据、不碰会话状态。
 - Python 代码只有一个包根 `compute/`：数据源、工作区运行时、导入限流在 `compute/data/`，路径与产物生命周期、训练设备路由在 `compute/infrastructure/`。
-- 三个注册表里声明了但**没有执行器**的工具（`fetch_table`、`browser_extract_tables`、`load_feishu_bitable`）目前是死声明；处理方式见「已知缺口」。
+- `fetch_table` 与 `load_feishu_bitable` 已实现（见「网表/飞书表的入口」）；`browser_extract_tables` 是明确的非目标，保留声明但调用时只回答「这一版没有浏览器自动化」并给替代方案（有回归用例）。
 
 ## 进程边界
 

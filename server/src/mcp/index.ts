@@ -10,9 +10,9 @@
  *   这是唯一能在「一轮运行中间」改变模型可见工具集的机制；`configure({ modelTools })` 是整体替换，
  *   由 `conversations/service.ts` 在提交前重算，工具里改不动它。
  * - 旧实现每轮只暴露「最近发现的 5 个」（`select_mcp_schemas(..., limit=5)`）。这里同样提供
- *   `recentNames(limit=5)` 与 `selectMcpSchemas`，供暴露层（`tools/exposure.ts` 的
- *   `allowedMcpTools`）使用；那两处属于 P3.4/P4 接线，本模块不越界修改。`control.addTools` 本身
- *   只能追加、无法移除，所以「最近 5 个」的最终裁剪必须发生在每轮的 `modelTools` 计算里。
+ *   `recentNames(limit=5)` 与 `selectMcpSchemas`，由 `conversations/service.ts` 在提交前传给
+ *   暴露层（`tools/exposure.ts` 的 `allowedMcpTools`）。`control.addTools` 本身只能追加、无法移除，
+ *   所以「最近 5 个」的最终裁剪发生在每轮的 `modelTools` 计算里。
  * - 发现状态（旧 `discovered_mcp_tools` + `mcp_catalog_version_seen`）由宿主通过 `discovery` /
  *   `onDiscover` 持久化；目录版本一变，旧发现全部作废（旧实现的行为）。
  */
