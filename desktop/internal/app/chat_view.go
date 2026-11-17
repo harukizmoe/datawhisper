@@ -942,6 +942,9 @@ func (a *app) cardStatus(c *ui.Context, busy bool) {
 						elapsed = 0
 					}
 					a.buffer(ui.Text(c, formatElapsed(elapsed))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+					if a.cv.ttft > 0 {
+						a.buffer(ui.Text(c, a.tr("chat.ttft", "time", formatTTFT(a.cv.ttft)))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Shrink(0)
+					}
 					c.After(time.Second - elapsed%time.Second)
 				}
 				label := a.tr("chat.working")
@@ -1009,6 +1012,14 @@ func (a *app) contextWindow() int {
 }
 
 // formatElapsed 把已用时写成 12s、3m 05s。
+// formatTTFT 是首字延迟：一秒内给毫秒，超过给一位小数秒，避免都显示成 0s/1s。
+func formatTTFT(d time.Duration) string {
+	if d < time.Second {
+		return strconv.Itoa(int(d/time.Millisecond)) + "ms"
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
 func formatElapsed(d time.Duration) string {
 	s := int(d / time.Second)
 	if s < 60 {

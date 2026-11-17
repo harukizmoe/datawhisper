@@ -255,10 +255,32 @@ func (a *app) onChat(st conversation.State) {
 		a.cv.busySince = time.Time{}
 	}
 	a.chat, a.connected, a.streamErr = st, true, ""
+	a.recordTTFT(st)
 	a.syncFromState(switched)
 	a.syncTasks()
 	if finished {
 		a.refreshConversations() // 它的最新条目变了（服务端据此更新兜底标题）
+	}
+}
+
+// recordTTFT 在本轮第一段助手输出（文本或工具调用）出现时记下首字延迟。
+func (a *app) recordTTFT(st conversation.State) {
+	if a.cv.ttftStart.IsZero() {
+		return
+	}
+	for _, message := range st.Messages {
+		if message.Role != "assistant" || a.cv.ttftSeen[message.Key] {
+			continue
+		}
+		if message.Text == "" && message.Tool == nil {
+			continue // 空壳消息不算首字
+		}
+		a.cv.ttft = time.Since(a.cv.ttftStart)
+		if a.cv.ttft < 0 {
+			a.cv.ttft = 0
+		}
+		a.cv.ttftStart = time.Time{}
+		return
 	}
 }
 
@@ -331,6 +353,12 @@ func (a *app) send() {
 	a.cv.followPaused = false // 发出新消息后回到底部看回复
 	client, conv, scope := a.client, a.conv, a.newChatScope
 	draftModel, draftLevel := a.cv.draftModel, a.cv.draftLevel
+	// 首字延迟的基线：这一轮之前已有的消息键，与新出现的助手消息区分开。
+	a.cv.ttftSeen = make(map[string]bool, len(a.chat.Messages))
+	for _, message := range a.chat.Messages {
+		a.cv.ttftSeen[message.Key] = true
+	}
+	a.cv.ttft, a.cv.ttftStart = 0, time.Time{}
 	command, whenBusy := slashCommandName(text, a.cv.commands), a.whenBusy()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -359,12 +387,14 @@ func (a *app) send() {
 			Command:   command,
 			WhenBusy:  whenBusy,
 		})
+		submitted := time.Now()
 		a.post(func() {
 			if err != nil {
 				a.sendFailed(p, a.tr("chat.sendFailed", "error", err.Error()), err)
 				return
 			}
 			a.sending = false
+			a.cv.ttftStart = submitted
 			if a.pending != nil && a.pending.requestID == p.requestID {
 				a.pending = nil
 			}
