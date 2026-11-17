@@ -67,7 +67,8 @@ jobs:
           timeout 1800 python -m unittest \
             compute.tests.test_rpc \
             compute.tests.test_tools \
-            compute.tests.test_ui_methods
+            compute.tests.test_ui_methods \
+            compute.tests.test_chart_templates
         env:
           PYTHONHASHSEED: "0"
           TZ: UTC

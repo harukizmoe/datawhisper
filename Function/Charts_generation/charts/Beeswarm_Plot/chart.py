@@ -253,7 +253,14 @@ def generate(
         warnings.append(say("Required field [group] not found", "找不到必填字段 [group]"))
         return ChartResult(warnings=warnings)
 
-    plot_df = df[[_group, _value]].copy()
+    # 只有一列数值时 _auto_col 会把分组也兜底成同一列；那样 df[[g, v]] 会拿到重复列，
+    # 后面的 `plot_df[group].unique()` 直接报错。没有分组列时合成一组，而不是崩掉。
+    if _group == _value:
+        plot_df = df[[_value]].copy()
+        plot_df["__all__"] = say("All", "全部")
+        _group = "__all__"
+    else:
+        plot_df = df[[_group, _value]].copy()
     plot_df = plot_df.dropna(subset=[_group, _value])
 
     if plot_df.empty:
