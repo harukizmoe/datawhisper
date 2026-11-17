@@ -68,7 +68,8 @@ jobs:
             compute.tests.test_rpc \
             compute.tests.test_tools \
             compute.tests.test_ui_methods \
-            compute.tests.test_chart_templates
+            compute.tests.test_chart_templates \
+            compute.tests.test_chart_snapshots
         env:
           PYTHONHASHSEED: "0"
           TZ: UTC
