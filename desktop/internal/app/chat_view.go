@@ -756,12 +756,7 @@ func (a *app) composer(c *ui.Context) {
 					}
 				})
 				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					if options := a.modelOptions(); len(options) > 0 {
-						sel := ui.Select(c, &a.cv.modelChoice, options).MaxWidth(240).MinWidth(0).FontSize(a.fs(textCaption))
-						if sel.Changed() {
-							a.chooseModel(a.cv.modelChoice)
-						}
-					}
+					a.modelChip(c)
 					if options := a.thinkingOptions(); len(options) > 1 {
 						sel := ui.Select(c, &a.cv.thinkingChoice, options).MaxWidth(120).MinWidth(0).FontSize(a.fs(textCaption))
 						if sel.Changed() {
@@ -793,6 +788,33 @@ func (a *app) composer(c *ui.Context) {
 				})
 			})
 		})
+	})
+}
+
+// modelChip 是底栏的模型选择（参考 Tern）：图标、当前模型与箭头组成的胶囊，点开是模型菜单。
+func (a *app) modelChip(c *ui.Context) {
+	t := c.Theme()
+	options := a.modelOptions()
+	if len(options) == 0 {
+		return
+	}
+	choice := a.cv.modelChoice
+	if choice == "" {
+		choice = a.modelDefault()
+	}
+	ui.Button(c, "").Label(a.tr("chat.modelMenu")).MaxWidth(260).MinWidth(0).Children(func() {
+		ui.Icon(c, icons.Sparkles).Size(12, 12).TextColor(t.Accent)
+		ui.Text(c, choice).FontSize(a.fs(textCaption)).SingleLine().MinWidth(0)
+		ui.Icon(c, icons.ChevronDown).Size(12, 12).TextColor(t.TextMuted)
+	}).PopoverMenuButton(func(m *ui.Menu) {
+		a.menuShown()
+		for _, option := range options {
+			option := option
+			if m.Item(option).Radio(option == choice).Chosen() {
+				a.cv.modelChoice = option
+				a.chooseModel(option)
+			}
+		}
 	})
 }
 
