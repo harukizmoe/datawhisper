@@ -57,6 +57,7 @@ config/feishu-bot.json
 docs/*
 !/docs/refactor/
 !/docs/agents/
+!/docs/images/
 docs/refactor/*.png
 # 打包与构建脚本显式保留（scripts/* 默认忽略）。
 scripts/*

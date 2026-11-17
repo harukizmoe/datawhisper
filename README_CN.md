@@ -1,53 +1,76 @@
-# DataWhisper（智析）
+# DataWhisper
 
 [English](./README.md)
 
-本机单用户的数据分析桌面应用。用自然语言提问，agent 去查数据、画图，并把结论写下来。
+本地单用户的桌面数据分析应用。用自然语言提问，agent 去查数据、画图，并把结论写下来。
 
-没有账号、没有托管模型、没有云端存储：提供商与密钥由你自己配置，会话、图表、凭据全部留在这台机器上。
+不需要账号，不依赖托管模型，没有遥测。模型端点由你提供（任意 OpenAI 兼容地址或本地网关），会话、导入
+的文件、图表与凭据都留在这台机器上。
 
-## 组成
+![导入 CSV、执行 SQL、生成柱状图的一次对话](docs/images/chat-light.png)
 
-| 部分 | 技术 | 作用 |
+## 能做什么
+
+- **自然语言提问**。agent 自己挑工具：用 DuckDB 跑 SQL、做列画像、从 41 个图表模板里选一张，再用能追溯到
+  工具结果里的数字写结论。
+- **数据随你带**。把 CSV/XLSX/PDF 拖进输入区、从数据面板导入、挂载一个文件夹作为工作区，或连接 SQL /
+  Google Sheets / 飞书多维表格 / HTTP 来源。
+- **跨回合接着干**。长任务、工作流运行、团队委派、审批卡片与 MCP 工具服务器都出现在同一个对话和「运行」页签里。
+- **保持本地**。桌面端、agent 服务与 Python 计算进程只通过管道通信——没有端口、没有 HTTP 服务、没有云存储。
+
+## 截图
+
+| | |
+|---|---|
+| ![带预览表格的数据面板](docs/images/data-panel.png) | ![模型与提供方设置](docs/images/settings-models.png) |
+| 数据面板：来源、表、产物、运行 | 设置：提供方、模型、上下文上限、用量 |
+
+![深色主题下的图表对话](docs/images/chat-dark.png)
+
+## 工作方式
+
+| 组成 | 技术 | 职责 |
 |---|---|---|
-| 桌面端 | Go + [MyGo](https://mygo.egoist.dev) 原生 UI | 窗口、聊天、数据面板、设置 |
-| agent 服务 | Bun + `@earendil-works/pi-durable` | 模型回合、工具、长任务、MCP、飞书机器人 |
-| 计算进程 | Python（pandas / DuckDB / Plotly） | 载入数据、SQL、统计、图表、导出 |
-| 图表与仪表盘 | Web view（Plotly / ECharts / D3） | 在聊天与产物面板里内嵌渲染 |
+| 桌面端 | Go + [MyGo](https://mygo.egoist.dev) 原生 UI | 对话、数据面板、设置、工作区 |
+| agent 服务 | Bun + `@earendil-works/pi-durable` | 模型回合、工具、权限、长任务、工作流、MCP、飞书机器人 |
+| 计算进程 | Python（pandas / DuckDB / Plotly） | 数据加载、SQL、统计、图表、导出 |
 
-三个进程用管道相连：桌面端拉起服务，服务拉起计算进程。所有边界都是 stdin/stdout 上的
-JSON-RPC 2.0 —— 没有端口、没有令牌、没有 HTTP 服务。
+```
+desktop (Go/MyGo) ──stdio JSON-RPC 2.0──▶ server (Bun)
+server ──stdio JSON-RPC 2.0──▶ compute (Python)
+```
 
-## 从源码运行
+桌面端拉起服务，服务拉起计算进程。状态只在服务里（每个数据目录一个 SQLite）；计算进程无状态，重启即可。
+图表在应用的 web view 里渲染，使用随包携带的 Plotly / ECharts / D3。
 
-需要：Go 1.24+、Bun 1.4+、带虚拟环境的 Python 3.11，Linux 上还需要 WebKitGTK 4.1（`webkit2gtk-4.1`）。
+## 快速开始（源码运行）
+
+需要 Go 1.24+、Bun 1.4+、Python 3.11（虚拟环境），Linux 上还需要 WebKitGTK 4.1（`webkit2gtk-4.1`）。
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r compute/requirements.txt
 bun install --cwd server
 
-# 开发模式启动桌面端（它会自己拉起服务）
 cd desktop && go run .
 ```
 
-首次使用：打开 **Settings → Models**，选一个预设（本机 Ollama、本机 OpenAI 兼容网关、AtlasCloud），
-或自己填任意 OpenAI 兼容地址；填密钥后点 **Discover models** 从端点读取上下文长度与能力（不用手抄），
-保存前先点 **Test**。
+首次启动：首页会把你引到 **设置 → 模型**。选一个预设（本地 Ollama、任意 OpenAI 兼容网关、AtlasCloud），
+或自己填端点；需要密钥的填上，再点 **发现模型** 从端点拉上下文上限。选好默认模型后，新对话就用它。
 
-然后 **File → New chat**，直接提问；把 CSV/XLSX/PDF 拖进窗口即可导入。
+提问，或把 CSV/XLSX/PDF 拖进输入区。标题栏的 **数据** 按钮打开面板：来源、工作区文件、产物与运行。
 
 ## 功能
 
-- **聊天** —— 流式 Markdown、思考过程、工具调用折叠成一行（可展开）、内嵌图表、斜杠命令、中止与排队、
-  `ask_user` 问题卡片。
-- **数据面板** —— 导入文件、连接 SQL / Google Sheets / 飞书 / HTTP 数据源、预览表与 schema、
-  选择哪些表参与分析、挂载工作区目录。
-- **分析** —— DuckDB 上的 SQL、41 种图表、统计模板、数据清洗、Excel/报告/PPT/仪表盘导出、
-  知识库（指标、规则、笔记，本地向量）。
-- **可信** —— 数字溯源门会拒绝回答里没有工具结果支撑的数值；超长工具结果外溢成制品，模型必须显式读取；
-  写操作需要确认。
-- **本地优先** —— 每个用户数据目录一个 SQLite；凭据进系统钥匙串（没有时落 `0600` 文件）；无遥测。
+- **对话** —— 流式 Markdown、可折叠的思考与工具调用、内嵌图表、斜杠命令、打断/排队、`ask_user` 问题卡片，
+  回复中显示首字延迟。
+- **数据面板** —— 导入文件、连接远程来源、预览表与结构、选择参与分析的列、挂载工作区文件夹、查看运行与产物。
+- **分析** —— DuckDB 上的 SQL、41 种图表模板、统计模板、清洗、Excel/报告/PPT/仪表盘导出、知识库
+  （指标、规则、笔记）与本地向量检索。
+- **可信** —— 最终回答里的数字要对上工具结果；过长的工具输出外溢成产物，模型必须显式再读；写操作要确认；
+  工作区对话跑在权限模式下。
+- **集成** —— MCP 服务器（stdio/SSE，按回合发现工具）、飞书机器人（长连接或 webhook）、含本地网关的提供方预设。
+- **本地优先** —— 每个数据目录一个 SQLite；凭据在系统钥匙串（没有时退化为 `0600` 文件）；无遥测、无账号。
 
 ## 数据位置
 
@@ -57,35 +80,50 @@ cd desktop && go run .
 | macOS | `~/Library/Application Support/DataWhisper` |
 | Windows | `%APPDATA%\DataWhisper` |
 
-可用 `DW_DATA_DIR` 覆盖。目录里有 `datawhisper.sqlite`（会话、任务）、`library.sqlite`（标题、hooks、
-归档运行记录）、`uploads/`、`outputs/`（图表与导出）、`tool_results/`（外溢的工具结果）。
+可用 `DW_DATA_DIR` 覆盖。目录里有 `datawhisper.sqlite`（会话、任务）、`library.sqlite`（标题、hooks、归档运行）、
+`uploads/`、`outputs/`（图表、导出）与 `tool_results/`（外溢的工具输出）。
 
 ## 打包
 
 ```bash
-scripts/build/build-app.sh              # Linux：desktop/build/ 下的 deb + tar.gz + PKGBUILD
-scripts/build/build-app.sh -platform darwin/universal
+scripts/build/build-app.sh              # Linux：deb + tar.gz + PKGBUILD，输出到 desktop/build/
 ```
 
-各平台前置依赖、签名与自动更新密钥见 [`docs/refactor/packaging.md`](docs/refactor/packaging.md)。
-CI（`.github/workflows/`）会跑三个测试套件与打包矩阵。
+发布流程目前只打 Linux 包；macOS/Windows 打包不维护。细节见
+[`docs/refactor/packaging.md`](docs/refactor/packaging.md)。
 
-## 从旧版升级
+## 开发
 
-旧版是带登录、配额与托管模型的 Flask 网页应用，那套代码已删除；旧会话、job 记录与工作流运行可以导入：
+```bash
+# agent 服务
+cd server && bunx tsc --noEmit -p . && bun test
+
+# 桌面端
+cd desktop && gofmt -l . && go vet ./... && go test -race -count=1 ./...
+
+# 计算进程（仓库根 .venv）
+.venv/bin/python -m unittest compute.tests.test_rpc compute.tests.test_tools \
+  compute.tests.test_ui_methods compute.tests.test_chart_templates compute.tests.test_chart_snapshots
+```
+
+CI 跑同样三套。设计笔记在 [`docs/refactor/`](docs/refactor/)：管道协议、上传交接、工具暴露规则与重构证据。
+
+## 从旧版网页应用升级
+
+旧版是带登录、配额与托管模型的 Flask 网页应用，代码已删除；已有会话、任务与工作流记录可以导入：
 
 ```bash
 cd server && bun run scripts/migrate-old-data.ts --from <旧仓库> --to <数据目录> --dry-run
 ```
 
-确认报告无误后去掉 `--dry-run`。旧 job 与工作流记录会成为只读归档。
+报告确认后去掉 `--dry-run`。旧任务与工作流记录会变成只读归档。
 
-## 文档
+## 非目标
 
-- [`docs/refactor/pi-durable-plan.md`](docs/refactor/pi-durable-plan.md) —— 重构计划与验收证据
-- [`docs/refactor/ui-protocol.md`](docs/refactor/ui-protocol.md) —— 桌面端与服务的管道协议
-- [`docs/refactor/ipc-uploads.md`](docs/refactor/ipc-uploads.md) —— 文件导入如何跨管道
-- [`docs/refactor/packaging.md`](docs/refactor/packaging.md) —— 安装包、签名、发布
+- 不做网页版/云端版、多用户账号与遥测。
+- 不做浏览器自动化：`browser_extract_tables` 明确回答「这一版没有浏览器自动化」，并给出 `fetch_table`
+  或上传文件的替代路径。
+- 模型端点必须是 OpenAI 兼容接口，不内嵌各家专用 SDK。
 
 ## 许可
 
