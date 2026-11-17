@@ -77,8 +77,10 @@ func (a *app) integrationSettings(c *ui.Context, t *ui.Theme) {
 			a.settingGroup(c, t, a.tr("feishu.chatLink"), a.tr("feishu.chatLinkTip"), func() {
 				a.feishuLinkRow(c, t)
 			})
+			a.mcpSection(c, t)
 		})
 	})
+	a.mcpModal(c, t)
 }
 
 // feishuStatusRow 是连接状态：一个状态点、状态词与错误原因。

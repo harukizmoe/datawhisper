@@ -11,6 +11,8 @@ import type { TeamDelegationPort } from "./tools/app/types.ts";
 import { ComputeClient } from "./compute/client.ts";
 import type { Config } from "./config.ts";
 import { NO_TURN_STATE, type Conversations, type TurnState, createConversations } from "./conversations/service.ts";
+import { McpConfigStore } from "./mcp/config.ts";
+import { createMcpTools, type McpTools } from "./mcp/index.ts";
 import { SecretCredentialStore } from "./models/credentials.ts";
 import {
   createConversationSourceStore,
@@ -44,6 +46,13 @@ import { ModelService } from "./models/service.ts";
 import type { SubmitResponse } from "./protocol.ts";
 import type { RpcMethod } from "./ipc/rpc.ts";
 
+/** MCP 的宿主侧句柄：设置界面改完配置后调 `refresh()`，新工具才会进注册表。 */
+export type McpRuntime = {
+  readonly store: McpConfigStore;
+  readonly tools: McpTools;
+  refresh(): Promise<void>;
+};
+
 export type ServiceOptions = {
   registry?: Registry;
   /** 本轮可用的工具（P4 提供；为空表示还没有工具，模型只能纯对话）。 */
@@ -75,6 +84,8 @@ export type Service = {
   readonly workflowMethods: Record<string, RpcMethod>;
   /** 工作流目录：保存的定义与从定义启动运行。 */
   readonly workflowCatalog: WorkflowCatalog;
+  /** MCP：配置存储、运行时与「保存后重连并重装注册表」的入口。 */
+  readonly mcp: McpRuntime;
   /** `conversations.submitTurn` 的便捷入口（测试里常用）。 */
   submitTurn(id: string | number, body: unknown): Promise<SubmitResponse>;
   /** Harness 关闭时落定：`stop()` 之后，或存储失败之后（`kind: "failed"`）。 */
@@ -127,6 +138,15 @@ export async function startService(config: Config, options: ServiceOptions = {})
   mkdirSync(config.dataDir, { recursive: true });
 
   const modelService = await ModelService.open(config.dataDir, { forceFileCredentials: options.forceFileCredentials });
+  // MCP 配置与密钥独立存一份：`mcp_config.json` 只留键名，真值进凭据库（与数据源凭据分开，避免互相清理）。
+  const mcpCredentials = await SecretCredentialStore.open(
+    join(config.dataDir, "mcp-credentials.json"),
+    join(config.dataDir, "mcp-credentials.index.json"),
+    { forceFile: options.forceFileCredentials },
+  );
+  const mcpStore = await McpConfigStore.open(join(config.dataDir, "mcp_config.json"), mcpCredentials);
+  // 启动时就连接并发现：`search_mcp_tools` 的第一轮请求前目录必须已经可用。
+  const mcpTools = await createMcpTools({ servers: () => mcpStore.enabled() });
 
   // compute 与工具集要在注册表之前就绪：注册表要装工具，策略扩展要用同一个外溢 store。
   const compute = new ComputeClient({
@@ -158,6 +178,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
           sources: () => sourceState,
           workspaces: workspaceStore,
           ingest: ingestPort,
+          mcpCatalog: mcpTools.catalog,
         })
       : undefined;
   const tools = options.tools ?? assembled!.tools;
@@ -173,6 +194,17 @@ export async function startService(config: Config, options: ServiceOptions = {})
   if (tools.length > 0) {
     registry.install(defineExtension({ name: "datawhisper-tools", tools }));
   }
+  // MCP 工具是 deferred：必须真的在注册表里，`modelTools` 才可能选中它们。
+  registry.install(mcpTools.extension());
+  const mcp: McpRuntime = {
+    store: mcpStore,
+    tools: mcpTools,
+    async refresh() {
+      await mcpTools.refresh();
+      // 同名扩展就地替换，后加的服务器工具立刻可用。
+      registry.install(mcpTools.extension());
+    },
+  };
   harness = await Harness.open(
     await openNodeSqliteStorage(join(config.dataDir, "datawhisper.sqlite")),
     {
@@ -228,6 +260,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     tools,
     turnState: options.turnState ?? ((conversationId) => readTurnState(sourceState, workspaceStore, config.dataDir, conversationId)),
     workflowsAvailable: true,
+    mcp: mcpTools,
   });
   // 旧版每个对话各存一份工作区记录；先迁成全局注册表 + 对话 scope，之后才对外服务。幂等。
   try {
@@ -283,6 +316,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     teamMethods: teams,
     workflowMethods: workflowApi,
     workflowCatalog: catalog,
+    mcp,
     conversations,
     submitTurn: (id, body) => conversations.submitTurn(id, body),
     closed,
