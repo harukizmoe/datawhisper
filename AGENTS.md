@@ -60,7 +60,7 @@ cd server && bunx tsc --noEmit -p . && bun test
 cd desktop && gofmt -l . && go vet ./... && go test -race -count=1 ./...
 
 # 计算进程（用仓库根的 .venv）
-.venv/bin/python -m unittest compute.tests.test_rpc compute.tests.test_tools compute.tests.test_ui_methods
+.venv/bin/python -m unittest compute.tests.test_rpc compute.tests.test_tools compute.tests.test_ui_methods compute.tests.test_chart_templates
 
 # 开发运行
 cd desktop && go run .
