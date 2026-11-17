@@ -35,9 +35,10 @@ type chatView struct {
 	renameBusy bool
 
 	// 模型与思考强度。
-	models      []service.AvailableModel
-	modelsErr   string
-	modelChoice string
+	models       []service.AvailableModel
+	modelsErr    string
+	modelsLoaded bool
+	modelChoice  string
 	// thinkingChoice 是思考强度下拉框的值；thinkingDefault 表示未设置。
 	thinkingChoice string
 	// modelsTouched：用户已经改了模型、服务端还没确认。这段时间不把下拉框拨回旧值，避免闪回。
@@ -405,6 +406,7 @@ func (a *app) refreshModels() {
 			if client != a.client {
 				return
 			}
+			a.cv.modelsLoaded = true
 			if err != nil {
 				a.cv.modelsErr = a.tr("chat.modelsFailed", "error", err.Error())
 				return

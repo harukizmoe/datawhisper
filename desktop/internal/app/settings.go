@@ -283,6 +283,8 @@ func (a *app) saveProviderKey(p service.ModelProvider) {
 			a.st.keyProvider, a.st.keyInput = "", ""
 			a.st.notice, a.st.noticeErr = a.tr("settings.noticeKeyStored", "name", p.Name), false
 			a.loadSettings()
+			// 刚存入密钥：模型目录可能从空变成可用，首页与模型菜单要跟上。
+			a.refreshModels()
 		})
 	}()
 }
@@ -373,6 +375,7 @@ func (a *app) saveDefaultModel() {
 			}
 			a.st.notice, a.st.noticeErr = a.tr("settings.noticeDefaultSaved"), false
 			a.loadSettings()
+			a.refreshModels()
 		})
 	}()
 }
