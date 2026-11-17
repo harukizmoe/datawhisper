@@ -13,6 +13,7 @@ import { say } from "../i18n.ts";
 import { createToolResultStore, type ToolResultStore } from "../tools/guard/spill.ts";
 import { createConversationDocs } from "../tools/app/docs.ts";
 import type { AppDocHosts, IngestPort, TeamDelegationPort } from "../tools/app/types.ts";
+import type { McpCatalogReader } from "../tools/app/mcp.ts";
 import type { WorkflowCatalog } from "../workflows/catalog.ts";
 import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, Harness, ToolExecutionApi } from "@earendil-works/pi-durable";
@@ -52,6 +53,8 @@ export type AssembleOptions = {
   readonly workspaces?: WorkspaceStore;
   /** 抓取/飞书工具的来源登记端口；由 `sourceMethods` 在装配后填 `ingest`（迟绑定）。 */
   readonly ingest?: { ingest?: IngestPort };
+  /** `search_mcp_tools` 的目录读取端；省略时该工具返回空目录（装配期没有 MCP 运行时的测试场景）。 */
+  readonly mcpCatalog?: McpCatalogReader;
 };
 
 export function assembleTools(config: Config, compute: ComputeClient, sessionId: string, options: AssembleOptions): ToolAssembly {
@@ -131,6 +134,7 @@ export function assembleTools(config: Config, compute: ComputeClient, sessionId:
     memoryDirs: { userDir: join(config.dataDir, "memory") },
     skillDirs: { builtinDir: join(config.computeCwd, "skills") },
     fetch: globalThis.fetch,
+    ...(options.mcpCatalog === undefined ? {} : { mcpCatalog: options.mcpCatalog }),
     ...(options.ingest === undefined
       ? {}
       : {

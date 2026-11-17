@@ -20,6 +20,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { EMPTY_TURN_CONTEXT, type TurnContext, TurnDoc } from "../agent/turn.ts";
 import { appError, invalidParams } from "../ipc/errors.ts";
+import type { McpTools } from "../mcp/index.ts";
 import { type ModelService, parseThinkingLevel } from "../models/service.ts";
 import type {
   AgentModelResponse,
@@ -69,6 +70,8 @@ export type ConversationsDeps = {
   turnState?: (conversationId: number) => TurnState | Promise<TurnState>;
   /** 宿主有自己的工作流目录：每轮的工具暴露里，工作流工具不要求挂载工作区。 */
   workflowsAvailable?: boolean;
+  /** MCP 运行时：本轮先按消息预发现，再把最近 5 个工具放进可见集合；省略时 MCP 工具不可见。 */
+  mcp?: McpTools;
 };
 
 /** 一条订阅通知：与旧 SSE 的 `snapshot`/`ops`/`end` 一一对应，加上订阅号。 */
@@ -191,6 +194,8 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     Object.assign(doc, next);
   }, context);
 
+  // MCP 目录与工具名发现同轮进行：先预发现（旧 `search_mcp_catalog`），再按最近 5 个裁剪。
+  if (deps.mcp !== undefined) await deps.mcp.discover(discoveryMessage);
   const bySelection = toolsForTurn(deps.tools ?? [], {
     userMessage: text,
     command,
@@ -200,6 +205,8 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     teamsEnabled: current.teamsEnabled,
     discoveredTools: next.discoveredTools,
     maxTools: MAX_VISIBLE_TOOLS,
+    includeMcp: deps.mcp !== undefined,
+    allowedMcpTools: deps.mcp?.recentNames(5) ?? null,
   });
   // 调用方（工作流节点）给了工具名单时它说了算：名单之外的工具这一轮不可见，名单里的不受关键词发现限制。
   const selected =

@@ -84,6 +84,8 @@ type app struct {
 
 	// st 是模型与提供商设置页的数据与编辑状态（settings.go）。
 	st settingsState
+	// mcp 是设置页「集成 → MCP 服务器」的数据与编辑状态（mcp.go / mcp_view.go）。
+	mcp mcpState
 	// src 是右侧数据面板（数据源、工作区、产物）的数据与编辑状态（sources.go）。
 	src sourcesState
 	// cv 是聊天页自己的界面状态（输入、工具折叠、ask_user 选择、模型选择），见 chat.go。

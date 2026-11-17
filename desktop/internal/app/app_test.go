@@ -317,6 +317,16 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 			respond(req.ID, map[string]any{"enabled": true, "configured": true, "appId": "cli_a1", "appSecretConfigured": true,
 				"inboundTransport": "long_connection", "receiveIdType": "chat_id", "receiveId": "oc_1", "receiveIdMasked": "…oc_1",
 				"inboundStatus": "connected", "inboundError": "", "link": nil})
+		case "mcp.list":
+			respond(req.ID, map[string]any{"servers": []any{
+				map[string]any{"server_id": "github", "label": "GitHub", "transport": "stdio", "enabled": true,
+					"description": "", "command": "npx", "args": []any{"-y", "server-github"}, "envKeys": []any{"GITHUB_TOKEN"},
+					"url": "", "headerNames": []any{}, "status": "connected", "tools": 7, "lastError": ""},
+			}})
+		case "mcp.upsert":
+			respond(req.ID, map[string]any{"ok": true, "message": "Updated"})
+		case "mcp.test":
+			respond(req.ID, map[string]any{"ok": true, "tools": 2, "error": ""})
 		case "feishu.setConfig":
 			respond(req.ID, map[string]any{"enabled": true, "configured": true, "appId": params["app_id"], "inboundStatus": "connected"})
 		case "session.rename":

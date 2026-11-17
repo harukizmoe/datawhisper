@@ -19,7 +19,7 @@
 
 import { defineExtension, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { type McpCatalogEntry, type McpCatalogReader, searchMcpCatalog } from "../tools/app/mcp.ts";
-import { type McpClientOptions, McpServerClient } from "./client.ts";
+import { type McpClientOptions, type McpClientStatus, McpServerClient } from "./client.ts";
 import { say } from "../i18n.ts";
 import type { McpServerConfig } from "./config.ts";
 import {
@@ -46,9 +46,21 @@ export type McpToolsConfig = {
   readonly now?: () => number;
 };
 
+/** 设置界面需要的连接状态：密钥值不出现，只给键名与状态。 */
+export type McpServerStatus = {
+  readonly server_id: string;
+  readonly label: string;
+  readonly enabled: boolean;
+  readonly status: McpClientStatus;
+  readonly tools: number;
+  readonly lastError: string;
+};
+
 export type McpTools = {
   /** 供 `search_mcp_tools` 的 `AppToolDeps.mcpCatalog`。 */
   readonly catalog: McpCatalogReader;
+  /** 每个已配置服务器的连接状态（含禁用的；禁用的没有客户端，按 disconnected 上报）。 */
+  status(): Promise<McpServerStatus[]>;
   /** 当前已发现的工具注册项（按服务器/工具名的稳定顺序）。 */
   tools(): ToolRegistration[];
   /** 把当前工具集装进一个扩展；宿主在 `Harness.open` 的 registry 或 `configure({ extensions })` 里安装。 */
@@ -179,6 +191,21 @@ export async function createMcpTools(config: McpToolsConfig): Promise<McpTools> 
 
   const api: McpTools = {
     catalog: catalogReader,
+    async status() {
+      await syncClients();
+      const servers = await readServers();
+      return servers.map((server) => {
+        const client = clients.get(server.server_id);
+        return {
+          server_id: server.server_id,
+          label: server.label === "" ? server.server_id : server.label,
+          enabled: server.enabled,
+          status: client?.status ?? "disconnected",
+          tools: client?.tools.length ?? 0,
+          lastError: client?.lastError ?? "",
+        };
+      });
+    },
     tools: buildRegistrations,
     extension: () => defineExtension({ name: "datawhisper-mcp", tools: buildRegistrations() }),
     async refresh() {

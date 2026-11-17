@@ -14,8 +14,10 @@ import type { Workflows } from "../workflows/service.ts";
 import { appError, INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
 import { isLang, setLanguage } from "../i18n.ts";
 import { libraryMethods } from "./library.ts";
+import { mcpMethods } from "./mcp.ts";
 import { orchestrationMethods } from "./orchestration.ts";
 import type { MapError, MethodParams, RpcMethod } from "./rpc.ts";
+import type { McpRuntime } from "../service.ts";
 
 export type MethodDeps = {
   harness: Harness;
@@ -41,6 +43,8 @@ export type MethodDeps = {
   teamMethods?: Record<string, RpcMethod>;
   /** 工作流定义与启动方法表（`workflow.definitions.*`、`workflow.start`）；省略时不注册。 */
   workflowMethods?: Record<string, RpcMethod>;
+  /** MCP 运行时；省略时 `mcp.*` 方法不注册（进程内测试的轻量装配）。 */
+  mcp?: McpRuntime;
 };
 
 function idParam(params: MethodParams, key = "id"): string | number {
@@ -162,6 +166,7 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
     ...(deps.sourceMethods ?? {}),
     ...(deps.teamMethods ?? {}),
     ...(deps.workflowMethods ?? {}),
+    ...(deps.mcp === undefined ? {} : mcpMethods(deps.mcp)),
     // 会话库/知识库/记忆/技能/hooks/仪表盘：compute 侧的数据根必须与这里一致，
     // 因此共用 `dataDir`（service.ts 给 compute 子进程设的 `BAA_DATA_DIR` 也是它）。
     ...libraryMethods({ harness, context, conversations, compute, dataDir: deps.dataDir }),

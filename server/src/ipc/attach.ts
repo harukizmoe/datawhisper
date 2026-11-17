@@ -53,6 +53,7 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
       workflows: service.workflows,
       teamMethods: service.teamMethods,
       workflowMethods: service.workflowMethods,
+      mcp: service.mcp,
     }),
     send: (record) => writer.send(record),
     mapError: mapSettingsError,
