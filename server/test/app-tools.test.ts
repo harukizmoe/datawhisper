@@ -335,6 +335,20 @@ describe("ingest tools", () => {
     );
     expect(reply).toContain("attached the bitable");
   });
+
+  // 浏览器自动化是明确的非目标：这个工具保留声明，但必须给出可操作的替代方案，而不是假装成功。
+  test("browser_extract_tables reports the missing automation and points at fetch_table", async () => {
+    const { tools } = makeHarness();
+    const result = await run(
+      byName(tools, "browser_extract_tables"),
+      { url: "https://example.test/app" },
+      { conversationId: 1 } as unknown as ToolExecutionApi<AppToolDetails>,
+    );
+    expect(result.isError).toBe(true);
+    const text = textOf(result);
+    expect(text).toContain("Browser automation is not available in this build");
+    expect(text).toContain("fetch_table");
+  });
 });
 
 describe("workspace tools", () => {

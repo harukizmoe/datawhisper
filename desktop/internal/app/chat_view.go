@@ -802,9 +802,9 @@ func (a *app) modelChip(c *ui.Context) {
 	if choice == "" {
 		choice = a.modelDefault()
 	}
-	ui.Button(c, "").Label(a.tr("chat.modelMenu")).MaxWidth(260).MinWidth(0).Children(func() {
+	ui.Button(c, "").Label(a.tr("chat.modelMenu")).Tooltip(choice).MaxWidth(260).MinWidth(0).Children(func() {
 		ui.Icon(c, icons.Sparkles).Size(12, 12).TextColor(t.Accent)
-		ui.Text(c, choice).FontSize(a.fs(textCaption)).SingleLine().MinWidth(0)
+		ui.Text(c, a.modelTitle(choice)).FontSize(a.fs(textCaption)).SingleLine().MinWidth(0)
 		ui.Icon(c, icons.ChevronDown).Size(12, 12).TextColor(t.TextMuted)
 	}).PopoverMenuButton(func(m *ui.Menu) {
 		a.menuShown()
