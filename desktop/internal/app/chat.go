@@ -492,6 +492,21 @@ func (a *app) modelOptions() []string {
 	return options
 }
 
+// modelTitle 是界面上显示模型的名字：优先用提供方给的展示名，空名或未知时退回 provider/id。
+// 它只影响显示；菜单值、思考强度与 chooseModel 一律仍用 provider/id 作稳定键。
+func (a *app) modelTitle(label string) string {
+	for _, m := range a.cv.models {
+		if m.Provider+"/"+m.ID != label {
+			continue
+		}
+		if name := strings.TrimSpace(m.Name); name != "" {
+			return name
+		}
+		return label
+	}
+	return label
+}
+
 // thinkingOptions 是当前模型的思考强度选项；模型不支持思考时返回 nil（界面不显示这个下拉框）。
 func (a *app) thinkingOptions() []string {
 	levels := a.thinkingLevels()
