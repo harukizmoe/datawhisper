@@ -1,6 +1,6 @@
 # Tern 打磨清单：已完成与未完成
 
-状态：本项按「能做的做完、剩下的记录前提」收口。除 ttft 外都已落地；ttft 卡在上游字段，不阻塞其他工作。
+状态：本项已全部落地。ttft 没有等上游字段，而是在桌面端按订阅事件自己计时（见「已完成」最后一行）。
 
 对照 `docs/refactor/ui-redesign.md` 的 Tern 参照项，记下每一项现在的状态、证据与下一步。
 
@@ -14,33 +14,12 @@
 | 折叠行 | 一轮里连续的工具调用折成一行「Worked for …」，外观里可关 | `desktop/internal/app/chat_fold.go` |
 | 输入区磨砂与边缘羽化 | 卡片本身半透明 + 背景模糊（std 16 DIP），边缘按圆角矩形 SDF 在 14 DIP 内渐隐；卡片里再放一块实色内容板（圆角 18）承载输入与引用，所以文字只有卡片之外才透出 | `desktop/internal/app/frost.go`、`chat_view.go`（`frosted`、`composer`） |
 | 输入区内部结构 | 状态区在卡片里：回复中左边转圈、已用时与正在做的事，下面一条细进度条，条下左边百分比、右边上下文窗口；回复中把这一轮提问引在实色板里，停止按钮是深色圆钮 | `desktop/internal/app/chat_view.go`（`cardStatus`、`quotedPrompt`、`stopButton`），用例 `TestComposerQuotesThePromptWhileReplying` |
+| ttft（首字延迟） | 桌面端在提交被受理时开始计时，收到本轮第一条助手输出（正文或工具调用）时停表，状态行显示 `first token 1.2s`；空壳消息与提交前已有的消息不计 | `desktop/internal/app/app.go`（`recordTTFT`）、`chat_view.go`（`formatTTFT`、`cardStatus`），用例 `TestFirstTokenLatency` |
 | 无气泡扁平风格 | 用户消息去掉气泡与右对齐，与助手正文同一套排版，左侧一条 3 DIP 的 accent 竖线做区分；`userBubble` 主题令牌随之删除（19 个配色文件、`Tokens` 与默认值） | `desktop/internal/app/chat_view.go`、`internal/theme/` |
 
 ## 未完成
 
-### ttft（首字延迟）
-
-现状：每轮末尾的元数据有 `in/out/cache/费用/tok/s`，没有 `ttft`。
-
-证据：`@earendil-works/pi-ai` 的助手消息只有 `timestamp`（**请求开始**的毫秒时间戳）与 `durationMs`（到响应结束的总时长，见 `dist/types.d.ts` 第 398–405 行），没有首字时间字段；在整个 `node_modules/@earendil-works/*/dist` 里 grep `ttft` / `timeToFirstToken` 也无结果。界面的 `conversation.Usage` 来自这些条目，因此首字延迟不可能从现有字段反推（`timestamp + durationMs` 是结束时间）。
-
-要补的话有三条路：
-
-1. **server 记账**：在 `submit` 到第一个带正文的 delta 之间计时，把结果塞进同一条提交条目（新增 `ttftMs` 字段），桌面端再读进 `Usage`。需要确认 pi-durable 的 live 事件里能在提交前拿到「第一条 delta 的时间戳」。
-2. **订阅 ops 计时**：server 在 `conversation.subscribe` 的同一路 `watch` 上解析 path 增量，找到第一条助手正文写入的时间；代价是要理解会话文档的路径结构，且多轮/中止/工具先行的边界要逐个定。
-3. **等库支持**：上游加上 ttft 后只改 `usageOf` 与元数据行。
-
-### ttft（首字延迟）
-
-现状：每轮末尾的元数据有 `in/out/cache/费用/tok/s`，没有 `ttft`。
-
-证据：`@earendil-works/pi-ai` 的助手消息只有 `timestamp`（**请求开始**的毫秒时间戳）与 `durationMs`（到响应结束的总时长，见 `dist/types.d.ts` 第 398–405 行），没有首字时间字段；在整个 `node_modules/@earendil-works/*/dist` 里 grep `ttft` / `timeToFirstToken` 也无结果。界面的 `conversation.Usage` 来自这些条目，因此首字延迟不可能从现有字段反推（`timestamp + durationMs` 是结束时间）。
-
-要补的话有三条路：
-
-1. **server 记账**：在 `submit` 到第一个带正文的 delta 之间计时，把结果塞进同一条提交条目（新增 `ttftMs` 字段），桌面端再读进 `Usage`。需要确认 pi-durable 的 live 事件里能在提交前拿到「第一条 delta 的时间戳」。
-2. **订阅 ops 计时**：server 在 `conversation.subscribe` 的同一路 `watch` 上解析 path 增量，找到第一条助手正文写入的时间；代价是要理解会话文档的路径结构，且多轮/中止/工具先行的边界要逐个定。
-3. **等库支持**：上游加上 ttft 后只改 `usageOf` 与元数据行。
+没有待办项。剩余差异（视觉像素、真实模型的首字抖动）交给截图回归与日常使用观察，不再作为 Tern 清单项。
 
 ## 怎么验证这一页
 

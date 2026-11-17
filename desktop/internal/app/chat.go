@@ -95,6 +95,12 @@ type chatView struct {
 	jumpedAt     time.Time
 	// busySince 是当前这次回复开始的时刻，状态行据此显示已用时；不在回复中时为零值。
 	busySince time.Time
+	// ttftStart 是本次提交被服务受理的时刻；ttft 是等到第一段模型输出（文本或工具调用）花的时间。
+	// 服务端的用量里没有首 token 字段，所以在桌面端按订阅事件自己算。
+	ttftStart time.Time
+	ttft      time.Duration
+	// ttftSeen 是提交前已有的消息键：用来区分“这一轮新出现的助手消息”。
+	ttftSeen map[string]bool
 }
 
 // askUI 是一张 ask_user 卡片的本地状态：单选、多选、自由输入以及是否已经发送。
@@ -134,6 +140,7 @@ func (v *chatView) resetConversation() {
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
 	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0
 	v.composerSeen, v.wantFocus, v.blurSince, v.menuOpen = false, false, time.Time{}, false
+	v.ttftStart, v.ttft, v.ttftSeen = time.Time{}, 0, nil
 	v.followPaused, v.fullOpen = false, false
 }
 
