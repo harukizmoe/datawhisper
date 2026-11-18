@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 import pandas as pd
 
 from ._utils import (
+    quote_ident,
     _clean_identifier, _dedup_columns, _detect_header_row,
     _list_tables, _new_conn, _preview_table_dict, _query, _register,
     _table_schema_str,
@@ -173,8 +174,8 @@ class GoogleSheetsDataSource(DataSource):
 
         for table in detail_tables:
             try:
-                rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
-                cols = self._conn.execute(f'DESCRIBE "{table}"').fetchall()
+                rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
+                cols = self._conn.execute(f'DESCRIBE {quote_ident(table)}').fetchall()
                 col_str = ", ".join(r[0] for r in cols)
                 parts.append(f"Table: {table}  ({rows} rows)  [{col_str}]")
             except Exception:
@@ -184,7 +185,7 @@ class GoogleSheetsDataSource(DataSource):
         analysis = [t for t in _list_tables(self._conn) if t not in self._tables]
         for table in analysis:
             try:
-                rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
                 parts.append(_table_schema_str(self._conn, table, rows))
             except Exception:
                 pass
@@ -194,7 +195,7 @@ class GoogleSheetsDataSource(DataSource):
     def get_table_detail(self, table_name: str) -> str:
         """Return full column list + row count for a single sheet."""
         try:
-            rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table_name)}').fetchone()[0]
             return _table_schema_str(self._conn, table_name, rows)
         except Exception as exc:
             return f"Sheet '{table_name}' — error: {exc}"
@@ -209,10 +210,10 @@ class GoogleSheetsDataSource(DataSource):
         else:
             try:
                 self._conn.execute(
-                    f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                 )
                 rows = self._conn.execute(
-                    f'SELECT COUNT(*) FROM "{table_name}"'
+                    f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                 ).fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
@@ -231,8 +232,8 @@ class GoogleSheetsDataSource(DataSource):
         result = []
         for (t,) in tables:
             try:
-                cols = [r[0] for r in self._conn.execute(f'DESCRIBE "{t}"').fetchall()]
-                total = self._conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+                cols = [r[0] for r in self._conn.execute(f'DESCRIBE {quote_ident(t)}').fetchall()]
+                total = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(t)}').fetchone()[0]
                 result.append({"name": t, "columns": cols, "total_rows": total})
             except Exception:
                 continue

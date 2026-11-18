@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 安全：修掉安全审计发现的模型可控边界。表名（`create_analysis_table`/`clean_data`/`delete_analysis_tables`）只接受简单标识符，所有连接器改用转义后的标识符，注入的引号不会再变成 SQL；SQL 文件函数改为白名单 + 形状规则（`read_json_objects`、`parquet_scan`、`glob` 等补上路径校验，未知 `read_*`/`*_scan` 与 `postgres_scan` 一类远程表函数直接拒绝），DuckDB 关闭扩展自动安装/加载；挂载目录里的 `.env`/`.ssh`/密钥文件即使相对路径也拒绝读取。MCP 子进程不再继承凭据类环境变量，SSE 只允许 http(s) 且 endpoint 必须同源、禁止重定向。图表标题去掉尖括号，内嵌 JSON 转义 `</script`。云端 embedding token 配置文件改成 0600。
 - 新增：输入框支持直接粘贴文件（在文件管理器里复制后 Ctrl+V），与拖放、回形针走同一条导入链路；剪贴板里有文本时仍是普通粘贴，不会把路径插进正文。
 - 质量：MCP 发现状态写进会话文档（`TurnDoc.mcpDiscovery`：工具名 + 目录版本）。此前只在服务进程内存里，重启后本会话的首轮又会从零发现；现在版本一致就沿用上次的名字，目录变化才作废。发现逻辑抽成纯函数 `discoverMcpForTurn`，提交时算一次并随本轮上下文落盘。
 - 质量：桌面端 CI 现在装 Bun、server 依赖与 `.venv`，并设 `DW_E2E_REAL=1`，真实 server + compute 的 `TestRealServerEndToEnd` 与 `live_test` 不再跳过；此前它们只在本地跑。

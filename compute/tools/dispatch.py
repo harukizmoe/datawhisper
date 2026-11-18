@@ -66,7 +66,8 @@ def normalize_chart_call_args(args: Dict[str, Any]) -> Dict[str, Any]:
     if not title:
         title = say(f"Data visualization · {chart_type.replace('_', ' ')}", f"数据可视化 · {chart_type.replace('_', ' ')}")
     normalized["chart_type"] = chart_type
-    normalized["title"] = title[:120]
+    # 标题会直接进图表的 <title>/<h1>；去掉尖括号，避免模型标题注入脚本标签。
+    normalized["title"] = title[:120].replace("<", "").replace(">", "")
     return normalized
 
 

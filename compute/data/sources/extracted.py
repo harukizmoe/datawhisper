@@ -8,6 +8,7 @@ from typing import List, Tuple
 import pandas as pd
 
 from ._utils import (
+    quote_ident,
     _clean_identifier, _dedup_columns, _list_tables, _new_conn,
     _preview_table_dict, _query, _register, _table_schema_str,
 )
@@ -45,7 +46,7 @@ class ExtractedTableDataSource(DataSource):
     def get_schema(self) -> str:
         parts: List[str] = []
         for table in self.list_tables():
-            rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
             parts.append(_table_schema_str(self._conn, table, rows))
         return "\n\n".join(parts)
 
@@ -61,9 +62,9 @@ class ExtractedTableDataSource(DataSource):
             rows = len(_df)
         else:
             try:
-                self._conn.execute(f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})')
+                self._conn.execute(f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})')
                 rows = self._conn.execute(
-                    f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                    f'SELECT COUNT(*) FROM {quote_ident(table_name)}').fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
         return _table_schema_str(self._conn, table_name, rows)
@@ -73,9 +74,9 @@ class ExtractedTableDataSource(DataSource):
         for table in self.list_tables():
             try:
                 cols = [row[0] for row in self._conn.execute(
-                    f'DESCRIBE "{table}"').fetchall()]
+                    f'DESCRIBE {quote_ident(table)}').fetchall()]
                 total = self._conn.execute(
-                    f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                    f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
                 previews.append({"name": table, "columns": cols, "total_rows": total})
             except Exception:
                 continue

@@ -11,6 +11,7 @@ import duckdb
 import pandas as pd
 
 from ._utils import (
+    quote_ident,
     _clean_identifier, _dedup_columns, _detect_header_row,
     _list_tables, _new_conn, _preview_table_dict, _query, _register,
     _table_schema_str, is_write_sql, snapshot_tables_to_memory,
@@ -389,7 +390,7 @@ class ExcelDataSource(DataSource):
         parts: List[str] = []
         conn = self._active_conn()
         for table in self.list_tables():
-            rows = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            rows = conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
             parts.append(_table_schema_str(conn, table, rows))
         return "\n\n".join(parts) if parts else "No tables."
 
@@ -411,10 +412,10 @@ class ExcelDataSource(DataSource):
         else:
             try:
                 conn.execute(
-                    f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                 )
                 rows = conn.execute(
-                    f'SELECT COUNT(*) FROM "{table_name}"'
+                    f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                 ).fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
@@ -440,8 +441,8 @@ class ExcelDataSource(DataSource):
         result = []
         for t in self.list_tables():
             try:
-                cols = [r[0] for r in conn.execute(f'DESCRIBE "{t}"').fetchall()]
-                total = conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+                cols = [r[0] for r in conn.execute(f'DESCRIBE {quote_ident(t)}').fetchall()]
+                total = conn.execute(f'SELECT COUNT(*) FROM {quote_ident(t)}').fetchone()[0]
                 result.append({"name": t, "columns": cols, "total_rows": total})
             except Exception:
                 continue

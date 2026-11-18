@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import math
 import os
 import pathlib
@@ -306,6 +307,8 @@ def _save_runtime_config() -> None:
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    # 里面有云端 embedding token；只在写入期间收紧权限，不依赖 umask。
+    os.chmod(temp, 0o600)
     temp.replace(_EMBED_CONFIG_FILE)
 
 

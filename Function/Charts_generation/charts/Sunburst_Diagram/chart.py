@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 import json
+import re
 import uuid
 
 import pandas as pd
@@ -527,7 +528,9 @@ def generate(
     }
 
     fig_id = f"sunburst-{uuid.uuid4().hex}"
+    # `</script>` 出现在标签值里会提前结束脚本块；转义斜杠，JSON 仍是合法文本。
     fig_json = json.dumps({"data": [trace_data], "layout": layout_data}, ensure_ascii=False)
+    fig_json = re.sub(r"(?i)</script", "<\\\\/script", fig_json)
     render_fail_msg = say("Chart rendering failed; open the console to see the error.", "图表渲染失败，请打开控制台查看错误。")
     chart_html = f"""<div>
     <script>window.PlotlyConfig = {{MathJaxConfig: 'local'}};</script>

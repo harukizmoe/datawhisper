@@ -116,10 +116,32 @@ _BANNED_FUNCTIONS = {
 # sqlglot 对部分函数有专用节点（ReadCSV/ReadParquet/ReadJSON），其余解析为 Anonymous。
 _FILE_READ_FUNCTIONS = {
     "read_csv", "read_csv_auto",
-    "read_parquet", "read_parquet_auto",
-    "read_json", "read_json_auto",
+    "read_parquet", "read_parquet_auto", "parquet_scan",
+    "read_json", "read_json_auto", "read_json_objects",
+    "read_ndjson", "read_ndjson_auto", "read_ndjson_objects",
     "read_text", "read_text_auto",
     "read_blob", "read_blob_auto",
+    "glob", "sniff_csv",
+    "parquet_metadata", "parquet_schema",
+    "parquet_file_metadata", "parquet_kv_metadata",
+}
+
+# 远程/扩展表函数：会把连接发到任意主机（SSRF）或加载外部数据库/扩展。
+# 单独列出是因为它们不是文件读取，不能走路径白名单。
+_REMOTE_TABLE_FUNCTIONS = {
+    "sqlite_scan", "sqlite_query", "sqlite_attach",
+    "postgres_scan", "postgres_query", "postgres_attach",
+    "mysql_scan", "mysql_query", "mysql_attach",
+    "sqlserver_scan", "sqlserver_query",
+    "iceberg_scan", "iceberg_metadata", "delta_scan",
+}
+
+_FUNCTION_REASON_ZH = {
+    "it can write to the file system or access the network/extensions": "可写入文件系统或访问网络/扩展",
+    "it connects to an external database": "会连接外部数据库",
+    "it scans files or external databases outside the allowed roots": "会扫描允许目录之外的文件或外部数据库",
+    "it reads files outside the allowed roots": "会读取允许目录之外的文件",
+    "it inspects files outside the allowed roots": "会检查允许目录之外的文件",
 }
 
 # sqlglot 的专用文件读取节点类型名（小写）。
@@ -135,6 +157,42 @@ _BLOCKED_URL_SCHEMES = (
     "s3://", "gs://", "gcs://", "azure://", "abfs://", "abfss://",
     "hdfs://", "webhdfs://", "sftp://", "scp://",
 )
+
+
+# 模型新建的表名：只接受普通标识符，避免任何引号/分隔符进入 DDL。
+_TABLE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def _identifier_error(value: object, key: str) -> Optional[str]:
+    """校验模型给出的新表名；合法返回 None。"""
+    text = str(value if value is not None else "").strip()
+    if _TABLE_IDENTIFIER_RE.match(text):
+        return None
+    return say(f"'{key}' must be a simple identifier (letters, digits, underscore; at most 64 characters, "
+               f"not starting with a digit): {text!r}. Choose a different name.",
+               f"'{key}' 必须是简单标识符（字母、数字、下划线，最多 64 个字符，不能以数字开头）：{text!r}。请换一个名字。")
+
+
+def _dangerous_function(name: str) -> Optional[str]:
+    """返回该函数被拒绝的原因；安全函数返回 None。
+
+    策略：显式黑名单 + 形状规则。未知的 `read_*`、未列入白名单的 `*_scan`、
+    远程数据库表函数一律拒绝——否则新版本 DuckDB 新增的别名会绕过路径白名单。
+    """
+    lowered = (name or "").lower()
+    if lowered in _BANNED_FUNCTIONS:
+        return "it can write to the file system or access the network/extensions"
+    if lowered in _REMOTE_TABLE_FUNCTIONS:
+        return "it connects to an external database"
+    if lowered in _FILE_READ_FUNCTIONS:
+        return None
+    if lowered.endswith("_scan"):
+        return "it scans files or external databases outside the allowed roots"
+    if lowered.startswith("read_"):
+        return "it reads files outside the allowed roots"
+    if lowered.startswith("sniff_"):
+        return "it inspects files outside the allowed roots"
+    return None
 
 
 def _is_file_read_anonymous(node) -> bool:
@@ -337,6 +395,16 @@ def _check_single_path(path_str: str, norm_roots: List[Path]) -> Optional[str]:
         # 取 resolved 的 parent 作为校验目标
         check_path = resolved.parent
 
+    # 始终黑名单：工作目录里的 .env/.ssh/.git、密钥文件与系统目录一律拒绝，
+    # 不论它是否在白名单根内（旧实现只在挂载校验时检查，SQL 直读漏掉了）。
+    try:
+        from compute.data.workspace import _is_blocked_path
+        if _is_blocked_path(check_path):
+            return say(f"Path is permanently blocked (.env/.ssh/.git, key files, or a system directory): {path_str}",
+                       f"该路径属于永久禁止读取的范围（.env/.ssh/.git、密钥文件或系统目录）：{path_str}")
+    except ImportError:
+        pass
+
     # 白名单校验：必须在某个根目录下
     in_whitelist = False
     for root in norm_roots:
@@ -420,9 +488,10 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
         # Anonymous 函数（例如 sqlglot 可能识别不了的 read_csv_auto）
         if isinstance(node, exp.Anonymous):
             fname = (node.name or "").lower()
-            if fname in _BANNED_FUNCTIONS:
-                return say(f"Function {fname}() is not allowed: it can write to the file system or access the network/extensions.",
-                           f"禁止使用函数 {fname}()：该函数可访问文件系统写入/网络/扩展。")
+            reason = _dangerous_function(fname)
+            if reason is not None:
+                return say(f"Function {fname}() is not allowed: {reason}.",
+                           f"禁止使用函数 {fname}()：该函数{_FUNCTION_REASON_ZH.get(reason, '不在允许范围内')}。")
 
         # 具名函数节点
         if isinstance(node, exp.Func):
@@ -430,9 +499,10 @@ def _validate_sql_ast_body(sqlglot_module, statements, exp, allowed_roots: List[
             # 若可用也检查 sql_name
             sql_name = getattr(node, "sql_name", lambda: "")()
             for candidate in (fname, sql_name.lower()):
-                if candidate in _BANNED_FUNCTIONS:
-                    return say(f"Function {candidate}() is not allowed: it can write to the file system or access the network/extensions.",
-                               f"禁止使用函数 {candidate}()：该函数可访问文件系统写入/网络/扩展。")
+                reason = _dangerous_function(candidate)
+                if reason is not None:
+                    return say(f"Function {candidate}() is not allowed: {reason}.",
+                               f"禁止使用函数 {candidate}()：该函数{_FUNCTION_REASON_ZH.get(reason, '不在允许范围内')}。")
 
     # ── COPY 语句扫描 ──────────────────────────────────────────────────────────
     for node in stmt.walk():
@@ -582,9 +652,12 @@ def _validate_sql_heuristic(sql: str) -> Optional[str]:
     # ── File-read 函数：heuristic 模式下一律拒绝（无法做路径白名单）──────────
     _FILE_READ_TOKENS = [
         r"\bread_csv\b", r"\bread_csv_auto\b", r"\bread_json\b", r"\bread_json_auto\b",
-        r"\bread_parquet\b", r"\bread_parquet_auto\b",
+        r"\bread_json_objects\b", r"\bread_ndjson\w*\b",
+        r"\bread_parquet\b", r"\bread_parquet_auto\b", r"\bparquet_scan\b",
+        r"\bparquet_(?:file_|kv_)?(?:metadata|schema)\b",
         r"\bread_text\b", r"\bread_text_auto\b",
         r"\bread_blob\b", r"\bread_blob_auto\b",
+        r"\bglob\b", r"\bsniff_csv\b",
     ]
     for pattern in _FILE_READ_TOKENS:
         if re.search(pattern, sql_lower):
@@ -625,6 +698,23 @@ def validate_tool_args(
     """
     if workspace_authorization is not None:
         allowed_roots = list(workspace_authorization.allowed_roots)
+    if name == "create_analysis_table":
+        err = _identifier_error(args.get("table_name") or "analysis_data", "table_name")
+        if err:
+            return err
+    if name == "clean_data":
+        # 输入表名可以是已有表（可能含空格/CJK），已由 quote_ident 转义；只约束新表名。
+        err = _identifier_error(args.get("output_table") or "cleaned_data", "output_table")
+        if err:
+            return err
+    if name == "delete_analysis_tables":
+        names = args.get("table_names")
+        if isinstance(names, list):
+            for index, table_name in enumerate(names, 1):
+                err = _identifier_error(table_name, f"table_names[{index}]")
+                if err:
+                    return err
+
     if name in SQL_TOOLS:
         sql = (args.get("sql") or "").strip()
         if not sql:

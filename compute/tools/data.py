@@ -1163,7 +1163,7 @@ class DataToolsMixin:
         if not tname:
             return {"text": say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。"), "charts": []}
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self.data_source.execute_query(f'SELECT * FROM {_quote_ident(tname)}')
         if err or df is None or df.empty:
             return {"text": say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}"), "charts": []}
 
@@ -1180,7 +1180,7 @@ class DataToolsMixin:
         if not tname:
             return {"text": say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。"), "charts": []}
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self.data_source.execute_query(f'SELECT * FROM {_quote_ident(tname)}')
         if err or df is None or df.empty:
             return {"text": say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}"), "charts": []}
 
@@ -1278,7 +1278,7 @@ class DataToolsMixin:
         if not tname:
             return say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。")
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self.data_source.execute_query(f'SELECT * FROM {_quote_ident(tname)}')
         if err or df is None or df.empty:
             return say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}")
 
@@ -1322,7 +1322,7 @@ class DataToolsMixin:
         if not tname:
             return say("❌ No tables available in the data source.", "❌ 数据源中没有可用的表格。")
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self.data_source.execute_query(f'SELECT * FROM {_quote_ident(tname)}')
         if err or df is None or df.empty:
             return say(f"❌ Failed to read table '{tname}': {err}", f"❌ 读取表 '{tname}' 失败：{err}")
 
