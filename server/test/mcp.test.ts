@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import { SecretCredentialStore } from "../src/models/credentials.ts";
 import type { AppToolDeps } from "../src/tools/app/types.ts";
 import { createInteractionTools } from "../src/tools/app/interaction.ts";
-import { McpServerClient, type McpClientOptions } from "../src/mcp/client.ts";
+import { childEnvironment, McpServerClient, type McpClientOptions } from "../src/mcp/client.ts";
 import {
   McpConfigStore,
   mcpSecretId,
@@ -488,6 +488,74 @@ describe("sse transport", () => {
     } finally {
       await client.close();
       server.stop(true);
+    }
+  });
+});
+
+describe("安全边界", () => {
+  test("MCP 子进程环境过滤凭据类变量，显式配置优先", () => {
+    const env = childEnvironment(
+      {
+        PATH: "/usr/bin",
+        HOME: "/home/user",
+        HTTP_PROXY: "http://proxy",
+        OPENAI_API_KEY: "sk-secret",
+        ANTHROPIC_API_KEY: "sk-ant",
+        GITHUB_TOKEN: "ghp_x",
+        DB_PASSWORD: "pw",
+        MY_SECRET: "s",
+      },
+      { FAKE_TOKEN: "configured", HOME: "/custom" },
+    );
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.HTTP_PROXY).toBe("http://proxy");
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.DB_PASSWORD).toBeUndefined();
+    expect(env.MY_SECRET).toBeUndefined();
+    expect(env.HOME).toBe("/custom");
+    expect(env.FAKE_TOKEN).toBe("configured");
+  });
+
+  test("SSE endpoint 指向另一个源时拒绝连接，且不向该源发请求", async () => {
+    let reached = 0;
+    const other = Bun.serve({
+      port: 0,
+      fetch: () => {
+        reached += 1;
+        return new Response("should not be called", { status: 500 });
+      },
+    });
+    const server = Bun.serve({
+      port: 0,
+      fetch: (request) => {
+        const url = new URL(request.url);
+        if (request.method === "GET" && url.pathname === "/sse") {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(`event: endpoint
+data: http://127.0.0.1:${other.port}/messages
+
+`));
+            },
+          });
+          return new Response(body, { headers: { "content-type": "text/event-stream" } });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const client = new McpServerClient(
+      fakeConfig({ transport: "sse", url: `http://127.0.0.1:${server.port}/sse`, command: "", args: [] }),
+      clientOptions(),
+    );
+    try {
+      expect(await client.connectNow()).toBe(false);
+      expect(reached).toBe(0);
+    } finally {
+      await client.close();
+      server.stop(true);
+      other.stop(true);
     }
   });
 });

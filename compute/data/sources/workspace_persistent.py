@@ -27,6 +27,7 @@ import duckdb
 import pandas as pd
 
 from ._utils import (
+    quote_ident,
     _clean_identifier, _dedup_columns, _list_tables, _table_schema_str,
     _preview_table_dict, _query, _register, is_write_sql,
     snapshot_tables_to_memory,
@@ -75,7 +76,7 @@ def _configure_bulk_connection(conn: duckdb.DuckDBPyConnection) -> None:
 
 def _import_metrics(file_path: str, started_at: float, tables: list[str], conn) -> dict:
     row_count = sum(
-        int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
+        int(conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0])
         for table in tables
     )
     return {
@@ -113,9 +114,9 @@ def parse_workspace_csv_job(
                     _configure_bulk_connection(conn)
                     conn.execute("BEGIN TRANSACTION")
                     for table in old_tables:
-                        conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+                        conn.execute(f'DROP TABLE IF EXISTS {quote_ident(table)}')
                     conn.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS '
+                        f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS '
                         f"SELECT * FROM {_csv_scan_sql(file_path)}"
                     )
                     _clean_table_columns(conn, table_name)
@@ -148,11 +149,11 @@ def parse_workspace_csv_job(
 
 
 def _clean_table_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> None:
-    cols_raw = [row[0] for row in conn.execute(f'DESCRIBE "{table_name}"').fetchall()]
+    cols_raw = [row[0] for row in conn.execute(f'DESCRIBE {quote_ident(table_name)}').fetchall()]
     cleaned = _dedup_columns([_clean_identifier(col) for col in cols_raw])
     for old, new in zip(cols_raw, cleaned):
         if old != new:
-            conn.execute(f'ALTER TABLE "{table_name}" RENAME COLUMN "{old}" TO "{new}"')
+            conn.execute(f'ALTER TABLE {quote_ident(table_name)} RENAME COLUMN {quote_ident(old)} TO {quote_ident(new)}')
 
 
 def parse_workspace_excel_job(
@@ -199,7 +200,7 @@ def parse_workspace_excel_job(
                     _configure_bulk_connection(conn)
                     conn.execute("BEGIN TRANSACTION")
                     for table in old_tables:
-                        conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+                        conn.execute(f'DROP TABLE IF EXISTS {quote_ident(table)}')
                     for index, (sheet, df) in enumerate(parsed, start=1):
                         ctx.check_canceled()
                         if df is not None:
@@ -307,9 +308,9 @@ class WorkspacePersistentSource(DataSource):
         try:
             with acquire_synchronous_workspace_write_lease(self._db_path, self._lease_owner_id):
                 # 先删旧表（如果存在）
-                self._conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                self._conn.execute(f'DROP TABLE IF EXISTS {quote_ident(table_name)}')
                 self._conn.execute(
-                    f'CREATE OR REPLACE TABLE "{table_name}" AS '
+                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS '
                     f"SELECT * FROM {_csv_scan_sql(file_path)}"
                 )
                 # 清理列名
@@ -331,7 +332,7 @@ class WorkspacePersistentSource(DataSource):
                 with acquire_synchronous_workspace_write_lease(self._db_path, self._lease_owner_id):
                     self._conn.register("_tmp_ws_", df)
                     self._conn.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM _tmp_ws_'
+                        f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS SELECT * FROM _tmp_ws_'
                     )
                     self._conn.unregister("_tmp_ws_")
                 self._invalidate_shadow()
@@ -392,7 +393,7 @@ class WorkspacePersistentSource(DataSource):
                 try:
                     self._conn.register("_tmp_ws_", df)
                     self._conn.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM _tmp_ws_'
+                        f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS SELECT * FROM _tmp_ws_'
                     )
                     self._conn.unregister("_tmp_ws_")
                     registered.append(table_name)
@@ -431,7 +432,7 @@ class WorkspacePersistentSource(DataSource):
             conn = self._active_conn()
             for table in (self.list_tables() or []):
                 try:
-                    rows = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                    rows = conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
                     parts.append(_table_schema_str(conn, table, rows))
                 except Exception as e:
                     log.warning("[WorkspaceDS] schema for %s failed: %s", table, e)
@@ -453,7 +454,7 @@ class WorkspacePersistentSource(DataSource):
             conn = self._active_conn()
             for table in self.list_tables():
                 try:
-                    rows = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                    rows = conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
                     info = _preview_table_dict(conn, table, table, 0)
                     info["total_rows"] = rows
                     result.append(info)
@@ -478,16 +479,16 @@ class WorkspacePersistentSource(DataSource):
                         conn.register(temp_name, _df)
                         try:
                             conn.execute(
-                                f'CREATE OR REPLACE TABLE "{table_name}" AS '
-                                f'SELECT * FROM "{temp_name}"'
+                                f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS '
+                                f'SELECT * FROM {quote_ident(temp_name)}'
                             )
                         finally:
                             conn.unregister(temp_name)
                     else:
                         conn.execute(
-                            f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                            f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                         )
-                    rows = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                    rows = conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table_name)}').fetchone()[0]
             else:
                 with acquire_synchronous_workspace_write_lease(self._db_path, self._lease_owner_id):
                     with self._db_lock:
@@ -496,16 +497,16 @@ class WorkspacePersistentSource(DataSource):
                             self._conn.register(temp_name, _df)
                             try:
                                 self._conn.execute(
-                                    f'CREATE OR REPLACE TABLE "{table_name}" AS '
-                                    f'SELECT * FROM "{temp_name}"'
+                                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS '
+                                    f'SELECT * FROM {quote_ident(temp_name)}'
                                 )
                             finally:
                                 self._conn.unregister(temp_name)
                         else:
                             self._conn.execute(
-                                f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                                f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                             )
-                        rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                        rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table_name)}').fetchone()[0]
             return say(f"Table '{table_name}' created, {rows} rows.", f"表 '{table_name}' 已创建，共 {rows} 行。")
         except Exception as e:
             return say(f"Failed to create table: {e}", f"创建表失败：{e}")

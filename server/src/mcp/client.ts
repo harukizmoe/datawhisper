@@ -62,6 +62,22 @@ export type McpClientOptions = {
   readonly onLog?: (level: "debug" | "info" | "warn" | "error", message: string) => void;
 };
 
+/** 服务端环境里不该传给第三方 MCP 进程的变量名形状。 */
+const SENSITIVE_ENV_RE = /(?:^|_)(?:API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTH)(?:$|_)/i;
+
+/** 进程环境 + 用户显式配置，过滤凭据类变量。 */
+export function childEnvironment(
+  base: Readonly<Record<string, string | undefined>>,
+  configured: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined || SENSITIVE_ENV_RE.test(key)) continue;
+    env[key] = value;
+  }
+  return { ...env, ...configured };
+}
+
 const DEFAULTS = {
   requestTimeoutMs: 30_000,
   callTimeoutMs: 60_000,
@@ -146,8 +162,9 @@ class StdioTransport implements McpTransport {
     if (!allowed.has(stem)) throw new Error(say(`Command '${this.config.command}' is not on the allowlist`, `命令 '${this.config.command}' 不在白名单中`));
     const argv = stdioArgv(this.config.command, this.config.args);
     const proc = spawn(argv[0]!, argv.slice(1), {
-      // 旧实现：os.environ 打底、配置覆盖。
-      env: { ...process.env, ...this.config.env },
+      // 旧实现：os.environ 打底、配置覆盖。现在过滤掉凭据类变量：MCP 服务器是
+      // 第三方代码，不该默认可读 provider key（安全审计发现 7）。
+      env: childEnvironment(process.env, this.config.env),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -302,17 +319,36 @@ class SseTransport implements McpTransport {
 
   async connect(): Promise<void> {
     this.controller = new AbortController();
+    let base: URL;
+    try {
+      base = new URL(this.config.url);
+    } catch {
+      throw new Error(sseFailure(`invalid URL: ${this.config.url}`, `无效的 URL：${this.config.url}`));
+    }
+    if (base.protocol !== "http:" && base.protocol !== "https:") {
+      throw new Error(sseFailure(`unsupported URL scheme: ${base.protocol}`, `不支持的 URL 协议：${base.protocol}`));
+    }
     let response: Response;
     try {
-      response = await fetch(this.config.url, {
+      response = await fetch(base, {
         headers: { accept: "text/event-stream", ...this.config.headers },
         signal: this.controller.signal,
+        redirect: "error",
       });
     } catch (error) {
       throw new Error(sseFailure(errorText(error), errorText(error)));
     }
     if (!response.ok) throw new Error(sseFailure(`HTTP ${response.status}`, `HTTP ${response.status}`));
-    this.endpoint = new URL(await this.readEndpoint(response), this.config.url).toString();
+    const endpoint = new URL(await this.readEndpoint(response), base);
+    // 事件流只能把请求指回同一个源：否则配置的服务器可以把后续 JSON-RPC 和
+    // 认证头转发到本机/内网任意地址（安全审计发现 6）。
+    if (endpoint.origin !== base.origin) {
+      throw new Error(sseFailure(
+        `endpoint origin ${endpoint.origin} does not match ${base.origin}`,
+        `endpoint 源 ${endpoint.origin} 与配置的 ${base.origin} 不一致`,
+      ));
+    }
+    this.endpoint = endpoint.toString();
     await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
@@ -356,6 +392,7 @@ class SseTransport implements McpTransport {
       headers: { "content-type": "application/json", accept: "application/json", ...this.config.headers },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error",
     });
     if (!response.ok) {
       const text = (await response.text()).slice(0, 200);

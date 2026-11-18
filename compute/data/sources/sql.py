@@ -26,6 +26,7 @@ import duckdb
 import pandas as pd
 
 from ._utils import (
+    quote_ident,
     _new_conn, _preview_table_dict, _query, _register, _table_schema_str,
     is_write_sql,
 )
@@ -147,7 +148,9 @@ class SQLDataSource(DataSource):
             dialect = self._engine.dialect.name
         except Exception:
             dialect = ""
-        return f"`{name}`" if dialect in ("mysql", "mariadb") else f'"{name}"'
+        if dialect in ("mysql", "mariadb"):
+            return "`" + str(name).replace("`", "``") + "`"
+        return '"' + str(name).replace('"', '""') + '"' 
 
     def list_catalog_tables(self) -> List[str]:
         """Full remote catalog for preview/selection validation only."""
@@ -275,7 +278,7 @@ class SQLDataSource(DataSource):
             with self._duck_lock:
                 self._duck.register("_tmp_sql_", df)
                 self._duck.execute(
-                    f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM _tmp_sql_'
+                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS SELECT * FROM _tmp_sql_'
                 )
                 self._duck.unregister("_tmp_sql_")
                 self._loaded.add(table_name)
@@ -363,7 +366,7 @@ class SQLDataSource(DataSource):
         for t in sorted(self._cache_tables):
             try:
                 with self._duck_lock:
-                    rows = self._duck.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+                    rows = self._duck.execute(f'SELECT COUNT(*) FROM {quote_ident(t)}').fetchone()[0]
                     schema = _table_schema_str(self._duck, t, rows)
                 parts.append(schema)
             except Exception:
@@ -386,7 +389,7 @@ class SQLDataSource(DataSource):
             try:
                 with self._duck_lock:
                     total = self._duck.execute(
-                        f'SELECT COUNT(*) FROM "{table_name}"'
+                        f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                     ).fetchone()[0]
                 row_hint = f"  ({total:,} rows — cached in DuckDB)"
             except Exception:
@@ -517,10 +520,10 @@ class SQLDataSource(DataSource):
             try:
                 with self._duck_lock:
                     self._duck.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                        f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                     )
                     rows = self._duck.execute(
-                        f'SELECT COUNT(*) FROM "{table_name}"'
+                        f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                     ).fetchone()[0]
                     schema_str = _table_schema_str(self._duck, table_name, rows)
             except Exception as exc:
@@ -544,8 +547,8 @@ class SQLDataSource(DataSource):
         for t in sorted(self._cache_tables):
             try:
                 with self._duck_lock:
-                    cols  = [r[0] for r in self._duck.execute(f'DESCRIBE "{t}"').fetchall()]
-                    total = self._duck.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+                    cols  = [r[0] for r in self._duck.execute(f'DESCRIBE {quote_ident(t)}').fetchall()]
+                    total = self._duck.execute(f'SELECT COUNT(*) FROM {quote_ident(t)}').fetchone()[0]
                 result.append({"name": f"{_analysis_prefix()}{t}", "columns": cols, "total_rows": total})
             except Exception:
                 continue
@@ -556,8 +559,8 @@ class SQLDataSource(DataSource):
             if t in self._loaded:
                 try:
                     with self._duck_lock:
-                        cols  = [r[0] for r in self._duck.execute(f'DESCRIBE "{t}"').fetchall()]
-                        total = self._duck.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+                        cols  = [r[0] for r in self._duck.execute(f'DESCRIBE {quote_ident(t)}').fetchall()]
+                        total = self._duck.execute(f'SELECT COUNT(*) FROM {quote_ident(t)}').fetchone()[0]
                     result.append({"name": t, "columns": cols, "total_rows": total})
                 except Exception:
                     result.append({"name": t, "columns": [], "total_rows": None})

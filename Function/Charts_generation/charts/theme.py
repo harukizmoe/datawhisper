@@ -359,7 +359,10 @@ def _parse_call(html: str, end: int) -> Optional[Tuple[Any, Any, Any, int, Any]]
 
 
 def _dump(v: Any) -> str:
-    return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+    # 写回 <script> 里的 JSON：只转义 `</script`，否则标签值里的结束标签会提前
+    # 结束脚本块（安全审计发现 9）。JSON 语义不变（`\/` 等价于 `/`）。
+    text = json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+    return re.sub(r"(?i)</script", "<\\/script", text)
 
 
 def _iter_fig_literals(html: str):

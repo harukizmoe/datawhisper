@@ -44,6 +44,12 @@ const BLOCKED_ENV_KEYS: ReadonlySet<string> = new Set([
   "DYLD_INSERT_LIBRARIES",
   "DYLD_LIBRARY_PATH",
   "PYTHONPATH",
+  // 运行时的启动钩子：能让 MCP 进程在加载服务器代码前执行任意文件。
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "PYTHONSTARTUP",
+  "PYTHONHOME",
+  "PYTHONUSERBASE",
 ]);
 
 /** 运行时使用的完整配置（env/headers 的值已从凭据库解析出来）。 */

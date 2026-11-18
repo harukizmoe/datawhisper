@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 from ._utils import (
+    quote_ident,
     _clean_identifier, _dedup_columns, _list_tables, _new_conn,
     _preview_table_dict, _query, _register, _table_schema_str,
 )
@@ -74,7 +75,7 @@ class HTTPAPIDataSource(DataSource):
         # Include every table (raw + analysis tables created at runtime).
         parts: List[str] = []
         for table in (self.list_tables() or [self._table]):
-            rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
             parts.append(_table_schema_str(self._conn, table, rows))
         return "\n\n".join(parts)
 
@@ -91,10 +92,10 @@ class HTTPAPIDataSource(DataSource):
         else:
             try:
                 self._conn.execute(
-                    f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                 )
                 rows = self._conn.execute(
-                    f'SELECT COUNT(*) FROM "{table_name}"'
+                    f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                 ).fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"

@@ -90,6 +90,15 @@ def _detect_header_row(rows: list, scan: int = 10) -> int:
     return best_idx
 
 
+def quote_ident(name: object) -> str:
+    """把表名/列名安全地放进 SQL：双引号包裹并转义内部双引号。
+
+    DuckDB 的标识符用双引号界定；名字里的 `"` 必须写成 `""`，否则模型给出的
+    表名可以闭合标识符并注入任意 SQL（见安全审计发现 1）。
+    """
+    return '"' + str(name).replace('"', '""') + '"'
+
+
 # ── DuckDB connection / registration ─────────────────────────────────────────
 
 def _new_conn() -> duckdb.DuckDBPyConnection:
@@ -127,6 +136,11 @@ def _new_conn() -> duckdb.DuckDBPyConnection:
     # A4 起：不再 SET enable_external_access=false —— 它会禁用 read_csv 等
     # file-read 函数，与工作目录直读冲突。网络 SSRF 防护交给 validate.py 的
     # URL 黑名单（_BLOCKED_URL_SCHEMES）。
+    #
+    # 但扩展自动安装/自动加载要关掉：否则 `postgres_scan()` 之类的表函数会先
+    # 联网下载扩展再连接任意主机。校验层已经拒绝这些函数，这里再兜一层。
+    conn.execute("SET autoinstall_known_extensions=false")
+    conn.execute("SET autoload_known_extensions=false")
 
     return conn
 
@@ -232,7 +246,7 @@ def _register(conn: duckdb.DuckDBPyConnection, table: str, df: pd.DataFrame):
     df = _coerce_problem_columns(df)
     conn.register("_tmp_reg_", df)
     try:
-        conn.execute(f'CREATE OR REPLACE TABLE "{table}" AS SELECT * FROM _tmp_reg_')
+        conn.execute(f'CREATE OR REPLACE TABLE {quote_ident(table)} AS SELECT * FROM _tmp_reg_')
     except Exception as exc:
         # 兜底：若仍然失败（如非 object 列的 cast 问题），逐列探测并修复后重试。
         log.warning("[_register] table=%r cast failed (%s), probing columns for bad types…", table, exc)
@@ -257,7 +271,7 @@ def _register(conn: duckdb.DuckDBPyConnection, table: str, df: pd.DataFrame):
                     lambda v: None if (v is None or (isinstance(v, float) and np.isnan(v))) else str(v)
                 )
         conn.register("_tmp_reg_", df)
-        conn.execute(f'CREATE OR REPLACE TABLE "{table}" AS SELECT * FROM _tmp_reg_')
+        conn.execute(f'CREATE OR REPLACE TABLE {quote_ident(table)} AS SELECT * FROM _tmp_reg_')
     finally:
         try:
             conn.unregister("_tmp_reg_")
@@ -336,16 +350,16 @@ def snapshot_tables_to_memory(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBP
     shadow = _new_conn()
     for table in _list_tables(conn):
         try:
-            df = conn.execute(f'SELECT * FROM "{table}"').df()
+            df = conn.execute(f'SELECT * FROM {quote_ident(table)}').df()
         except Exception as exc:
             log.warning("[shadow] snapshot of table %r failed: %s", table, exc)
             continue
         if df is None or df.empty:
             # Preserve empty tables so DDL referencing them still binds.
             try:
-                cols = conn.execute(f'DESCRIBE "{table}"').fetchall()
+                cols = conn.execute(f'DESCRIBE {quote_ident(table)}').fetchall()
                 shadow.execute(
-                    f'CREATE TABLE "{table}" ('
+                    f'CREATE TABLE {quote_ident(table)} ('
                     + ", ".join(f'"{c[0]}" {c[1]}' for c in cols)
                     + ")"
                 )
@@ -359,7 +373,7 @@ def snapshot_tables_to_memory(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBP
 # ── DuckDB query / introspection ─────────────────────────────────────────────
 
 def _table_schema_str(conn: duckdb.DuckDBPyConnection, table: str, row_count: int) -> str:
-    desc_rows = conn.execute(f'DESCRIBE "{table}"').fetchall()
+    desc_rows = conn.execute(f'DESCRIBE {quote_ident(table)}').fetchall()
     col_names = [r[0] for r in desc_rows]
 
     # Detect columns with uninformative auto-generated names (col, col_2, …)
@@ -375,7 +389,7 @@ def _table_schema_str(conn: duckdb.DuckDBPyConnection, table: str, row_count: in
     # Auto-named columns (col, col_2 …) already had this; now universal.
     if row_count > 0:
         try:
-            sample = conn.execute(f'SELECT * FROM "{table}" LIMIT 2').fetchall()
+            sample = conn.execute(f'SELECT * FROM {quote_ident(table)} LIMIT 2').fetchall()
             if sample:
                 col_lines.append("  -- sample data (first 2 rows) --")
                 for row in sample:
@@ -393,10 +407,10 @@ def _preview_table_dict(conn: duckdb.DuckDBPyConnection, table: str,
                         display_name: str, max_rows: int) -> dict:
     """Fast preview fetch from a DuckDB connection — avoids pandas fillna/astype overhead."""
     try:
-        rel = conn.execute(f'SELECT * FROM "{table}" LIMIT {max_rows}')
+        rel = conn.execute(f'SELECT * FROM {quote_ident(table)} LIMIT {max_rows}')
         cols = [d[0] for d in rel.description]
         rows_raw = rel.fetchall()
-        total = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        total = conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
         rows = [["" if v is None else str(v) for v in row] for row in rows_raw]
         return {"name": display_name, "columns": cols, "rows": rows, "total_rows": total}
     except Exception as e:

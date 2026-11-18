@@ -28,6 +28,7 @@ import pandas as pd
 from compute.i18n import say
 
 from .sources._utils import (
+    quote_ident,
     _new_conn,
     _table_schema_str,
     _query,
@@ -86,7 +87,7 @@ class MergedDataSource(DataSource):
             for bare in bare_tables:
                 prefixed = f"{prefix}{bare}"
                 try:
-                    df, err = src.execute_query(f'SELECT * FROM "{bare}"')
+                    df, err = src.execute_query(f'SELECT * FROM {quote_ident(bare)}')
                     if err or df is None or df.empty:
                         log.debug("[MergedDS] src%d table %r empty/error, skipping: %s",
                                   idx, bare, err)
@@ -116,7 +117,7 @@ class MergedDataSource(DataSource):
             for prefixed in sorted(src_sections.get(idx, [])):
                 try:
                     rows = self._conn.execute(
-                        f'SELECT COUNT(*) FROM "{prefixed}"'
+                        f'SELECT COUNT(*) FROM {quote_ident(prefixed)}'
                     ).fetchone()[0]
                     table_parts.append(_table_schema_str(self._conn, prefixed, rows))
                 except Exception:
@@ -131,7 +132,7 @@ class MergedDataSource(DataSource):
 
         for tbl in analysis_section:
             try:
-                rows = self._conn.execute(f'SELECT COUNT(*) FROM "{tbl}"').fetchone()[0]
+                rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(tbl)}').fetchone()[0]
                 parts.append(_table_schema_str(self._conn, tbl, rows))
             except Exception:
                 pass
@@ -153,10 +154,10 @@ class MergedDataSource(DataSource):
             else:
                 try:
                     self._conn.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                        f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                     )
                     rows = self._conn.execute(
-                        f'SELECT COUNT(*) FROM "{table_name}"'
+                        f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                     ).fetchone()[0]
                 except Exception as exc:
                     return f"Error building analysis table: {exc}"
@@ -173,9 +174,9 @@ class MergedDataSource(DataSource):
         result: List[dict] = []
         for prefixed in sorted(self._prefix_map.keys()):
             try:
-                cols  = [r[0] for r in self._conn.execute(f'DESCRIBE "{prefixed}"').fetchall()]
+                cols  = [r[0] for r in self._conn.execute(f'DESCRIBE {quote_ident(prefixed)}').fetchall()]
                 total = self._conn.execute(
-                    f'SELECT COUNT(*) FROM "{prefixed}"'
+                    f'SELECT COUNT(*) FROM {quote_ident(prefixed)}'
                 ).fetchone()[0]
                 result.append({"name": prefixed, "columns": cols, "total_rows": total})
             except Exception:

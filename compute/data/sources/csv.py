@@ -7,6 +7,7 @@ from typing import List, Tuple
 import pandas as pd
 
 from ._utils import (
+    quote_ident,
     _clean_identifier, _dedup_columns, _list_tables, _new_conn,
     _preview_table_dict, _query, _register, _table_schema_str,
 )
@@ -28,18 +29,18 @@ class CSVDataSource(DataSource):
         # DuckDB can read CSV directly — fastest path for large files
         try:
             self._conn.execute(
-                f"CREATE OR REPLACE TABLE \"{table}\" AS "
-                f"SELECT * FROM read_csv_auto('{file_path}', header=true, "
+                f"CREATE OR REPLACE TABLE {quote_ident(table)} AS "
+                f"SELECT * FROM read_csv_auto('{file_path.replace(chr(39), chr(39) * 2)}', header=true, "
                 f"null_padding=true, ignore_errors=true, "
                 f"nullstr=['', 'null', 'NULL', 'Null', 'nan', 'NaN', 'N/A', 'n/a'])"
             )
             # Rename columns to cleaned identifiers
-            cols_raw = [r[0] for r in self._conn.execute(f'DESCRIBE "{table}"').fetchall()]
+            cols_raw = [r[0] for r in self._conn.execute(f'DESCRIBE {quote_ident(table)}').fetchall()]
             cleaned = _dedup_columns([_clean_identifier(c) for c in cols_raw])
             for old, new in zip(cols_raw, cleaned):
                 if old != new:
                     self._conn.execute(
-                        f'ALTER TABLE "{table}" RENAME COLUMN "{old}" TO "{new}"'
+                        f'ALTER TABLE {quote_ident(table)} RENAME COLUMN {quote_ident(old)} TO {quote_ident(new)}'
                     )
             log.info("[CSVDS] loaded %r via read_csv_auto", file_path)
         except Exception as e:
@@ -58,7 +59,7 @@ class CSVDataSource(DataSource):
         # Include every table (raw + analysis tables created at runtime).
         parts: List[str] = []
         for table in (self.list_tables() or [self._table]):
-            rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            rows = self._conn.execute(f'SELECT COUNT(*) FROM {quote_ident(table)}').fetchone()[0]
             parts.append(_table_schema_str(self._conn, table, rows))
         return "\n\n".join(parts)
 
@@ -75,10 +76,10 @@ class CSVDataSource(DataSource):
         else:
             try:
                 self._conn.execute(
-                    f'CREATE OR REPLACE TABLE "{table_name}" AS ({sql})'
+                    f'CREATE OR REPLACE TABLE {quote_ident(table_name)} AS ({sql})'
                 )
                 rows = self._conn.execute(
-                    f'SELECT COUNT(*) FROM "{table_name}"'
+                    f'SELECT COUNT(*) FROM {quote_ident(table_name)}'
                 ).fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
