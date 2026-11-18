@@ -768,8 +768,21 @@ func (a *app) composer(c *ui.Context) {
 					if busy {
 						a.quotedPrompt(c)
 					}
+					services := c.Services()
 					area := ui.TextArea(c, &a.input).Label(a.tr("chat.message")).Placeholder(a.tr("chat.placeholder")).Lines(1, 8).MinHeight(0).
-						BorderWidth(0).Background(t.Surface.Alpha(0)).AutoFocus().OnTextKey(func(k ui.TextKey) bool {
+						BorderWidth(0).Background(t.Surface.Alpha(0)).AutoFocus().OnPaste(func(text string) bool {
+						// 剪贴板里只有文件（如文件管理器里复制）时 text 为空：把它当附件收下，不插入路径。
+						// 有文本时保持原生粘贴；混合内容只取文本，避免一次粘贴既插字又排队上传。
+						if text != "" {
+							return false
+						}
+						files, err := services.ReadClipboardData(transfer.FileList, transfer.URIList).Files()
+						if err != nil || len(files) == 0 {
+							return false
+						}
+						a.attachPaths(files)
+						return true
+					}).OnTextKey(func(k ui.TextKey) bool {
 						if k.Key != ui.KeyEnter || k.Mods != 0 {
 							return false // Shift+Enter 换行
 						}
