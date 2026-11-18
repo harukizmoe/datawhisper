@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 质量：MCP 发现状态写进会话文档（`TurnDoc.mcpDiscovery`：工具名 + 目录版本）。此前只在服务进程内存里，重启后本会话的首轮又会从零发现；现在版本一致就沿用上次的名字，目录变化才作废。发现逻辑抽成纯函数 `discoverMcpForTurn`，提交时算一次并随本轮上下文落盘。
 - 质量：桌面端 CI 现在装 Bun、server 依赖与 `.venv`，并设 `DW_E2E_REAL=1`，真实 server + compute 的 `TestRealServerEndToEnd` 与 `live_test` 不再跳过；此前它们只在本地跑。
 
 ## 0.1.1 — 2026-11-18

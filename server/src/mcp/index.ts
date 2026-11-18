@@ -9,12 +9,12 @@
  *   `control.addTools`，pi-durable 会写进会话的 `modelTools.add`，下一次模型请求就能看到它们。
  *   这是唯一能在「一轮运行中间」改变模型可见工具集的机制；`configure({ modelTools })` 是整体替换，
  *   由 `conversations/service.ts` 在提交前重算，工具里改不动它。
- * - 旧实现每轮只暴露「最近发现的 5 个」（`select_mcp_schemas(..., limit=5)`）。这里同样提供
- *   `recentNames(limit=5)` 与 `selectMcpSchemas`，由 `conversations/service.ts` 在提交前传给
- *   暴露层（`tools/exposure.ts` 的 `allowedMcpTools`）。`control.addTools` 本身只能追加、无法移除，
- *   所以「最近 5 个」的最终裁剪发生在每轮的 `modelTools` 计算里。
- * - 发现状态（旧 `discovered_mcp_tools` + `mcp_catalog_version_seen`）由宿主通过 `discovery` /
- *   `onDiscover` 持久化；目录版本一变，旧发现全部作废（旧实现的行为）。
+ * - 旧实现每轮只暴露「最近发现的 5 个」（`select_mcp_schemas(..., limit=5)`）。`selectForTurn`
+ *   在提交前按会话文档里的发现结果裁剪（`tools/exposure.ts` 的 `allowedMcpTools`）。
+ *   `control.addTools` 只能追加、无法移除，所以「最近 5 个」的最终裁剪发生在每轮的 `modelTools` 计算里。
+ * - 发现状态（旧 `discovered_mcp_tools` + `mcp_catalog_version_seen`）由 `discoverMcpForTurn`
+ *   计算后写进会话的 `TurnDoc.mcpDiscovery`，换服务进程也能恢复；目录版本一变，旧发现全部作废。
+ *   `McpTools.discover` / `recentNames` 保留给独立使用与测试，生产提交路径不再调用。
  */
 
 import { defineExtension, type Extension, type ToolRegistration } from "@earendil-works/pi-durable";
@@ -55,6 +55,26 @@ export type McpServerStatus = {
   readonly tools: number;
   readonly lastError: string;
 };
+
+/**
+ * 本轮 MCP 发现：只在目录版本匹配时沿用旧名，再加本轮的匹配项（去重，缓冲最近 10 个；
+ * 每轮真正曝光的仍是尾部 5 个，由 `selectForTurn` 裁剪）。状态由调用方（会话文档）持有，
+ * 所以桌面端重启后仍然有效。
+ */
+export async function discoverMcpForTurn(
+  reader: McpCatalogReader,
+  message: string,
+  previous?: McpDiscoveryState,
+): Promise<McpDiscoveryState> {
+  const { catalog, version } = await reader.read();
+  const matched = searchMcpCatalog(catalog, message, "", DISCOVERY_LIMIT).map((match) => match.name);
+  const kept = previous !== undefined && previous.version === version ? previous.names : [];
+  const merged: string[] = [];
+  for (const name of [...kept, ...matched]) {
+    if (!merged.includes(name)) merged.push(name);
+  }
+  return { names: merged.slice(-DISCOVERY_LIMIT), version };
+}
 
 export type McpTools = {
   /** 供 `search_mcp_tools` 的 `AppToolDeps.mcpCatalog`。 */
