@@ -87,16 +87,33 @@ jobs:
         with:
           go-version-file: desktop/go.mod
           cache-dependency-path: desktop/go.sum
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: compute/requirements.txt
       - name: Install GTK and WebKitGTK
         # mygo 用 purego 在运行期加载 GTK/WebKitGTK（不参与编译），测试需要一个可用的会话。
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-3-0 libwebkit2gtk-4.1-0 xvfb xauth dbus-x11
+      - name: Install the agent service and compute worker
+        # 真链路测试会拉起真实 server（它再拉起 .venv 里的 compute），所以两边依赖都要装。
+        run: |
+          bun install --frozen-lockfile --cwd ../server
+          python -m venv ../.venv
+          ../.venv/bin/python -m pip install --upgrade pip
+          ../.venv/bin/python -m pip install -r ../compute/requirements.txt
       - name: Check formatting
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Vet
         run: go vet ./...
       - name: Test
-        # live 测试需要 bun 与 server/node_modules，缺少时会自行 skip。
-        run: timeout 900 xvfb-run -a go test -race -count=1 -timeout 600s ./...
+        # DW_E2E_REAL 打开真实 server/桌面端冒烟（TestRealServerEndToEnd 与 live_test），不再跳过。
+        run: timeout 900 xvfb-run -a go test -race -count=1 -timeout 600s -v ./...
+        env:
+          DW_E2E_REAL: "1"
