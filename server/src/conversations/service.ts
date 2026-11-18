@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { EMPTY_TURN_CONTEXT, type TurnContext, TurnDoc } from "../agent/turn.ts";
 import { appError, invalidParams } from "../ipc/errors.ts";
-import type { McpTools } from "../mcp/index.ts";
+import { discoverMcpForTurn, type McpTools } from "../mcp/index.ts";
 import { type ModelService, parseThinkingLevel } from "../models/service.ts";
 import type {
   AgentModelResponse,
@@ -177,6 +177,10 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     { discovered: previous.discoveredTools, turns: previous.discoveryTurns },
     discoveryMessage,
   );
+  // MCP 发现状态随会话文档保存：版本匹配时沿用上一轮，目录变了自动作废。
+  const mcpDiscovery = deps.mcp === undefined
+    ? undefined
+    : await discoverMcpForTurn(deps.mcp.catalog, discoveryMessage, previous.mcpDiscovery);
   const next: TurnContext = {
     ...previous,
     message: text,
@@ -188,14 +192,14 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     discoveryTurns: discovery.state.turns.map((turn) => [...turn]),
     discoveredTools: [...discovery.state.discovered],
     turn: previous.turn + 1,
+    ...(mcpDiscovery === undefined ? {} : { mcpDiscovery: { names: [...mcpDiscovery.names], version: mcpDiscovery.version } }),
   };
   await conversation.commit(async (tx) => {
     const doc = await tx.doc(TurnDoc, conversation.id);
     Object.assign(doc, next);
   }, context);
 
-  // MCP 目录与工具名发现同轮进行：先预发现（旧 `search_mcp_catalog`），再按最近 5 个裁剪。
-  if (deps.mcp !== undefined) await deps.mcp.discover(discoveryMessage);
+  // 可见集合用同一份发现结果：目录变了旧名已经在上一段被清掉。
   const bySelection = toolsForTurn(deps.tools ?? [], {
     userMessage: text,
     command,
@@ -206,7 +210,7 @@ export async function submitTurn(deps: ConversationsDeps, id: string | number, b
     discoveredTools: next.discoveredTools,
     maxTools: MAX_VISIBLE_TOOLS,
     includeMcp: deps.mcp !== undefined,
-    allowedMcpTools: deps.mcp?.recentNames(5) ?? null,
+    allowedMcpTools: mcpDiscovery?.names ?? null,
   });
   // 调用方（工作流节点）给了工具名单时它说了算：名单之外的工具这一轮不可见，名单里的不受关键词发现限制。
   const selected =

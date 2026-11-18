@@ -33,6 +33,11 @@ export type TurnContext = {
   discoveredTools: string[];
   /** 本轮序号，从 0 递增；每轮 submit 加一。 */
   turn: number;
+  /**
+   * 本会话最近的 MCP 发现：工具名与当时的目录版本。版本一变旧名作废（旧实现的
+   * `discovered_mcp_tools` + `mcp_catalog_version_seen`）。可选，旧文档没有这个字段。
+   */
+  mcpDiscovery?: { names: string[]; version: string };
 };
 
 export const EMPTY_TURN_CONTEXT: TurnContext = {
