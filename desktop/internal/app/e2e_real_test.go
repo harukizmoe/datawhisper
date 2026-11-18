@@ -4,9 +4,10 @@ package app
 // 发一句话，要求屏幕上出现模型回复。
 //
 // 模型由测试内的 OpenAI 兼容桩提供（`/v1/models` + 流式 `/v1/chat/completions`），所以不联网、不需要密钥。
-// 默认跳过：桌面端的 CI 任务没有 bun 与 Python 环境，只有显式设置 DW_E2E_REAL=1 时才跑（本地开发用）。
+// 只有显式设置 DW_E2E_REAL=1 时才跑：CI 的 Desktop job 装了 Bun、Bun 依赖与 .venv 后会打开它，
+// 本地也可以按同样方式跑。
 //
-//	go test ./internal/app -run TestRealServerEndToEnd -v   # 需要 DW_E2E_REAL=1
+//	DW_E2E_REAL=1 go test ./internal/app -run TestRealServerEndToEnd -v
 
 import (
 	"bufio"
