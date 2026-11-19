@@ -25,6 +25,43 @@ log = logging.getLogger(__name__)
 # Files below this size keep the existing low-latency synchronous path.
 EXCEL_JOB_THRESHOLD_BYTES = int(os.environ.get("BAA_EXCEL_JOB_THRESHOLD", 5_000_000))
 
+# 工作簿解压/载入上限：挡住压缩炸弹与超大文件把 compute 进程打爆。
+# 阈值每次调用时读取，便于测试与运维调整。
+def _workbook_limits() -> tuple[int, int, int]:
+    return (
+        int(os.environ.get("BAA_MAX_WORKBOOK_BYTES", str(512 * 1024 * 1024))),
+        int(os.environ.get("BAA_MAX_WORKBOOK_UNCOMPRESSED_BYTES", str(2 * 1024 * 1024 * 1024))),
+        int(os.environ.get("BAA_MAX_WORKBOOK_RATIO", "200")),
+    )
+
+
+def check_workbook_limits(path: str) -> None:
+    """在解析前检查文件大小与 xlsx 解压后总量；超限抛 ValueError。"""
+    max_file, max_uncompressed, max_ratio = _workbook_limits()
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        raise ValueError(f"Cannot read workbook {path}: {exc}") from exc
+    if size > max_file:
+        raise ValueError(say(
+            f"The workbook is too large to open ({size / 1024 / 1024:.0f} MB; limit {max_file / 1024 / 1024:.0f} MB).",
+            f"工作簿过大，无法打开（{size / 1024 / 1024:.0f} MB，上限 {max_file / 1024 / 1024:.0f} MB）。",
+        ))
+    if path.lower().endswith((".xlsx", ".xlsm")):
+        import zipfile
+        try:
+            with zipfile.ZipFile(path) as archive:
+                total = sum(info.file_size for info in archive.infolist())
+        except (zipfile.BadZipFile, OSError) as exc:
+            raise ValueError(f"The workbook is not a valid xlsx archive: {exc}") from exc
+        if total > max_uncompressed or (size > 0 and total / size > max_ratio):
+            raise ValueError(say(
+                f"The workbook expands to {total / 1024 / 1024:.0f} MB (limit {max_uncompressed / 1024 / 1024:.0f} MB, "
+                f"compression ratio limit {max_ratio}x); it will not be parsed.",
+                f"工作簿解压后约 {total / 1024 / 1024:.0f} MB（上限 {max_uncompressed / 1024 / 1024:.0f} MB，"
+                f"压缩比上限 {max_ratio} 倍），已拒绝解析。",
+            ))
+
 
 def excel_requires_job(path: str) -> bool:
     """Return whether an Excel upload should use the background parser."""
@@ -36,6 +73,7 @@ def excel_requires_job(path: str) -> bool:
 
 def _excel_engine(path: str) -> Tuple[str, List[str]]:
     """Choose the fastest installed engine and return workbook sheet names."""
+    check_workbook_limits(path)
     try:
         import python_calamine  # noqa: F401
         engine = "calamine"
