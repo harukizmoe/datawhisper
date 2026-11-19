@@ -1,6 +1,6 @@
 # 更新日志
 
-## 未发布
+## 0.1.2 — 2026-11-19
 
 - 安全（补充）：Excel 上传在解析前检查文件大小、xlsx 解压总量与压缩比（默认 512 MB / 2 GB / 200×，可用 `BAA_MAX_WORKBOOK_*` 调整），压缩炸弹直接拒绝；直接上传的大工作簿解析与工作区导入共用导入槽位，避免并发解析打爆内存。
 - 安全：修掉安全审计发现的模型可控边界。表名（`create_analysis_table`/`clean_data`/`delete_analysis_tables`）只接受简单标识符，所有连接器改用转义后的标识符，注入的引号不会再变成 SQL；SQL 文件函数改为白名单 + 形状规则（`read_json_objects`、`parquet_scan`、`glob` 等补上路径校验，未知 `read_*`/`*_scan` 与 `postgres_scan` 一类远程表函数直接拒绝），DuckDB 关闭扩展自动安装/加载；挂载目录里的 `.env`/`.ssh`/密钥文件即使相对路径也拒绝读取。MCP 子进程不再继承凭据类环境变量，SSE 只允许 http(s) 且 endpoint 必须同源、禁止重定向。图表标题去掉尖括号，内嵌 JSON 转义 `</script`。云端 embedding token 配置文件改成 0600。
