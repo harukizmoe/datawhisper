@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 
 from compute.data.sources import SQLDataSource
+from compute.data.large_import_limiter import acquire_large_import_slot
 from compute.data.sources.excel import excel_requires_job, parse_excel_job
 from compute.data.sources.workspace_persistent import WorkspacePersistentSource
 from compute.data.workspace import WorkspaceRuntime, validate_workdir
@@ -61,8 +62,11 @@ def _parse_workbook(ctx: MethodContext, descriptor: dict) -> str:
     """把大工作簿解析成独立的 DuckDB 文件；返回其路径。"""
     PARSED_EXCEL_DIR.mkdir(parents=True, exist_ok=True)
     db_path = PARSED_EXCEL_DIR / f"{uuid.uuid4().hex}.duckdb"
+    job_ctx = InlineJobContext(ctx)
     try:
-        parsed = parse_excel_job(InlineJobContext(ctx), descriptor["file_path"], str(db_path), descriptor["name"])
+        # 与工作区导入共用槽位：大工作簿解析是内存峰值，别让多个上传同时进行。
+        with acquire_large_import_slot(job_ctx):
+            parsed = parse_excel_job(job_ctx, descriptor["file_path"], str(db_path), descriptor["name"])
         ctx.check()
     except Cancelled:
         # 中途停止的解析会自己删掉文件；已完成的解析不会。

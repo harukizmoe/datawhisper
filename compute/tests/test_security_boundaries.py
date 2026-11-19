@@ -10,6 +10,7 @@ import json
 import os
 import stat
 import sys
+import zipfile
 
 import duckdb
 import pandas as pd
@@ -171,3 +172,31 @@ class EngineAndCredentialTests(unittest.TestCase):
             finally:
                 neural_embedder._EMBED_CONFIG_FILE = original
                 neural_embedder._CLOUD_TOKEN = original_token
+
+class UploadLimitTests(unittest.TestCase):
+    def test_compression_bomb_workbook_is_rejected(self):
+        from compute.data.sources.excel import check_workbook_limits
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bomb.xlsx"
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("sheet1.xml", b"0" * (1024 * 1024))
+            old = os.environ.get("BAA_MAX_WORKBOOK_UNCOMPRESSED_BYTES")
+            os.environ["BAA_MAX_WORKBOOK_UNCOMPRESSED_BYTES"] = "1024"
+            try:
+                with self.assertRaises(ValueError):
+                    check_workbook_limits(str(path))
+            finally:
+                if old is None:
+                    os.environ.pop("BAA_MAX_WORKBOOK_UNCOMPRESSED_BYTES", None)
+                else:
+                    os.environ["BAA_MAX_WORKBOOK_UNCOMPRESSED_BYTES"] = old
+
+    def test_normal_workbook_passes_limits(self):
+        from compute.data.sources.excel import check_workbook_limits
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.xlsx"
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("sheet1.xml", b"<x/>")
+            check_workbook_limits(str(path))
