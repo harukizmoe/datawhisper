@@ -112,9 +112,8 @@
       "workflow_list",
       "workflow_start",
       "workflow_status",
-      "display_diagram",
-      "edit_diagram",
-      "get_diagram",
+      "canvas_create",
+      "canvas_get",
       "memory_read"
     ],
     "all+mcp": [
@@ -191,9 +190,8 @@
       "workflow_list",
       "workflow_start",
       "workflow_status",
-      "display_diagram",
-      "edit_diagram",
-      "get_diagram",
+      "canvas_create",
+      "canvas_get",
       "memory_read"
     ],
     "mcp-only": [
@@ -655,7 +653,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -664,7 +662,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -674,7 +672,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -682,7 +680,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -691,7 +689,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -720,7 +718,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -729,7 +727,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -739,7 +737,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -747,7 +745,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -756,7 +754,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -785,7 +783,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -794,7 +792,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -804,7 +802,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -812,7 +810,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -821,7 +819,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -850,7 +848,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "get_diagram",
+          "canvas_get",
           "workspace_read_file"
         ],
         "filtered": [
@@ -861,7 +859,7 @@
           "ask_user",
           "workspace_read_file",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ],
         "stage": "general",
         "staged": [
@@ -872,7 +870,7 @@
           "ask_user",
           "workspace_read_file",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ],
         "scoped": [
           "workspace_status",
@@ -881,7 +879,7 @@
           "ask_user",
           "workspace_read_file",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -891,7 +889,7 @@
           "ask_user",
           "workspace_read_file",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ]
       }
     },
@@ -920,8 +918,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -930,8 +927,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -941,8 +937,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -950,8 +945,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -960,8 +954,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -8109,7 +8102,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -8118,7 +8111,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -8128,7 +8121,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -8136,7 +8129,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -8145,7 +8138,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -8174,8 +8167,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -8184,8 +8176,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -8195,8 +8186,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -8204,8 +8194,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -8214,8 +8203,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -8244,7 +8232,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "get_diagram"
+          "canvas_get"
         ],
         "filtered": [
           "workspace_status",
@@ -8253,7 +8241,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ],
         "stage": "general",
         "staged": [
@@ -8263,7 +8251,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ],
         "scoped": [
           "workspace_status",
@@ -8271,7 +8259,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -8280,7 +8268,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "get_diagram"
+          "canvas_get"
         ]
       }
     },
@@ -8368,7 +8356,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -8377,7 +8365,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "stage": "general",
         "staged": [
@@ -8387,7 +8375,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "scoped": [
           "workspace_status",
@@ -8395,7 +8383,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -8404,7 +8392,7 @@
           "query_knowledge",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram"
+          "canvas_create"
         ]
       }
     },
@@ -15888,7 +15876,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -15904,9 +15892,8 @@
           "generate_chart",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ],
         "stage": "inspect",
         "staged": [
@@ -15919,9 +15906,8 @@
           "query_data",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ],
         "scoped": [
           "workspace_status",
@@ -15932,9 +15918,8 @@
           "query_data",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -15946,9 +15931,8 @@
           "query_data",
           "ask_user",
           "load_analysis_skill",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ]
       }
     },
@@ -15981,7 +15965,7 @@
       "maxTools": null,
       "expected": {
         "discovered": [
-          "display_diagram"
+          "canvas_create"
         ],
         "filtered": [
           "workspace_status",
@@ -16000,9 +15984,8 @@
           "team_status",
           "agent_delegate",
           "team_delegate",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ],
         "stage": "inspect",
         "staged": [
@@ -16018,9 +16001,8 @@
           "team_status",
           "agent_delegate",
           "team_delegate",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ],
         "scoped": [
           "workspace_status",
@@ -16034,9 +16016,8 @@
           "team_status",
           "agent_delegate",
           "team_delegate",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ],
         "readToolResultEnum": null,
         "limited": [
@@ -16051,9 +16032,8 @@
           "team_status",
           "agent_delegate",
           "team_delegate",
-          "display_diagram",
-          "edit_diagram",
-          "get_diagram"
+          "canvas_create",
+          "canvas_get"
         ]
       }
     },
@@ -17259,9 +17239,8 @@
         "workflow_list",
         "workflow_start",
         "workflow_status",
-        "display_diagram",
-        "edit_diagram",
-        "get_diagram",
+        "canvas_create",
+        "canvas_get",
         "memory_read"
       ],
       "hasDataSource": true,
@@ -19261,8 +19240,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -19307,7 +19286,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -19344,7 +19323,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -19379,7 +19358,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -19421,8 +19400,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -19467,7 +19446,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -19504,7 +19483,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -19539,7 +19518,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -19583,8 +19562,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -19629,7 +19608,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -19666,7 +19645,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -19701,7 +19680,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -19747,8 +19726,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -19793,7 +19772,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -19830,7 +19809,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -19865,7 +19844,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -19916,8 +19895,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -19962,7 +19941,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -19999,7 +19978,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -20034,7 +20013,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -20057,7 +20036,7 @@
           "team_list",
           "team_status",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ]
       }
@@ -20095,8 +20074,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -20141,7 +20120,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -20178,7 +20157,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -20213,7 +20192,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -20236,7 +20215,7 @@
           "team_list",
           "team_status",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ]
       }
@@ -20622,8 +20601,8 @@
         "discovered": [
           "browse_webpage",
           "browser_search",
+          "canvas_create",
           "clean_data",
-          "display_diagram",
           "memory_read",
           "profile_data",
           "task_list",
@@ -20663,7 +20642,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "stage": "general",
@@ -20695,7 +20674,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "scoped": [
@@ -20725,7 +20704,7 @@
           "agent_delegate",
           "team_delegate",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ],
         "readToolResultEnum": null,
@@ -20748,7 +20727,7 @@
           "team_list",
           "team_status",
           "workflow_list",
-          "display_diagram",
+          "canvas_create",
           "memory_read"
         ]
       }
@@ -24014,33 +23993,32 @@
     {
       "message": "用商业模式画布梳理我们的业务",
       "names": [
-        "display_diagram"
+        "canvas_create"
       ]
     },
     {
       "message": "画一个 SWOT 四象限分析图",
       "names": [
-        "display_diagram"
+        "canvas_create"
       ]
     },
     {
       "message": "帮我画一下 BCG 矩阵",
       "names": [
-        "display_diagram"
+        "canvas_create"
       ]
     },
     {
       "message": "查看当前的画布内容",
       "names": [
-        "get_diagram",
+        "canvas_get",
         "workspace_read_file"
       ]
     },
     {
       "message": "修改画布，把增长模块挪到左上角",
       "names": [
-        "edit_diagram",
-        "get_diagram"
+        "canvas_create"
       ]
     },
     {
@@ -24697,20 +24675,19 @@
     {
       "message": "modify diagram: add a new box",
       "names": [
-        "display_diagram"
+        "canvas_create"
       ]
     },
     {
       "message": "edit the canvas diagram",
       "names": [
-        "edit_diagram",
-        "get_diagram"
+        "canvas_create"
       ]
     },
     {
       "message": "get the current diagram",
       "names": [
-        "get_diagram"
+        "canvas_get"
       ]
     },
     {
@@ -24720,7 +24697,7 @@
     {
       "message": "swot 分析我们的竞争力",
       "names": [
-        "display_diagram"
+        "canvas_create"
       ]
     },
     {
@@ -25184,7 +25161,7 @@
         {
           "discovered": [
             "task_get",
-            "display_diagram"
+            "canvas_create"
           ],
           "turns": [
             [
@@ -25192,11 +25169,11 @@
             ],
             [],
             [
-              "display_diagram"
+              "canvas_create"
             ]
           ],
           "added": [
-            "display_diagram"
+            "canvas_create"
           ]
         }
       ]
@@ -25271,25 +25248,25 @@
       "after": [
         {
           "discovered": [
-            "display_diagram"
+            "canvas_create"
           ],
           "turns": [
             [
-              "display_diagram"
+              "canvas_create"
             ]
           ],
           "added": [
-            "display_diagram"
+            "canvas_create"
           ]
         },
         {
           "discovered": [
-            "display_diagram",
+            "canvas_create",
             "task_get"
           ],
           "turns": [
             [
-              "display_diagram"
+              "canvas_create"
             ],
             [
               "task_get"
@@ -25301,13 +25278,13 @@
         },
         {
           "discovered": [
-            "display_diagram",
+            "canvas_create",
             "task_get",
             "configure_hooks"
           ],
           "turns": [
             [
-              "display_diagram"
+              "canvas_create"
             ],
             [
               "task_get"

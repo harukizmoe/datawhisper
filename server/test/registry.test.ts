@@ -79,8 +79,8 @@ describe("built-in tool registry", () => {
 
   test("has every name exactly once and matches the Python name set", () => {
     const names = BUILTIN_TOOL_REGISTRY.all().map((spec) => spec.name);
-    expect(names.length).toBe(72);
-    expect(new Set(names).size).toBe(72);
+    expect(names.length).toBe(71);
+    expect(new Set(names).size).toBe(71);
     expect([...BUILTIN_TOOL_REGISTRY.names()].sort(pyCompare)).toEqual(cases.names);
     expect([...BUILTIN_TOOL_REGISTRY.names()].sort(pyCompare)).toEqual(cases.specs.map((spec) => spec.name).sort(pyCompare));
     expect(cases.missingSpecLookup).toEqual([]);
@@ -96,8 +96,8 @@ describe("built-in tool registry", () => {
     const counts: Record<string, number> = {};
     for (const spec of BUILTIN_TOOL_REGISTRY.all()) counts[spec.category] = (counts[spec.category] ?? 0) + 1;
     expect(counts).toEqual(cases.categoryCounts);
-    // 清单中为 40 A + 14 B + 18 C；registry 的分类以不同方式切分同样的 72 个工具。
-    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(40 + 14 + 18);
+    // 清单为 40 A + 14 B + 17 C；registry 的分类以不同方式切分同样的 71 个工具。
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(71);
   });
 
   test("category defaults the side-effect scope for write/output tools", () => {

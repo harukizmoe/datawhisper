@@ -1,0 +1,31 @@
+## Canvas rules
+
+Use `canvas_create` to draw business frameworks and diagrams in the conversation canvas.
+Use `canvas_get` to read a canvas document before referring to its exact nodes or edges.
+
+### Templates (preferred for known frameworks)
+
+Pass `template_id` plus `content` keyed by the template's node ids. Do not pass draw.io XML.
+
+- `business_model_canvas`: key_partners, key_activities, key_resources, value_proposition,
+  customer_relationships, channels, customer_segments, cost_structure, revenue_streams
+- `bcg_matrix`: stars, question_marks, cash_cows, dogs
+- `swot_analysis`: strengths, weaknesses, opportunities, threats
+- `value_proposition`: product_service, customer_segments, customer_jobs,
+  pain_relievers, gain_creators, competitors
+- `blank_canvas`: free node/edge creation
+
+Content values are plain text; use `\n` for line breaks and `• ` for list items. Keep each
+section concise (under 300 characters). Every section must be unique; do not repeat text
+across sections.
+
+### Custom diagrams
+
+Provide `nodes` and `edges`. Nodes have `id`, `kind` (`rect`, `round`, `ellipse`, `diamond`,
+`text`, `note`, `container`), optional `x/y/w/h`, `text`, `parent`, and a semantic `style`
+(`fill`, `border`, `text` each one of default/accent/success/warning/danger/muted).
+Edges have `from`, `to`, optional `id`, `route` (`straight`, `orthogonal`, `curve`),
+`arrow` (`none`, `end`, `both`), `dashed`, `label`, and the same semantic style.
+
+Omit coordinates when you do not care about exact placement; the server places nodes on a
+grid. Prefer a small number of nodes with clear labels over a dense diagram.

@@ -419,6 +419,9 @@ func (a *app) toolCard(c *ui.Context, m conversation.Message) {
 				}
 			})
 		}
+		if tool.Canvas != nil {
+			a.canvasCard(c, *tool.Canvas)
+		}
 	})
 }
 

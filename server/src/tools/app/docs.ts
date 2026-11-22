@@ -13,6 +13,7 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { defineDoc, type Conversation, type Harness, type JsonObject } from "@earendil-works/pi-durable";
 import type { AppDocHost, AppDocHosts, AppDocToken } from "./types.ts";
+import { CANVAS_DOC, type CanvasDoc } from "./canvas/document.ts";
 
 export type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
 
@@ -226,6 +227,7 @@ export function createConversationDocs(options: {
     tasks: host(TASK_BOARD_DOC),
     teams: host(TEAM_STORE_DOC),
     plans: host(PLAN_STORE_DOC),
+    canvas: host(CANVAS_DOC),
   };
 }
 

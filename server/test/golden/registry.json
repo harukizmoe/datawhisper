@@ -1610,7 +1610,7 @@
       "confirmation": "none"
     },
     {
-      "name": "display_diagram",
+      "name": "canvas_create",
       "category": "output",
       "defaultExposed": false,
       "discoverable": true,
@@ -1618,15 +1618,18 @@
         "bcg",
         "canvas",
         "diagram",
+        "draw a diagram",
         "swot",
         "价值主张",
         "商业模式画布",
         "四象限",
         "战略图",
         "框架图",
+        "流程图",
+        "画一张图",
         "画布"
       ],
-      "discoverySummary": "Render a draw.io diagram (business model canvas, BCG, SWOT, value proposition) to the canvas drawer.",
+      "discoverySummary": "Create a native canvas (business model canvas, BCG, SWOT, value proposition, or a custom node/edge diagram).",
       "commands": [],
       "skills": [
         "bcg-matrix",
@@ -1644,42 +1647,7 @@
       "confirmation": "explicit_request"
     },
     {
-      "name": "edit_diagram",
-      "category": "write",
-      "defaultExposed": false,
-      "discoverable": true,
-      "discoveryKeywords": [
-        "bcg",
-        "canvas",
-        "diagram",
-        "swot",
-        "价值主张",
-        "修改画布",
-        "商业模式画布",
-        "四象限",
-        "框架图",
-        "画布",
-        "编辑图形"
-      ],
-      "discoverySummary": "Edit an existing draw.io diagram in the canvas drawer.",
-      "commands": [],
-      "skills": [
-        "bcg-matrix",
-        "business-model-canvas",
-        "swot-analysis",
-        "value-proposition"
-      ],
-      "requiresDataSource": false,
-      "concurrencySafe": false,
-      "executionMode": "sync",
-      "jobThreshold": "",
-      "requiresRuntime": false,
-      "requiresWorkspace": false,
-      "sideEffect": "workspace",
-      "confirmation": "explicit_request"
-    },
-    {
-      "name": "get_diagram",
+      "name": "canvas_get",
       "category": "read",
       "defaultExposed": false,
       "discoverable": true,
@@ -1691,9 +1659,10 @@
         "价值主张",
         "商业模式画布",
         "查看图",
-        "画布"
+        "画布",
+        "读取画布"
       ],
-      "discoverySummary": "Retrieve the current draw.io XML from the canvas drawer.",
+      "discoverySummary": "Read a native canvas document and its revision.",
       "commands": [],
       "skills": [
         "bcg-matrix",
@@ -1753,20 +1722,19 @@
     "browser_navigate",
     "browser_screenshot",
     "browser_search",
+    "canvas_create",
+    "canvas_get",
     "clean_data",
     "configure_hooks",
     "create_analysis_table",
     "create_feishu_bitable",
     "delete_analysis_tables",
-    "display_diagram",
-    "edit_diagram",
     "export_excel",
     "export_report",
     "fetch_table",
     "generate_chart",
     "generate_dashboard",
     "generate_ppt",
-    "get_diagram",
     "get_schema",
     "get_table_detail",
     "list_feishu_bitable_tables",
@@ -1829,9 +1797,9 @@
   "missingSpecLookup": [],
   "categoryCounts": {
     "read": 28,
+    "interaction": 10,
+    "write": 21,
     "analysis": 6,
-    "write": 22,
-    "output": 6,
-    "interaction": 10
+    "output": 6
   }
 }

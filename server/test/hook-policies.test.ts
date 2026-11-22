@@ -22,9 +22,9 @@ describe("parseTextFallbackToolCalls", () => {
   test("ignores unknown and differently-cased tool names; repeated parameters keep the last value", () => {
     expect(parseTextFallbackToolCalls('<other><parameter name="x">1</parameter></other>')).toEqual([]);
     // 标签正则是大小写不敏感的，但 allowlist 不是：Python 同样会丢弃大写名称。
-    expect(parseTextFallbackToolCalls('<EDIT_DIAGRAM><PARAMETER NAME="id">3</PARAMETER></EDIT_DIAGRAM>')).toEqual([]);
-    expect(parseTextFallbackToolCalls('<display_diagram><parameter name="xml">a</parameter><parameter name="xml">b</parameter></display_diagram>')).toEqual([
-      { name: "display_diagram", args: { xml: "b" } },
+    expect(parseTextFallbackToolCalls('<CANVAS_CREATE><PARAMETER NAME="title">3</PARAMETER></CANVAS_CREATE>')).toEqual([]);
+    expect(parseTextFallbackToolCalls('<canvas_create><parameter name="title">a</parameter><parameter name="title">b</parameter></canvas_create>')).toEqual([
+      { name: "canvas_create", args: { title: "b" } },
     ]);
   });
 });

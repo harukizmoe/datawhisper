@@ -203,14 +203,11 @@ describe("discoverToolNamesForQuery", () => {
     expect(discoverToolNamesForQuery("搜索一下网页").has("browser_search")).toBe(true);
     expect(discoverToolNamesForQuery("搜索一下网页").has("workspace_grep")).toBe(false);
     expect(discoverToolNamesForQuery("打开 https://example.com 总结一下").has("browser_navigate")).toBe(false);
-    expect([...discoverToolNamesForQuery("画一个商业模式画布")].filter((name) => name.includes("diagram"))).toEqual(["display_diagram"]);
-    expect([...discoverToolNamesForQuery("修改画布")].filter((name) => name.includes("diagram")).sort()).toEqual([
-      "edit_diagram",
-      "get_diagram",
-    ]);
-    expect([...discoverToolNamesForQuery("查看画布")].filter((name) => name.includes("diagram"))).toEqual(["get_diagram"]);
-    // "价值主张" 能匹配某个 diagram 工具，但匹配不上强 diagram 正则：所有 diagram 工具都被丢弃。
-    expect([...discoverToolNamesForQuery("价值主张")].filter((name) => name.includes("diagram"))).toEqual([]);
+    expect([...discoverToolNamesForQuery("画一个商业模式画布")].filter((name) => name.startsWith("canvas_"))).toEqual(["canvas_create"]);
+    expect([...discoverToolNamesForQuery("修改画布")].filter((name) => name.startsWith("canvas_"))).toEqual(["canvas_create"]);
+    expect([...discoverToolNamesForQuery("查看画布")].filter((name) => name.startsWith("canvas_"))).toEqual(["canvas_get"]);
+    // "价值主张" 能匹配某个 canvas 工具，但匹配不上强 diagram 正则：所有 canvas 工具都被丢弃。
+    expect([...discoverToolNamesForQuery("价值主张")].filter((name) => name.startsWith("canvas_"))).toEqual([]);
   });
 });
 
@@ -288,7 +285,7 @@ describe("visibility cap priority", () => {
   const wide = schemas([
     "query_data", "workspace_status", "ask_user", "browser_click", "generate_chart",
     "select_chart", "memory_read", "task_list", "team_status", "workflow_list",
-    "display_diagram", "set_ppt_color_scheme", "profile_data", "clean_data",
+    "canvas_create", "set_ppt_color_scheme", "profile_data", "clean_data",
     "workspace_grep", "workspace_glob", "configure_hooks", "read_tool_result",
     "search_mcp_tools", "query_knowledge", "get_schema", "get_table_detail",
     "run_analysis", "load_analysis_skill", "structured_output",

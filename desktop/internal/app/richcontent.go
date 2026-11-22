@@ -410,6 +410,7 @@ func (a *app) richModals(c *ui.Context) {
 	t := c.Theme()
 	a.dashboardsModal(c, t)
 	a.fullChartModal(c, t)
+	a.canvasModal(c, t)
 	if !a.dash.open && !a.cv.fullOpen {
 		a.rich.ReleaseModal()
 	}

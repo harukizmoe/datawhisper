@@ -48,6 +48,13 @@ type chatView struct {
 	draftModel *service.ModelRef
 	draftLevel string
 
+	// 画布弹窗：打开的画布 id 与是否显示；只读阶段只展示，不进入编辑。
+	canvasOpen bool
+	canvasID   string
+	// canvases 是本会话的画布文档，按 id 索引；canvasCalls 记录已完成的画布工具数，用于重新读取。
+	canvases    map[string]conversation.Canvas
+	canvasCalls int
+
 	// 斜杠命令目录（command.list）。
 	commands []service.Command
 
@@ -138,6 +145,8 @@ func (v *chatView) resetConversation() {
 	v.modelsTouched = false
 	v.modelsErr, v.draftModel, v.draftLevel = "", nil, ""
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
+	v.canvasOpen, v.canvasID = false, ""
+	v.canvases, v.canvasCalls = nil, -1
 	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0
 	v.composerSeen, v.wantFocus, v.blurSince, v.menuOpen = false, false, time.Time{}, false
 	v.ttftStart, v.ttft, v.ttftSeen = time.Time{}, 0, nil

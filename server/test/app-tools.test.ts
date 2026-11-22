@@ -19,6 +19,7 @@ import {
   APP_TOOL_NAMES,
   createAppTools,
   createMemoryDocHost,
+  emptyCanvasDoc,
   initialPlanStore,
   initialTaskBoard,
   initialTeamStore,
@@ -27,8 +28,6 @@ import {
   type AppTool,
   type AppToolDeps,
   type AppToolDetails,
-  type CanvasProject,
-  type CanvasStore,
   type ToolResultArtifactRef,
 } from "../src/tools/app/index.ts";
 import { readZipEntry, listZipEntries } from "../src/tools/app/workspace/zip.ts";
@@ -163,53 +162,10 @@ function makeDocx(): Buffer {
   ]);
 }
 
-type FakeCanvas = CanvasStore & { projects: Map<string, CanvasProject> };
-
-function fakeCanvas(): FakeCanvas {
-  const projects = new Map<string, CanvasProject>();
-  let sequence = 0;
-  return {
-    projects,
-    async getProject(projectId) {
-      return projects.get(projectId);
-    },
-    async createProject(options) {
-      sequence += 1;
-      const project: CanvasProject = {
-        id: `p${sequence}`,
-        template_id: options.templateId,
-        title: options.title,
-        diagram_xml: "",
-        rendering_mode: "chart",
-      };
-      projects.set(project.id, project);
-      return project;
-    },
-    async updateProjectDiagramXml(options) {
-      const project = projects.get(options.projectId);
-      if (project === undefined) throw new Error("missing project");
-      const updated = { ...project, diagram_xml: options.diagramXml };
-      projects.set(options.projectId, updated);
-      return updated;
-    },
-    async updateProjectRenderingMode(options) {
-      const project = projects.get(options.projectId);
-      if (project === undefined) throw new Error("missing project");
-      const updated = { ...project, rendering_mode: options.renderingMode };
-      projects.set(options.projectId, updated);
-      return updated;
-    },
-    async getProjectDiagramXml(projectId) {
-      return projects.get(projectId)?.diagram_xml as string | undefined;
-    },
-  };
-}
-
 type Harness = {
   root: string;
   deps: AppToolDeps;
   tools: AppTool[];
-  canvas: FakeCanvas;
 };
 
 function makeHarness(overrides: Partial<AppToolDeps> = {}): Harness {
@@ -219,12 +175,12 @@ function makeHarness(overrides: Partial<AppToolDeps> = {}): Harness {
   mkdirSync(workspace, { recursive: true });
   mkdirSync(join(dataRoot, "uploads"), { recursive: true });
   mkdirSync(join(dataRoot, "outputs"), { recursive: true });
-  const canvas = fakeCanvas();
   // 文档宿主按会话现取，但同一个会话必须拿到同一份：否则「建任务」与「列任务」看到两个世界。
   const docs = {
     tasks: createMemoryDocHost(initialTaskBoard()),
     teams: createMemoryDocHost(initialTeamStore()),
     plans: createMemoryDocHost(initialPlanStore()),
+    canvas: createMemoryDocHost(emptyCanvasDoc()),
   };
   const deps: AppToolDeps = {
     workspace: new NodeWorkspaceFs({
@@ -239,10 +195,9 @@ function makeHarness(overrides: Partial<AppToolDeps> = {}): Harness {
     sessionId: "s1",
     workspaceId: "w1",
     now: () => new Date("2026-01-02T03:04:05"),
-    canvas,
     ...overrides,
   };
-  return { root, deps, tools: createAppTools(deps), canvas };
+  return { root, deps, tools: createAppTools(deps) };
 }
 
 async function statusRoot(tools: readonly AppTool[]): Promise<string> {
@@ -251,7 +206,7 @@ async function statusRoot(tools: readonly AppTool[]): Promise<string> {
 }
 
 describe("app tool registry", () => {
-  test("exposes the 44 typed tools in stable order", () => {
+  test("exposes the typed tools in stable order", () => {
     const { tools } = makeHarness();
     expect(tools.map((tool) => tool.name)).toEqual([...APP_TOOL_NAMES]);
     expect(tools).toHaveLength(APP_TOOL_NAMES.length);
@@ -265,7 +220,7 @@ describe("app tool registry", () => {
       "select_chart", "propose_excel_export", "propose_report_outline",
       "propose_ppt_outline", "propose_dashboard_outline",
       "ask_user", "browse_webpage", "read_tool_result", "search_mcp_tools",
-      "plan_complete", "get_diagram", "memory_read", "load_analysis_skill",
+      "plan_complete", "canvas_get", "memory_read", "load_analysis_skill",
       "list_feishu_bitable_tables", "workflow_list", "workflow_status", "browser_extract_tables",
     ]);
     for (const tool of tools) {
@@ -870,46 +825,52 @@ describe("artifacts, web and diagrams", () => {
     expect(requested).toHaveLength(1);
   });
 
-  test("display/edit/get diagram with content fill and cell operations", async () => {
-    const { tools, canvas } = makeHarness();
-    const display = await run(byName(tools, "display_diagram"), {
+  test("canvas_create fills a template and canvas_get returns the same document", async () => {
+    const { tools } = makeHarness();
+    const created = await run(byName(tools, "canvas_create"), {
       template_id: "bcg_matrix",
       content: { stars: "Star product" },
       title: "BCG",
     });
-    expect(display.details!.ok).toBe(true);
-    expect(textOf(display)).toContain("Star product");
-    const projectId = (display.details!.project as { id: string }).id;
-    expect(canvas.projects.get(projectId)?.rendering_mode).toBe("diagram");
+    expect(created.isError).toBeUndefined();
+    const details = created.details as { canvas_id: string; revision: number };
+    expect(details.canvas_id).toMatch(/^cv_/);
+    expect(details.revision).toBe(1);
+    expect(textOf(created)).toContain(details.canvas_id);
 
-    const current = await run(byName(tools, "get_diagram"), { project_id: projectId });
-    expect(current.details!.ok).toBe(true);
-    expect(typeof current.details!.xml).toBe("string");
+    const current = await run(byName(tools, "canvas_get"), { canvas_id: details.canvas_id });
+    expect(current.isError).toBeUndefined();
+    const doc = JSON.parse(textOf(current)) as { nodes: { text: string }[] };
+    expect(doc.nodes.map((node) => node.text)).toContain("Star product");
 
-    const edited = await run(byName(tools, "edit_diagram"), {
-      project_id: projectId,
-      operations: [{
-        operation: "update",
-        cell_id: "5",
-        new_xml: '<mxCell id="5" value="New question" vertex="1" parent="1"><mxGeometry/></mxCell>',
-      }],
-    });
-    expect(edited.details!.ok).toBe(true);
-    expect(textOf(edited)).toContain("New question");
-
-    const deleted = await run(byName(tools, "edit_diagram"), {
-      project_id: projectId,
-      operations: [{ operation: "delete", cell_id: "5" }],
-    });
-    expect(deleted.details!.ok).toBe(true);
-    expect(textOf(deleted)).not.toContain('id="5"');
-
-    const missing = await run(byName(tools, "display_diagram"), { xml: '<mxCell id="2" ' });
+    const missing = await run(byName(tools, "canvas_get"), { canvas_id: "cv_missing" });
     expect(missing.isError).toBe(true);
-    const noContent = await run(byName(tools, "display_diagram"), { content: { stars: "x" } });
-    expect(textOf(noContent)).toBe('{"ok":false,"error":"template_id is required when using content mode"}');
-    const unknownProject = await run(byName(tools, "get_diagram"), { project_id: "none" });
-    expect(textOf(unknownProject)).toContain("Canvas project none not found");
+    expect(textOf(missing)).toContain("canvas not found");
+
+    const invalid = await run(byName(tools, "canvas_create"), {
+      nodes: [{ id: "same" }, { id: "same" }],
+    });
+    expect(invalid.isError).toBe(true);
+    expect(textOf(invalid)).toContain("duplicate node id");
+
+    const dangling = await run(byName(tools, "canvas_create"), {
+      nodes: [{ id: "a" }],
+      edges: [{ id: "e", from: "a", to: "missing" }],
+    });
+    expect(dangling.isError).toBe(true);
+    expect(textOf(dangling)).toContain("edge e references a missing node");
+
+    const cycle = await run(byName(tools, "canvas_create"), {
+      nodes: [{ id: "a", kind: "container", parent: "b" }, { id: "b", kind: "container", parent: "a" }],
+    });
+    expect(cycle.isError).toBe(true);
+    expect(textOf(cycle)).toContain("cycle");
+
+    const tooMany = await run(byName(tools, "canvas_create"), {
+      nodes: Array.from({ length: 501 }, (_, index) => ({ id: `n${index}` })),
+    });
+    expect(tooMany.isError).toBe(true);
+    expect(textOf(tooMany)).toContain("too many nodes (max 500)");
   });
 });
 

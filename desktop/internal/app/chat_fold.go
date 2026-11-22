@@ -25,7 +25,7 @@ type chatRow struct {
 // ask_user 是要回答的问题，也不折。思考在「展开」方式下留在原位，所以同样不折。
 func foldTool(m conversation.Message) bool {
 	t := m.Tool
-	return m.Role == "tool" && m.Done && t != nil && t.Ask == nil && len(t.Charts) == 0 && t.DashboardID == ""
+	return m.Role == "tool" && m.Done && t != nil && t.Ask == nil && len(t.Charts) == 0 && t.DashboardID == "" && t.Canvas == nil
 }
 
 func foldThought(m conversation.Message, ap prefs.Appearance) bool {

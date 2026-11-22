@@ -13,7 +13,7 @@ import chartRules from './prompt-text/chart-rules.txt' with { type: 'text' }
 import commandHints from './prompt-text/command-hints.json' with { type: 'json' }
 import coreRules from './prompt-text/core-rules.txt' with { type: 'text' }
 import dataRules from './prompt-text/data-rules.txt' with { type: 'text' }
-import diagramRules from './prompt-text/diagram-rules.txt' with { type: 'text' }
+import canvasRules from './prompt-text/canvas-rules.txt' with { type: 'text' }
 import hooksRules from './prompt-text/hooks-rules.txt' with { type: 'text' }
 import ingestRules from './prompt-text/ingest-rules.txt' with { type: 'text' }
 import knowledgeRules from './prompt-text/knowledge-rules.txt' with { type: 'text' }
@@ -39,7 +39,7 @@ export const BROWSER_RULES: string = browserRules
 export const INGEST_RULES: string = ingestRules
 export const MULTI_SOURCE_RULES: string = multiSourceRules
 export const UNNAMED_COLUMN_RULES: string = unnamedColumnRules
-export const DIAGRAM_RULES: string = diagramRules
+export const CANVAS_RULES: string = canvasRules
 /** Template with a single `{catalog}` placeholder (Python `str.format(catalog=...)`). */
 export const SKILL_CATALOG_RULES: string = skillCatalogRules
 
@@ -189,8 +189,8 @@ export function messageNeedsChartRules(message: string | null | undefined): bool
   return CHART_INTENT_RE.test(message ?? '')
 }
 
-/** Diagram rules attach only when the canvas skill is explicitly activated (message is ignored). */
-export function messageNeedsDiagramRules(_message: string | null | undefined, opts: { hasCanvasSkill?: boolean } = {}): boolean {
+/** Canvas rules attach only when the canvas skill is explicitly activated (message is ignored). */
+export function messageNeedsCanvasRules(_message: string | null | undefined, opts: { hasCanvasSkill?: boolean } = {}): boolean {
   return opts.hasCanvasSkill ?? false
 }
 
@@ -224,7 +224,7 @@ export interface PromptContext {
   readonly needsIngest: boolean
   readonly hasKnowledge: boolean
   readonly hasUnnamedColumns: boolean
-  readonly needsDiagram: boolean
+  readonly needsCanvas: boolean
   readonly skillCatalog: string
 }
 
@@ -243,7 +243,7 @@ const DEFAULT_PROMPT_CONTEXT: PromptContext = {
   needsIngest: false,
   hasKnowledge: false,
   hasUnnamedColumns: false,
-  needsDiagram: false,
+  needsCanvas: false,
   skillCatalog: '',
 }
 
@@ -266,7 +266,7 @@ export function getSystemPrompt(context: Partial<PromptContext> | null = null): 
   if (ctx.needsIngest) blocks.push(INGEST_RULES)
   if (ctx.sourceCount > 1) blocks.push(MULTI_SOURCE_RULES)
   if (ctx.hasUnnamedColumns) blocks.push(UNNAMED_COLUMN_RULES)
-  if (ctx.needsDiagram) blocks.push(DIAGRAM_RULES)
+  if (ctx.needsCanvas) blocks.push(CANVAS_RULES)
   // Replacer function: the catalog is inserted verbatim (no `$&`-style expansion).
   if (ctx.skillCatalog) blocks.push(SKILL_CATALOG_RULES.replace('{catalog}', () => ctx.skillCatalog))
   return blocks

@@ -3,11 +3,11 @@ name: swot-analysis
 description: SWOT 分析，从内部优势/劣势和外部机会/威胁四个维度评估企业或产品的战略态势（strategy 战略分析）
 icon: 🔲
 tags: [mode-business, strategy, visualization]
-allowedTools: [display_diagram, edit_diagram, get_diagram]
+allowedTools: [canvas_create, canvas_get]
 ---
 # SWOT 分析
 
-使用 `display_diagram` 的 **content-fill 模式** 生成标准 2x2 SWOT 四象限图。
+使用 `canvas_create` 的 **content-fill 模式** 生成标准 2x2 SWOT 四象限图。
 
 ## 何时使用
 
@@ -16,9 +16,9 @@ allowedTools: [display_diagram, edit_diagram, get_diagram]
 
 ## 工具调用（content-fill 模式）
 
-**必须使用 content-fill 模式，不要传 raw XML。**
+**必须使用 content-fill 模式，不要手写节点或 draw.io XML。**
 
-调用 `display_diagram` 时传以下参数：
+调用 `canvas_create` 时传以下参数：
 - `template_id`: `"swot_analysis"`
 - `title`: 分析标题
 - `content`: JSON 对象，4 个 key 对应 4 个象限

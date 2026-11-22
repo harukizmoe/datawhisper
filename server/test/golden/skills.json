@@ -114,9 +114,8 @@
     "description": "波士顿矩阵（BCG Matrix）分析，按市场增长率和相对市场份额将业务单元分为明星、问题、现金牛、瘦狗四类（portfolio 产品组合）",
     "icon": "📊",
     "allowed_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ],
     "tags": [
      "mode-business",
@@ -128,7 +127,6 @@
     "resources": [],
     "public": {
      "name": "bcg-matrix",
-     "display_name": "bcg-matrix",
      "description": "波士顿矩阵（BCG Matrix）分析，按市场增长率和相对市场份额将业务单元分为明星、问题、现金牛、瘦狗四类（portfolio 产品组合）",
      "icon": "📊",
      "source": "builtin",
@@ -136,11 +134,12 @@
       "mode-business",
       "strategy",
       "visualization"
-     ]
+     ],
+     "display_name": "bcg-matrix"
     },
-    "prompt_sha256": "ed37e741b923a70304869a7dc8c5d1a3b57e6178dff68ab5c98ca1159bc83ae2",
-    "prompt_chars": 1103,
-    "prompt_head": "# 波士顿矩阵分析\n\n使用 `display_diagram` 的 **content-fill 模式** 生成标准 2"
+    "prompt_sha256": "0aa3634c8dea8170f7ca3851010dae19a789dec5221fabe8eaba566ce4fa85a4",
+    "prompt_chars": 1127,
+    "prompt_head": "# 波士顿矩阵分析\n\n使用 `canvas_create` 的 **content-fill 模式** 生成标准 2x2"
    },
    {
     "name": "business-model-canvas",
@@ -148,9 +147,8 @@
     "description": "商业模式画布（BMC）分析，用 9 个模块拆解产品的客户、价值、渠道、收入和成本（business model 商业模式）",
     "icon": "🗺",
     "allowed_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ],
     "tags": [
      "mode-business",
@@ -161,18 +159,18 @@
     "resources": [],
     "public": {
      "name": "business-model-canvas",
-     "display_name": "business-model-canvas",
      "description": "商业模式画布（BMC）分析，用 9 个模块拆解产品的客户、价值、渠道、收入和成本（business model 商业模式）",
      "icon": "🗺",
      "source": "builtin",
      "tags": [
       "mode-business",
       "strategy"
-     ]
+     ],
+     "display_name": "business-model-canvas"
     },
-    "prompt_sha256": "e9353037d2ec84837ff3b12094de2001d1687e886a68244500a5a4d77b04c0c1",
-    "prompt_chars": 1739,
-    "prompt_head": "# 商业模式画布分析\n\n使用 `display_diagram` 的 **content-fill 模式** 生成标准 "
+    "prompt_sha256": "ff6fdf1d4612b3917fc2740d0f47688caabb1dd70275323c0236461de0c0144a",
+    "prompt_chars": 1763,
+    "prompt_head": "# 商业模式画布分析\n\n使用 `canvas_create` 的 **content-fill 模式** 生成标准 Os"
    },
    {
     "name": "chart",
@@ -846,9 +844,8 @@
     "description": "SWOT 分析，从内部优势/劣势和外部机会/威胁四个维度评估企业或产品的战略态势（strategy 战略分析）",
     "icon": "🔲",
     "allowed_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ],
     "tags": [
      "mode-business",
@@ -860,7 +857,6 @@
     "resources": [],
     "public": {
      "name": "swot-analysis",
-     "display_name": "swot-analysis",
      "description": "SWOT 分析，从内部优势/劣势和外部机会/威胁四个维度评估企业或产品的战略态势（strategy 战略分析）",
      "icon": "🔲",
      "source": "builtin",
@@ -868,11 +864,12 @@
       "mode-business",
       "strategy",
       "visualization"
-     ]
+     ],
+     "display_name": "swot-analysis"
     },
-    "prompt_sha256": "0c6ff111c7f0bc1b5a68a24f3493be15178b5649a3e9d819156524b12d73c410",
-    "prompt_chars": 1175,
-    "prompt_head": "# SWOT 分析\n\n使用 `display_diagram` 的 **content-fill 模式** 生成标准 2"
+    "prompt_sha256": "00da67bf849c41b307f206f9c4bf7d19142818585a4d9a9357f342239c2b6077",
+    "prompt_chars": 1179,
+    "prompt_head": "# SWOT 分析\n\n使用 `canvas_create` 的 **content-fill 模式** 生成标准 2x2"
    },
    {
     "name": "tree",
@@ -952,9 +949,8 @@
     "description": "Ad-Lib 价值主张速写，用一句填空句式把价值主张拆成六个可验证的组成部分（value prop 价值主张）",
     "icon": "💡",
     "allowed_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ],
     "tags": [
      "mode-business",
@@ -965,18 +961,18 @@
     "resources": [],
     "public": {
      "name": "value-proposition",
-     "display_name": "value-proposition",
      "description": "Ad-Lib 价值主张速写，用一句填空句式把价值主张拆成六个可验证的组成部分（value prop 价值主张）",
      "icon": "💡",
      "source": "builtin",
      "tags": [
       "mode-business",
       "strategy"
-     ]
+     ],
+     "display_name": "value-proposition"
     },
-    "prompt_sha256": "9a7bd65b24bf4255ff67185343f13cbb8e5874674b3e1e630a48b8b0d2654c86",
-    "prompt_chars": 2390,
-    "prompt_head": "# Ad-Lib 价值主张速写\n\n使用 `display_diagram` 的 **content-fill 模式** "
+    "prompt_sha256": "47413a8eb13f350f6b3604d91ea6116b5fce3f97667bed145e75bfafcd7b3efc",
+    "prompt_chars": 2414,
+    "prompt_head": "# Ad-Lib 价值主张速写\n\n使用 `canvas_create` 的 **content-fill 模式** 生成"
    },
    {
     "name": "var",
@@ -1115,22 +1111,22 @@
    {
     "name": "bcg-matrix",
     "request": "",
-    "sha256": "ed37e741b923a70304869a7dc8c5d1a3b57e6178dff68ab5c98ca1159bc83ae2"
+    "sha256": "0aa3634c8dea8170f7ca3851010dae19a789dec5221fabe8eaba566ce4fa85a4"
    },
    {
     "name": "bcg-matrix",
     "request": "按地区拆分销量",
-    "sha256": "0826b4952803bb96d68d827556d02fafe456e6cf213a177e4b961b8180f6bcc9"
+    "sha256": "a4bc077559f2afb0fa9d4b52c2860af5105e09a79a7094b86a3c23cade069069"
    },
    {
     "name": "business-model-canvas",
     "request": "",
-    "sha256": "e9353037d2ec84837ff3b12094de2001d1687e886a68244500a5a4d77b04c0c1"
+    "sha256": "ff6fdf1d4612b3917fc2740d0f47688caabb1dd70275323c0236461de0c0144a"
    },
    {
     "name": "business-model-canvas",
     "request": "按地区拆分销量",
-    "sha256": "cecf98473f12d64e69e1bbc509773d11b6851ad2d6c19d942ba71f1dbd4ea818"
+    "sha256": "aecb599b67edc555367245f184026c4db71dfb0385410b2698da690140be03b9"
    },
    {
     "name": "chart",
@@ -1315,12 +1311,12 @@
    {
     "name": "swot-analysis",
     "request": "",
-    "sha256": "0c6ff111c7f0bc1b5a68a24f3493be15178b5649a3e9d819156524b12d73c410"
+    "sha256": "00da67bf849c41b307f206f9c4bf7d19142818585a4d9a9357f342239c2b6077"
    },
    {
     "name": "swot-analysis",
     "request": "按地区拆分销量",
-    "sha256": "f3a2e883775a6f8aad14a2bac4153ce4ec36ba4d533ff487341689b10f7bdd2e"
+    "sha256": "8d4b33a200fc48657472b53c67238ef738e80344fdf59b09c024acc853f6e99e"
    },
    {
     "name": "tree",
@@ -1345,12 +1341,12 @@
    {
     "name": "value-proposition",
     "request": "",
-    "sha256": "9a7bd65b24bf4255ff67185343f13cbb8e5874674b3e1e630a48b8b0d2654c86"
+    "sha256": "47413a8eb13f350f6b3604d91ea6116b5fce3f97667bed145e75bfafcd7b3efc"
    },
    {
     "name": "value-proposition",
     "request": "按地区拆分销量",
-    "sha256": "0d66ea71c94bed79a2b55677427c5530219b11ba098b34f1b359554ef6aeffca"
+    "sha256": "fa45c8cd1b2970c9a61de4fe3937ffbe7f4b1a656c7a1ccc4ef588cc50c3deec"
    },
    {
     "name": "var",
@@ -1405,17 +1401,15 @@
    {
     "name": "bcg-matrix",
     "requested_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ]
    },
    {
     "name": "business-model-canvas",
     "requested_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ]
    },
    {
@@ -1589,9 +1583,8 @@
    {
     "name": "swot-analysis",
     "requested_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ]
    },
    {
@@ -1615,9 +1608,8 @@
    {
     "name": "value-proposition",
     "requested_tools": [
-     "display_diagram",
-     "edit_diagram",
-     "get_diagram"
+     "canvas_create",
+     "canvas_get"
     ]
    },
    {
@@ -8291,15 +8283,14 @@
   "create_analysis_table",
   "create_feishu_bitable",
   "delete_analysis_tables",
-  "display_diagram",
-  "edit_diagram",
+  "canvas_create",
   "export_excel",
   "export_report",
   "fetch_table",
   "generate_chart",
   "generate_dashboard",
   "generate_ppt",
-  "get_diagram",
+  "canvas_get",
   "get_schema",
   "get_table_detail",
   "list_feishu_bitable_tables",
