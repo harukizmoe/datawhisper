@@ -388,6 +388,20 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 		case "conversation.scopes":
 			respond(req.ID, map[string]any{"scopes": []any{}})
 		// 任务板：一项完成、一项进行中、一项待办。
+		// 画布：一个两节点、一条连线的只读文档。
+		case "canvas.list":
+			respond(req.ID, map[string]any{"canvases": []any{
+				map[string]any{
+					"id": "cv_1", "title": "Signup flow", "revision": 2, "template_id": "blank_canvas", "updated_at": "2026-11-22T00:00:00Z",
+					"nodes": []any{
+						map[string]any{"id": "a", "kind": "round", "x": 20.0, "y": 20.0, "w": 120.0, "h": 60.0, "text": "Start", "parent": "", "pinned": false, "style": map[string]any{"fill": "accent", "border": "accent", "text": "default"}},
+						map[string]any{"id": "b", "kind": "rect", "x": 220.0, "y": 20.0, "w": 120.0, "h": 60.0, "text": "Done", "parent": "", "pinned": false, "style": map[string]any{"fill": "default", "border": "default", "text": "default"}},
+					},
+					"edges": []any{
+						map[string]any{"id": "e", "from": "a", "to": "b", "route": "straight", "arrow": "end", "dashed": false, "label": "", "style": map[string]any{"fill": "default", "border": "default", "text": "default"}},
+					},
+				},
+			}})
 		case "tasks.list":
 			respond(req.ID, map[string]any{"tasks": []any{
 				map[string]any{"id": "t1", "title": "Profile the data", "assignee": "", "status": "completed"},

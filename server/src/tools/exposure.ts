@@ -82,7 +82,7 @@ export const FEISHU_TOOLS: ReadonlySet<string> = new Set([
   "update_feishu_bitable_record",
 ]);
 
-const DIAGRAM_TOOLS: ReadonlySet<string> = new Set(["display_diagram", "edit_diagram", "get_diagram"]);
+const CANVAS_TOOLS: ReadonlySet<string> = new Set(["canvas_create", "canvas_get"]);
 
 export function looksLikeWorkspaceFileReadRequest(query: string): boolean {
   const text = String(query ?? "");
@@ -141,16 +141,13 @@ export function discoverToolNamesForQuery(query: string): Set<string> {
   }
 
   if (!STRONG_DIAGRAM_RE.test(raw)) {
-    for (const name of DIAGRAM_TOOLS) discovered.delete(name);
-  } else if ([...DIAGRAM_TOOLS].some((name) => discovered.has(name))) {
-    for (const name of DIAGRAM_TOOLS) discovered.delete(name);
-    if (/(修改|编辑|调整|edit|update)/iu.test(raw)) {
-      discovered.add("get_diagram");
-      discovered.add("edit_diagram");
-    } else if (/(查看|读取|获取|view|get|read)/iu.test(raw)) {
-      discovered.add("get_diagram");
+    for (const name of CANVAS_TOOLS) discovered.delete(name);
+  } else if ([...CANVAS_TOOLS].some((name) => discovered.has(name))) {
+    for (const name of CANVAS_TOOLS) discovered.delete(name);
+    if (/(查看|读取|获取|view|get|read)/iu.test(raw) && !/(修改|编辑|调整|edit|update)/iu.test(raw)) {
+      discovered.add("canvas_get");
     } else {
-      discovered.add("display_diagram");
+      discovered.add("canvas_create");
     }
   }
 
@@ -356,9 +353,8 @@ const ALWAYS_AVAILABLE: ReadonlySet<string> = new Set([
   "set_ppt_color_scheme",
   "structured_output",
   "plan_complete",
-  "display_diagram",
-  "edit_diagram",
-  "get_diagram",
+  "canvas_create",
+  "canvas_get",
 ]);
 
 const INSPECT_TOOLS: ReadonlySet<string> = new Set([

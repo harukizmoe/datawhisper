@@ -151,6 +151,7 @@ beforeAll(async () => {
     tasks: createMemoryDocHost(initialTaskBoard()),
     teams: createMemoryDocHost(initialTeamStore()),
     plans: createMemoryDocHost(initialPlanStore()),
+    canvas: createMemoryDocHost({ canvases: [] }),
   };
   teamDocs = docs.teams;
   planDocs = docs.plans;

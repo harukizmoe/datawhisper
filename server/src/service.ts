@@ -40,6 +40,7 @@ import { createWorkflows, workflowsExtension, type Workflows } from "./workflows
 import { createAgentNodeExecutor } from "./workflows/agent-node.ts";
 import { createTeamDelegateService, teamDelegationGuard } from "./teams/delegate.ts";
 import { teamMethods } from "./ipc/teams.ts";
+import { canvasMethods } from "./ipc/canvas.ts";
 import { workflowMethods } from "./ipc/workflows.ts";
 import { createWorkflowCatalog, type WorkflowCatalog } from "./workflows/catalog.ts";
 import { ModelService } from "./models/service.ts";
@@ -80,6 +81,8 @@ export type Service = {
   readonly permissions: PermissionBroker;
   /** 团队的只读视图与委托取消（`teams.*`）。 */
   readonly teamMethods: Record<string, RpcMethod>;
+  /** 会话画布文档（`canvas.list`）。 */
+  readonly canvasMethods: Record<string, RpcMethod>;
   /** 工作流定义与启动（`workflow.definitions.*`、`workflow.start`）的 IPC 方法表。 */
   readonly workflowMethods: Record<string, RpcMethod>;
   /** 工作流目录：保存的定义与从定义启动运行。 */
@@ -294,6 +297,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
   const delegation = createTeamDelegateService({ harness, context, conversations });
   delegationPort.current = delegation;
   const teams = teamMethods({ harness, context, delegation });
+  const canvases = canvasMethods({ harness, context });
   registry.install(teamDelegationGuard());
   registry.install(jobsExtension(jobs));
   registry.install(workflowsExtension(workflows));
@@ -314,6 +318,7 @@ export async function startService(config: Config, options: ServiceOptions = {})
     sourceMethods: { ...sourceApis, ...permissionApi, ...workspaceTreeMethods({ workspaces: workspaceStore }) },
     permissions,
     teamMethods: teams,
+    canvasMethods: canvases,
     workflowMethods: workflowApi,
     workflowCatalog: catalog,
     mcp,

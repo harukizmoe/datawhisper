@@ -3,11 +3,11 @@ name: bcg-matrix
 description: 波士顿矩阵（BCG Matrix）分析，按市场增长率和相对市场份额将业务单元分为明星、问题、现金牛、瘦狗四类（portfolio 产品组合）
 icon: 📊
 tags: [mode-business, strategy, visualization]
-allowedTools: [display_diagram, edit_diagram, get_diagram]
+allowedTools: [canvas_create, canvas_get]
 ---
 # 波士顿矩阵分析
 
-使用 `display_diagram` 的 **content-fill 模式** 生成标准 2x2 BCG 矩阵。
+使用 `canvas_create` 的 **content-fill 模式** 生成标准 2x2 BCG 矩阵。
 
 ## 何时使用
 
@@ -16,9 +16,9 @@ allowedTools: [display_diagram, edit_diagram, get_diagram]
 
 ## 工具调用（content-fill 模式）
 
-**必须使用 content-fill 模式，不要传 raw XML。**
+**必须使用 content-fill 模式，不要手写节点或 draw.io XML。**
 
-调用 `display_diagram` 时传以下参数：
+调用 `canvas_create` 时传以下参数：
 - `template_id`: `"bcg_matrix"`
 - `title`: 矩阵标题
 - `content`: JSON 对象，4 个 key 对应 4 个象限
@@ -54,8 +54,8 @@ allowedTools: [display_diagram, edit_diagram, get_diagram]
 ## 修正矩阵
 
 如果内容需要更新：
-1. `get_diagram` — 获取当前图表
-2. `edit_diagram` — 通过 cell ID 局部更新
+1. `canvas_get` — 取回当前文档与 revision
+2. 当前版本不提供局部编辑；按同一模板重新调用 `canvas_create` 生成新画布
 
 ## 分析要点
 

@@ -86,6 +86,8 @@ type ToolCall struct {
 	Charts []Chart
 	// DashboardID 是工具新建的仪表盘 id（dashboard_id）；界面据此提供查看入口。
 	DashboardID string
+	// Canvas 是画布工具结果里的画布摘要；界面据此画卡片并打开弹窗。
+	Canvas *CanvasRef
 }
 
 // Usage 是一次模型回复的 token 用量与费用（pi-ai 的 Usage）。DurationMS 是这次回复从发出请求到结束的耗时
@@ -129,6 +131,40 @@ type AskRequest struct {
 	Question    string
 	Options     []string
 	MultiSelect bool
+}
+
+// CanvasStyle 是画布节点/连线的语义色角色；界面按当前主题解析成实际颜色。
+type CanvasStyle struct {
+	Fill, Border, Text string
+}
+
+// CanvasNode 是画布上的一个节点；坐标与尺寸使用画布文档坐标（DIP）。
+type CanvasNode struct {
+	ID, Kind, Text, Parent string
+	X, Y, W, H             float64
+	Pinned                 bool
+	Style                  CanvasStyle
+}
+
+// CanvasEdge 是两个节点之间的连线。
+type CanvasEdge struct {
+	ID, From, To, Route, Arrow, Label string
+	Dashed                            bool
+	Style                             CanvasStyle
+}
+
+// Canvas 是会话里的一张原生画布。
+type Canvas struct {
+	ID, Title, TemplateID, UpdatedAt string
+	Revision                         int
+	Nodes                            []CanvasNode
+	Edges                            []CanvasEdge
+}
+
+// CanvasRef 是工具结果里指向一张画布的摘要；界面用它画卡片并按 id 找完整文档。
+type CanvasRef struct {
+	ID, Title string
+	Revision  int
 }
 
 // State 是聊天视图会从 replica 读取的内容：不可变，可以安全地交给 UI 线程。
@@ -366,6 +402,21 @@ func askRequestOf(node any) *AskRequest {
 	return &AskRequest{Question: question, Options: options, MultiSelect: multi}
 }
 
+// canvasRefOf 读出画布工具结果里的摘要。
+func canvasRefOf(details any) *CanvasRef {
+	m, ok := details.(map[string]any)
+	if !ok {
+		return nil
+	}
+	id, _ := m["canvas_id"].(string)
+	if id == "" {
+		return nil
+	}
+	title, _ := m["title"].(string)
+	revision := int(numberOf(m["revision"]))
+	return &CanvasRef{ID: id, Title: title, Revision: revision}
+}
+
 // chartsOf 从工具结果的 details 里读出图表记录。每张图有 id、标题、类型，以及落盘后的
 // path（或旧消息里内联的 html）；两者都没有的记录跳过，界面不画空图。
 func chartsOf(details any) []Chart {
@@ -459,6 +510,7 @@ func mergeResult(out []Message, index map[string]int, callID, output string, dur
 	}
 	tool.Charts = chartsOf(details)
 	tool.DashboardID = dashboardIDOf(details)
+	tool.Canvas = canvasRefOf(details)
 	return true
 }
 
@@ -560,7 +612,7 @@ func (r *Replica) messages() []Message {
 			if failed {
 				status = "error"
 			}
-			call := &ToolCall{CallID: callID, Name: name, Output: output, DurationMS: int64(duration), Status: status, Ask: askRequestOf(details), Charts: chartsOf(details), DashboardID: dashboardIDOf(details)}
+			call := &ToolCall{CallID: callID, Name: name, Output: output, DurationMS: int64(duration), Status: status, Ask: askRequestOf(details), Charts: chartsOf(details), DashboardID: dashboardIDOf(details), Canvas: canvasRefOf(details)}
 			out = append(out, Message{Key: "e" + id, Role: "tool", Text: name, Done: true, Tool: call})
 			if callID != "" {
 				index[callID] = len(out) - 1
@@ -586,7 +638,7 @@ func (r *Replica) messages() []Message {
 			}
 			continue
 		}
-		call := &ToolCall{CallID: callID, Name: name, Output: output, Status: "running", Ask: askRequestOf(field(slot, "details"))}
+		call := &ToolCall{CallID: callID, Name: name, Output: output, Status: "running", Ask: askRequestOf(field(slot, "details")), Canvas: canvasRefOf(field(slot, "details"))}
 		out = append(out, Message{Key: "t" + callID, Role: "tool", Text: name, Done: false, Tool: call})
 	}
 	// 流式回复：先是正在生成的思考，再是正文。key 与提交后的行一致（"g<task id>" 与 "g<task id>.th"）。

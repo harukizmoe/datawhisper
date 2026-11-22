@@ -13,6 +13,7 @@ import type { Jobs } from "../jobs/service.ts";
 import type { Workflows } from "../workflows/service.ts";
 import { appError, INVALID_PARAMS, RpcError, invalidParams } from "./errors.ts";
 import { isLang, setLanguage } from "../i18n.ts";
+import { canvasMethods } from "./canvas.ts";
 import { libraryMethods } from "./library.ts";
 import { mcpMethods } from "./mcp.ts";
 import { orchestrationMethods } from "./orchestration.ts";
@@ -41,6 +42,8 @@ export type MethodDeps = {
   sourceMethods?: Record<string, RpcMethod>;
   /** 团队方法表（`teams.*`）；省略时不注册。 */
   teamMethods?: Record<string, RpcMethod>;
+  /** 画布文档方法表（`canvas.*`）；省略时不注册。 */
+  canvasMethods?: Record<string, RpcMethod>;
   /** 工作流定义与启动方法表（`workflow.definitions.*`、`workflow.start`）；省略时不注册。 */
   workflowMethods?: Record<string, RpcMethod>;
   /** MCP 运行时；省略时 `mcp.*` 方法不注册（进程内测试的轻量装配）。 */
@@ -165,6 +168,7 @@ export function createMethods(deps: MethodDeps): Record<string, RpcMethod> {
     ...(feishu === undefined ? {} : feishuMethods(feishu, harness, context)),
     ...(deps.sourceMethods ?? {}),
     ...(deps.teamMethods ?? {}),
+    ...(deps.canvasMethods ?? {}),
     ...(deps.workflowMethods ?? {}),
     ...(deps.mcp === undefined ? {} : mcpMethods(deps.mcp)),
     // 会话库/知识库/记忆/技能/hooks/仪表盘：compute 侧的数据根必须与这里一致，

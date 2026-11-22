@@ -4,7 +4,7 @@ import {
   getSystemPrompt,
   messageNeedsBrowserRules,
   messageNeedsChartRules,
-  messageNeedsDiagramRules,
+  messageNeedsCanvasRules,
   messageNeedsHooksRules,
   messageNeedsIngestRules,
   messageNeedsWorkspaceRules,
@@ -39,7 +39,7 @@ const CHART_TOOLS = ["select_chart", "generate_chart"];
 const HOOKS_TOOLS = ["browse_webpage", "configure_hooks"];
 const BROWSER_TOOLS = ["browser_search", "browser_navigate", "browser_click", "browser_fill", "browser_extract", "browser_screenshot"];
 const INGEST_TOOLS = ["fetch_table", "browser_extract_tables"];
-const DIAGRAM_TOOLS = ["display_diagram", "edit_diagram"];
+const CANVAS_TOOLS = ["canvas_create", "canvas_get"];
 
 /** 旧实现里 `_PROPOSE_CMDS`：这些命令本身就要走“先提案再生成”的流程。 */
 const PROPOSE_COMMANDS: ReadonlySet<string> = new Set(["ppt", "ppt_revise", "export", "excel_revise", "report", "report_revise"]);
@@ -68,7 +68,7 @@ export function promptContextFor(turn: TurnContext, offeredTools: readonly strin
     // 旧实现无条件挂知识库提示块（只声明能力，不读内容）：知识内容通过检索结果进入用户消息。
     hasKnowledge: true,
     hasUnnamedColumns: turn.hasUnnamedColumns,
-    needsDiagram: hasAny(offered, DIAGRAM_TOOLS) || messageNeedsDiagramRules(message, { hasCanvasSkill: CANVAS_SKILLS.has(turn.activation.name) }),
+    needsCanvas: hasAny(offered, CANVAS_TOOLS) || messageNeedsCanvasRules(message, { hasCanvasSkill: CANVAS_SKILLS.has(turn.activation.name) }),
     skillCatalog: turn.skillCatalog,
   };
 }

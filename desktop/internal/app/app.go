@@ -258,6 +258,7 @@ func (a *app) onChat(st conversation.State) {
 	a.recordTTFT(st)
 	a.syncFromState(switched)
 	a.syncTasks()
+	a.syncCanvases()
 	if finished {
 		a.refreshConversations() // 它的最新条目变了（服务端据此更新兜底标题）
 	}

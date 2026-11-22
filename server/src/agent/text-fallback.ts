@@ -2,13 +2,13 @@
  * 文本形式的工具调用（移植自 agent/agent.py 的 `_parse_text_fallback_tool_calls`）。
  *
  * 有些模型会在消息文本中写出伪 XML 工具调用，而不是原生工具调用 —— 例如 MiniMax-M3
- * 写出的 `<display_diagram><parameter name="xml">…</parameter></display_diagram>`。当 stop-reason
+ * 写出的 `<canvas_create><parameter name="title">…</parameter></canvas_create>`。当 stop-reason
  * 回复里带有下文所列工具的这类块时，该块会被还原成真正的调用，从而实际执行。
  * 只识别这些名字，因此正文中无关的 XML 不会被误读为调用；不含任何 `<parameter>` 条目的
  * 块会被忽略（一个无参数的调用不可能是模型的本意）。
  */
 
-const TEXT_FALLBACK_TOOL_NAMES: ReadonlySet<string> = new Set(["display_diagram", "edit_diagram", "append_diagram"]);
+const TEXT_FALLBACK_TOOL_NAMES: ReadonlySet<string> = new Set(["canvas_create", "canvas_get"]);
 
 const PARAM_TAG_RE = /<parameter\s+name\s*=\s*"([^"]+)"\s*>([\s\S]*?)<\/parameter>/gi;
 const TOOL_BLOCK_RE = /<([a-zA-Z_][a-zA-Z0-9_]*)\b[^>]*>([\s\S]*?)<\/\1>/gi;

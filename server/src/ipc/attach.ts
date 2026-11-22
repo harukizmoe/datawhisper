@@ -52,6 +52,7 @@ export function attachIpc(service: Service, { input, output }: IpcStreams, optio
       jobs: service.jobs,
       workflows: service.workflows,
       teamMethods: service.teamMethods,
+      canvasMethods: service.canvasMethods,
       workflowMethods: service.workflowMethods,
       mcp: service.mcp,
     }),

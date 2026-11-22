@@ -57,9 +57,9 @@ describe("confirmation = explicit_request", () => {
   });
 
   test("本轮由 skill 启动时，技能名本身算明确请求", () => {
-    // display_diagram 的 skills 含 business-model-canvas（旧 `_guard_token` 同款规则）。
-    expect(check("display_diagram", { token: "business-model-canvas", message: "" })).toBeUndefined();
-    expect(check("display_diagram", { token: "ppt", message: "" })).toContain("[SYSTEM BLOCK]");
+    // canvas_create 的 skills 含 business-model-canvas（旧 `_guard_token` 同款规则）。
+    expect(check("canvas_create", { token: "business-model-canvas", message: "" })).toBeUndefined();
+    expect(check("canvas_create", { token: "ppt", message: "" })).toContain("[SYSTEM BLOCK]");
   });
 });
 

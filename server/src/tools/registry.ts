@@ -800,45 +800,32 @@ const SPECS: readonly ToolSpec[] = [
     requiresRuntime: true,
     requiresWorkspace: true,
   }),
-  // ── Diagram / Canvas tools ──
-  // Exposed via skills, but also discoverable so the agent can use them when the user mentions
-  // canvas/diagram keywords without manually selecting a skill.
+  // ── Canvas tools ──
+  // Exposed via canvas skills, but also discoverable so the agent can use them when the user
+  // mentions canvas/diagram keywords without manually selecting a skill.
   new ToolSpec({
-    name: "display_diagram",
+    name: "canvas_create",
     category: "output",
     defaultExposed: false,
     discoverable: true,
     skills: ["business-model-canvas", "bcg-matrix", "swot-analysis", "value-proposition"],
     discoveryKeywords: [
       "商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas",
-      "diagram", "四象限", "框架图", "战略图",
+      "diagram", "流程图", "四象限", "框架图", "战略图", "画一张图", "draw a diagram",
     ],
     discoverySummary:
-      "Render a draw.io diagram (business model canvas, BCG, SWOT, value proposition) to the canvas drawer.",
+      "Create a native canvas (business model canvas, BCG, SWOT, value proposition, or a custom node/edge diagram).",
     concurrencySafe: false,
     confirmation: "explicit_request",
   }),
   new ToolSpec({
-    name: "edit_diagram",
-    category: "write",
-    defaultExposed: false,
-    discoverable: true,
-    skills: ["business-model-canvas", "bcg-matrix", "swot-analysis", "value-proposition"],
-    discoveryKeywords: [
-      "商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas",
-      "diagram", "四象限", "框架图", "修改画布", "编辑图形",
-    ],
-    discoverySummary: "Edit an existing draw.io diagram in the canvas drawer.",
-    confirmation: "explicit_request",
-  }),
-  new ToolSpec({
-    name: "get_diagram",
+    name: "canvas_get",
     category: "read",
     defaultExposed: false,
     discoverable: true,
     skills: ["business-model-canvas", "bcg-matrix", "swot-analysis", "value-proposition"],
-    discoveryKeywords: ["商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas", "diagram", "查看图"],
-    discoverySummary: "Retrieve the current draw.io XML from the canvas drawer.",
+    discoveryKeywords: ["商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas", "diagram", "查看图", "读取画布"],
+    discoverySummary: "Read a native canvas document and its revision.",
   }),
   new ToolSpec({
     name: "memory_read",

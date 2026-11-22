@@ -3,11 +3,11 @@ name: business-model-canvas
 description: 商业模式画布（BMC）分析，用 9 个模块拆解产品的客户、价值、渠道、收入和成本（business model 商业模式）
 icon: 🗺
 tags: [mode-business, strategy]
-allowedTools: [display_diagram, edit_diagram, get_diagram]
+allowedTools: [canvas_create, canvas_get]
 ---
 # 商业模式画布分析
 
-使用 `display_diagram` 的 **content-fill 模式** 生成标准 Osterwalder 9 宫格商业模式画布。
+使用 `canvas_create` 的 **content-fill 模式** 生成标准 Osterwalder 9 宫格商业模式画布。
 
 ## 何时使用
 
@@ -16,9 +16,9 @@ allowedTools: [display_diagram, edit_diagram, get_diagram]
 
 ## 工具调用（content-fill 模式）
 
-**必须使用 content-fill 模式，不要传 raw XML。**
+**必须使用 content-fill 模式，不要手写节点或 draw.io XML。**
 
-调用 `display_diagram` 时传以下参数：
+调用 `canvas_create` 时传以下参数：
 - `template_id`: `"business_model_canvas"`
 - `title`: 画布标题（如"宁德时代 商业模式画布"）
 - `content`: JSON 对象，9 个 key 对应 9 个模块
@@ -64,8 +64,8 @@ allowedTools: [display_diagram, edit_diagram, get_diagram]
 ## 修正画布
 
 如果画布内容需要更新：
-1. `get_diagram` — 获取当前图表
-2. `edit_diagram` — 通过 cell ID 局部更新
+1. `canvas_get` — 取回当前文档与 revision
+2. 当前版本不提供局部编辑；按同一模板重新调用 `canvas_create` 生成新画布
 
 ## 分析要点
 

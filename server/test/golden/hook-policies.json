@@ -13,10 +13,10 @@
    "calls": []
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">&lt;mxfile&gt;x&lt;/mxfile&gt;</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">&lt;mxfile&gt;x&lt;/mxfile&gt;</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "&lt;mxfile&gt;x&lt;/mxfile&gt;"
      }
@@ -24,10 +24,10 @@
    ]
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">a</parameter><parameter name=\"title\">T</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">a</parameter><parameter name=\"title\">T</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "a",
       "title": "T"
@@ -36,11 +36,11 @@
    ]
   },
   {
-   "content": "<display_diagram></display_diagram>",
+   "content": "<canvas_create></canvas_create>",
    "calls": []
   },
   {
-   "content": "<display_diagram>no parameters here</display_diagram>",
+   "content": "<canvas_create>no parameters here</canvas_create>",
    "calls": []
   },
   {
@@ -48,10 +48,10 @@
    "calls": []
   },
   {
-   "content": "<edit_diagram><parameter name=\"id\">3</parameter></edit_diagram>",
+   "content": "<canvas_create><parameter name=\"id\">3</parameter></canvas_create>",
    "calls": [
     [
-     "edit_diagram",
+     "canvas_create",
      {
       "id": "3"
      }
@@ -59,10 +59,10 @@
    ]
   },
   {
-   "content": "<append_diagram><parameter name=\"xml\">y</parameter></append_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">y</parameter></canvas_create>",
    "calls": [
     [
-     "append_diagram",
+     "canvas_create",
      {
       "xml": "y"
      }
@@ -74,16 +74,16 @@
    "calls": []
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">m1</parameter></display_diagram><edit_diagram><parameter name=\"id\">9</parameter></edit_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">m1</parameter></canvas_create><canvas_create><parameter name=\"id\">9</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "m1"
      }
     ],
     [
-     "edit_diagram",
+     "canvas_create",
      {
       "id": "9"
      }
@@ -91,10 +91,10 @@
    ]
   },
   {
-   "content": "<display_diagram\n  id=\"1\"><parameter name=\"xml\">newline attr</parameter></display_diagram>",
+   "content": "<canvas_create\n  id=\"1\"><parameter name=\"xml\">newline attr</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "newline attr"
      }
@@ -102,10 +102,10 @@
    ]
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">multi\nline\nvalue</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">multi\nline\nvalue</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "multi\nline\nvalue"
      }
@@ -113,18 +113,18 @@
    ]
   },
   {
-   "content": "<display_diagram><parameter name='xml'>single quotes</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name='xml'>single quotes</parameter></canvas_create>",
    "calls": []
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">unclosed</display_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">unclosed</canvas_create>",
    "calls": []
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">a</parameter><parameter name=\"xml\">b</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">a</parameter><parameter name=\"xml\">b</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "b"
      }
@@ -132,10 +132,10 @@
    ]
   },
   {
-   "content": "<display_diagram><parameter name=\"中文\">值</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name=\"中文\">值</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "中文": "值"
      }
@@ -143,10 +143,10 @@
    ]
   },
   {
-   "content": "<display_diagram>pre<parameter name=\"xml\">x</parameter>post</display_diagram>",
+   "content": "<canvas_create>pre<parameter name=\"xml\">x</parameter>post</canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "x"
      }
@@ -154,10 +154,10 @@
    ]
   },
   {
-   "content": "<display_diagram><display_diagram><parameter name=\"xml\">nested</parameter></display_diagram></display_diagram>",
+   "content": "<canvas_create><canvas_create><parameter name=\"xml\">nested</parameter></canvas_create></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "nested"
      }
@@ -165,10 +165,10 @@
    ]
   },
   {
-   "content": "text before <display_diagram><parameter name=\"xml\">v</parameter></display_diagram> text after",
+   "content": "text before <canvas_create><parameter name=\"xml\">v</parameter></canvas_create> text after",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "v"
      }
@@ -176,10 +176,10 @@
    ]
   },
   {
-   "content": "<display_diagram><parameter name=\"xml\">a &amp; b &lt;c&gt;</parameter></display_diagram>",
+   "content": "<canvas_create><parameter name=\"xml\">a &amp; b &lt;c&gt;</parameter></canvas_create>",
    "calls": [
     [
-     "display_diagram",
+     "canvas_create",
      {
       "xml": "a &amp; b &lt;c&gt;"
      }
@@ -187,11 +187,11 @@
    ]
   },
   {
-   "content": "<display_diagram_name><parameter name=\"xml\">x</parameter></display_diagram_name>",
+   "content": "<canvas_create_name><parameter name=\"xml\">x</parameter></canvas_create_name>",
    "calls": []
   },
   {
-   "content": "<display_diagram><parameter name = \"xml\" >spaced</parameter ></display_diagram>",
+   "content": "<canvas_create><parameter name = \"xml\" >spaced</parameter ></canvas_create>",
    "calls": []
   }
  ],

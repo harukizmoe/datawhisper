@@ -12,7 +12,7 @@ import {
   COMMAND_HINTS,
   CORE_RULES,
   DATA_RULES,
-  DIAGRAM_RULES,
+  CANVAS_RULES,
   HOOKS_RULES,
   INGEST_RULES,
   KNOWLEDGE_RULES,
@@ -27,7 +27,7 @@ import {
   getSystemPrompt,
   messageNeedsBrowserRules,
   messageNeedsChartRules,
-  messageNeedsDiagramRules,
+  messageNeedsCanvasRules,
   messageNeedsHooksRules,
   messageNeedsIngestRules,
   messageNeedsKnowledge,
@@ -45,7 +45,7 @@ restoreLanguage(() => setLanguage('en'))
 describe('static blocks', () => {
   const ts: Record<string, string> = {
     CORE_RULES, DATA_RULES, WORKSPACE_RULES, KNOWLEDGE_RULES, CHART_RULES, OUTPUT_RULES, TEAMS_RULES,
-    HOOKS_RULES, BROWSER_RULES, INGEST_RULES, MULTI_SOURCE_RULES, UNNAMED_COLUMN_RULES, DIAGRAM_RULES,
+    HOOKS_RULES, BROWSER_RULES, INGEST_RULES, MULTI_SOURCE_RULES, UNNAMED_COLUMN_RULES, CANVAS_RULES,
     SKILL_CATALOG_RULES, _ANALYZE_GUIDE: ANALYZE_GUIDE, _CHART_IDS: CHART_IDS,
   }
   test('block count matches Python', () => {
@@ -78,8 +78,8 @@ describe('intent matchers', () => {
     ['browser', messageNeedsBrowserRules],
     ['ingest', messageNeedsIngestRules],
     ['chart', messageNeedsChartRules],
-    ['diagram', (m: string) => messageNeedsDiagramRules(m)],
-    ['diagramWithCanvas', (m: string) => messageNeedsDiagramRules(m, { hasCanvasSkill: true })],
+    ['diagram', (m: string) => messageNeedsCanvasRules(m)],
+    ['diagramWithCanvas', (m: string) => messageNeedsCanvasRules(m, { hasCanvasSkill: true })],
     ['knowledge', messageNeedsKnowledge],
   ] as const
   for (const [name, fn] of matchers) {

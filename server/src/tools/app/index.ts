@@ -1,7 +1,7 @@
 /**
  * A 类（纯 TS）工具装配点。
  *
- * `createAppTools(deps)` 返回 41 个 pi-durable 工具；它们只依赖注入的端口：
+ * `createAppTools(deps)` 返回 48 个 pi-durable 工具；它们只依赖注入的端口：
  * 工作区文件系统、pi-durable 文档、记忆/技能目录、画布、外溢结果、MCP 目录、fetch 与飞书机器人。
  */
 
@@ -16,12 +16,12 @@ import { createArtifactTool } from "./artifacts.ts";
 import { createMemoryTools } from "./memory.ts";
 import { createWebTools } from "./web.ts";
 import { createIngestTools } from "./ingest.ts";
-import { createDiagramTools } from "./diagram/tools.ts";
+import { createCanvasTools } from "./canvas/tools.ts";
 import { createFeishuTools } from "../../feishu/tools.ts";
 import { defaultFeishuService } from "../../feishu/service.ts";
 import { createWorkflowTools } from "./workflows.ts";
 
-/** 46 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
+/** 48 个 A 类工具（本批全部实现；`load_feishu_bitable` 是 compute 侧的 B 类工具，不在这里）。 */
 export const APP_TOOL_NAMES = [
   "workspace_status",
   "workspace_glob",
@@ -59,9 +59,8 @@ export const APP_TOOL_NAMES = [
   "read_tool_result",
   "search_mcp_tools",
   "plan_complete",
-  "display_diagram",
-  "edit_diagram",
-  "get_diagram",
+  "canvas_create",
+  "canvas_get",
   "memory_read",
   "list_feishu_bitable_tables",
   "create_feishu_bitable",
@@ -79,9 +78,8 @@ export type AppToolName = (typeof APP_TOOL_NAMES)[number];
 /**
  * 新建工具壳；壳本身无状态，可以跨会话共用（状态在注入的端口里）。
  *
- * 画图三件套依赖画布存储端口：没有端口就根本不创建，而不是创建出来、让模型调用后只得到
- * 「Canvas storage is not available」。宿主目前没有注入画布存储（新的原生画布见
- * `docs/refactor/native-canvas-prd.md`），所以实际暴露的是 38 个。
+ * 画布工具依赖会话文档宿主；没有宿主时工具仍会注册，但调用会返回明确的存储不可用错误，
+ * 由会话服务在装配时注入文档端口（见 `assemble.ts`）。
  */
 export function createAppTools(deps: AppToolDeps): AppTool[] {
   const effective: AppToolDeps = deps.colorScheme === undefined
@@ -99,7 +97,7 @@ export function createAppTools(deps: AppToolDeps): AppTool[] {
     ...createMemoryTools(effective),
     ...createWebTools(effective),
     ...createIngestTools(effective),
-    ...(effective.canvas === undefined ? [] : createDiagramTools(effective)),
+    ...createCanvasTools(effective),
     ...createFeishuTools({ connections: () => feishu.connections() }),
     ...createWorkflowTools(effective),
   ];
@@ -119,5 +117,5 @@ export * from "./interaction.ts";
 export * from "./artifacts.ts";
 export * from "./memory.ts";
 export * from "./web.ts";
-export * from "./diagram/canvas.ts";
-export * from "./diagram/tools.ts";
+export * from "./canvas/document.ts";
+export * from "./canvas/tools.ts";

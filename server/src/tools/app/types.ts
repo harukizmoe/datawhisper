@@ -22,7 +22,7 @@ import type { WorkspaceFs } from "./workspace/fs.ts";
 import type { PlanStoreDoc, PlanUsage, TaskBoardDoc, TeamMember, TeamStoreDoc } from "./docs.ts";
 import type { MemoryDirs } from "../../agent/memory.ts";
 import type { SkillDirs } from "../../agent/skills.ts";
-import type { CanvasStore } from "./diagram/canvas.ts";
+import type { CanvasDoc } from "./canvas/document.ts";
 import type { ToolResultArtifactSource } from "./artifacts.ts";
 import type { McpCatalogReader } from "./mcp.ts";
 import type { FeishuService } from "../../feishu/service.ts";
@@ -62,10 +62,6 @@ export type AppToolDeps = {
   readonly skillDirs?: SkillDirs;
   /** 已注册工具名集合，供技能激活时校验 allowed_tools；省略时取内置注册表。 */
   readonly knownToolNames?: ReadonlySet<string>;
-  /** draw.io 画布存储；省略时 diagram 工具返回存储不可用。 */
-  readonly canvas?: CanvasStore;
-  /** 本仓库自带的 draw.io 形状库目录（`server/assets/shape_libs`）。 */
-  readonly shapeLibsDir?: string;
   /** 外溢工具结果的读取源（`tr_<id>`）。 */
   readonly artifacts?: ToolResultArtifactSource;
   /** 团队成员委托的执行端口；省略时 `team_delegate` 返回能力不可用。 */
@@ -175,11 +171,12 @@ export type AppDocHost<T extends JsonObject = JsonObject> = {
   update<R>(mutate: (draft: T) => R | Promise<R>): Promise<R>;
 };
 
-/** 三份文档各自的宿主端口。 */
+/** 会话文档各自的宿主端口。 */
 export type AppDocHosts = {
   readonly tasks: AppDocHost<TaskBoardDoc>;
   readonly teams: AppDocHost<TeamStoreDoc>;
   readonly plans: AppDocHost<PlanStoreDoc>;
+  readonly canvas: AppDocHost<CanvasDoc>;
 };
 
 /** `defineDoc` 的 conversation 文档 token；由 `docs.ts` 定义。 */

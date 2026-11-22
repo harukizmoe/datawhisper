@@ -133,13 +133,13 @@ describe("数字溯源核对", () => {
 describe("文本形式工具调用", () => {
   test("正文里写伪 XML 调用时提醒改用原生工具调用，且只提醒一次", async () => {
     const { service, stub } = await start({
-      tools: [tool("display_diagram", "已显示")],
-      answerText: '<display_diagram><parameter name="xml">&lt;mxfile/&gt;</parameter></display_diagram>',
+      tools: [tool("canvas_create", "已创建")],
+      answerText: '<canvas_create><parameter name="title">图</parameter></canvas_create>',
     });
     await turn(service, "画个图");
     const notes = stub.log.filter((r) => r.lastUser.startsWith("[SYSTEM NOTE]"));
     expect(notes).toHaveLength(1);
-    expect(notes[0]!.lastUser).toContain("display_diagram");
+    expect(notes[0]!.lastUser).toContain("canvas_create");
     expect(notes[0]!.lastUser).toContain("原生工具调用");
   }, 30_000);
 });
