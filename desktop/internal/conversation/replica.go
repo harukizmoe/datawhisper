@@ -142,6 +142,7 @@ type CanvasStyle struct {
 type CanvasNode struct {
 	ID, Kind, Text, Parent string
 	X, Y, W, H             float64
+	FontSize               float64
 	Pinned                 bool
 	Style                  CanvasStyle
 }

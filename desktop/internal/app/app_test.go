@@ -90,6 +90,52 @@ func expectTexts(t *testing.T, tt *ui.Tester, present []string, absent []string)
 // fakeService 提供视图测试需要的那部分服务：会话 1 和 2（2 里有一条用户消息和一条回复）、一个由
 // conversation.create 创建的会话 3（它的 submit 没有可用模型），以及没有模型可用的列表。每次 ready 都新建
 // 一对内存管道，模拟服务的一次启动。
+func defaultFakeCanvas() map[string]any {
+	return map[string]any{
+		"id": "cv_1", "title": "Signup flow", "revision": 2, "template_id": "blank_canvas", "updated_at": "2026-11-22T00:00:00Z",
+		"nodes": []any{
+			map[string]any{"id": "a", "kind": "round", "x": 20.0, "y": 20.0, "w": 120.0, "h": 60.0, "text": "Start", "parent": "", "pinned": false, "fontSize": 14.0, "style": map[string]any{"fill": "accent", "border": "accent", "text": "default"}},
+			map[string]any{"id": "b", "kind": "rect", "x": 220.0, "y": 20.0, "w": 120.0, "h": 60.0, "text": "Done", "parent": "", "pinned": false, "fontSize": 14.0, "style": map[string]any{"fill": "default", "border": "default", "text": "default"}},
+		},
+		"edges": []any{
+			map[string]any{"id": "e", "from": "a", "to": "b", "route": "straight", "arrow": "end", "dashed": false, "label": "", "style": map[string]any{"fill": "default", "border": "default", "text": "default"}},
+		},
+	}
+}
+
+func numberFromAny(value any) float64 {
+	switch n := value.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	}
+	return 0
+}
+
+func applyFakeCanvasOps(doc map[string]any, raw any) {
+	ops, _ := raw.([]any)
+	nodes, _ := doc["nodes"].([]any)
+	for _, item := range ops {
+		op, _ := item.(map[string]any)
+		if op["op"] != "update_node" {
+			continue
+		}
+		id, _ := op["id"].(string)
+		patch, _ := op["patch"].(map[string]any)
+		for _, entry := range nodes {
+			node, _ := entry.(map[string]any)
+			if node["id"] == id {
+				for key, value := range patch {
+					node[key] = value
+				}
+			}
+		}
+	}
+	doc["nodes"] = nodes
+	doc["revision"] = numberFromAny(doc["revision"]) + 1
+}
+
 type fakeService struct {
 	t       *testing.T
 	mu      sync.Mutex
@@ -97,6 +143,9 @@ type fakeService struct {
 	calls   []fakeCall
 	// workflows 不为空时，假服务实现 workflow.* 方法；为空时它们是 method not found（界面隐藏那一节）。
 	workflows *fakeWorkflows
+	// canvas 是画布测试的可变文档；conflict 为 true 时 canvas.apply 返回版本冲突。
+	canvas   map[string]any
+	conflict bool
 }
 
 // fakeCall 是一次假服务收到的请求，测试据此断言界面发出的参数。
@@ -388,20 +437,32 @@ func (f *fakeService) serve(in io.Reader, out io.Writer) {
 		case "conversation.scopes":
 			respond(req.ID, map[string]any{"scopes": []any{}})
 		// 任务板：一项完成、一项进行中、一项待办。
-		// 画布：一个两节点、一条连线的只读文档。
+		// 画布：默认一个两节点、一条连线的文档；测试可以替换 f.canvas。
 		case "canvas.list":
-			respond(req.ID, map[string]any{"canvases": []any{
-				map[string]any{
-					"id": "cv_1", "title": "Signup flow", "revision": 2, "template_id": "blank_canvas", "updated_at": "2026-11-22T00:00:00Z",
-					"nodes": []any{
-						map[string]any{"id": "a", "kind": "round", "x": 20.0, "y": 20.0, "w": 120.0, "h": 60.0, "text": "Start", "parent": "", "pinned": false, "style": map[string]any{"fill": "accent", "border": "accent", "text": "default"}},
-						map[string]any{"id": "b", "kind": "rect", "x": 220.0, "y": 20.0, "w": 120.0, "h": 60.0, "text": "Done", "parent": "", "pinned": false, "style": map[string]any{"fill": "default", "border": "default", "text": "default"}},
-					},
-					"edges": []any{
-						map[string]any{"id": "e", "from": "a", "to": "b", "route": "straight", "arrow": "end", "dashed": false, "label": "", "style": map[string]any{"fill": "default", "border": "default", "text": "default"}},
-					},
-				},
-			}})
+			f.mu.Lock()
+			doc := f.canvas
+			if doc == nil {
+				doc = defaultFakeCanvas()
+			}
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"canvases": []any{doc}})
+		case "canvas.apply":
+			f.mu.Lock()
+			if f.conflict {
+				revision := int(numberFromAny(f.canvas["revision"]))
+				f.mu.Unlock()
+				write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{
+					"code": -32000, "message": "canvas revision conflict", "data": map[string]any{"kind": "canvas_conflict", "revision": revision},
+				}})
+				continue
+			}
+			if f.canvas == nil {
+				f.canvas = defaultFakeCanvas()
+			}
+			applyFakeCanvasOps(f.canvas, params["ops"])
+			doc := f.canvas
+			f.mu.Unlock()
+			respond(req.ID, map[string]any{"canvas": doc})
 		case "tasks.list":
 			respond(req.ID, map[string]any{"tasks": []any{
 				map[string]any{"id": "t1", "title": "Profile the data", "assignee": "", "status": "completed"},

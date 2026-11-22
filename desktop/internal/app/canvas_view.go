@@ -28,6 +28,10 @@ func finishedCanvasCalls(messages []conversation.Message) int {
 // syncCanvases 在聊天状态更新后检查画布是否该重新读取。切换会话时 canvasCalls 复位成 -1，
 // 因此即使还没跑过画布工具，也会读取一次已有的画布。
 func (a *app) syncCanvases() {
+	// 本地有未提交的手势或文字时，订阅/工具结果不能覆盖正在编辑的视图。
+	if a.cv.canvasPending || a.cv.canvasDrag != nil || a.cv.canvasEditing != "" {
+		return
+	}
 	if n := finishedCanvasCalls(a.chat.Messages); n != a.cv.canvasCalls {
 		a.cv.canvasCalls = n
 		a.loadCanvases()
@@ -49,24 +53,7 @@ func (a *app) loadCanvases() {
 			}
 			canvases := make(map[string]conversation.Canvas, len(list))
 			for _, item := range list {
-				canvas := conversation.Canvas{
-					ID: item.ID, Title: item.Title, TemplateID: item.TemplateID, UpdatedAt: item.UpdatedAt,
-					Revision: item.Revision,
-				}
-				for _, node := range item.Nodes {
-					canvas.Nodes = append(canvas.Nodes, conversation.CanvasNode{
-						ID: node.ID, Kind: node.Kind, Text: node.Text, Parent: node.Parent,
-						X: node.X, Y: node.Y, W: node.W, H: node.H, Pinned: node.Pinned,
-						Style: conversation.CanvasStyle{Fill: node.Style.Fill, Border: node.Style.Border, Text: node.Style.Text},
-					})
-				}
-				for _, edge := range item.Edges {
-					canvas.Edges = append(canvas.Edges, conversation.CanvasEdge{
-						ID: edge.ID, From: edge.From, To: edge.To, Route: edge.Route, Arrow: edge.Arrow,
-						Dashed: edge.Dashed, Label: edge.Label,
-						Style: conversation.CanvasStyle{Fill: edge.Style.Fill, Border: edge.Style.Border, Text: edge.Style.Text},
-					})
-				}
+				canvas := canvasFromService(item)
 				canvases[canvas.ID] = canvas
 			}
 			a.cv.canvases = canvases
@@ -78,6 +65,8 @@ func (a *app) loadCanvases() {
 func (a *app) openCanvas(ref conversation.CanvasRef) {
 	a.cv.canvasID = ref.ID
 	a.cv.canvasOpen = true
+	a.cv.canvasSel, a.cv.canvasEditing, a.cv.canvasDraft = "", "", ""
+	a.cv.canvasDrag, a.cv.canvasErr = nil, ""
 }
 
 // canvasCard 是对话工具结果下方的画布卡片：标题、缩略图与打开入口。
@@ -120,7 +109,7 @@ func (a *app) canvasCard(c *ui.Context, ref conversation.CanvasRef) {
 	})
 }
 
-// canvasModal 是全屏只读画布：标题、元信息与按内容缩放的画布。
+// canvasModal 是全屏画布：标题、样式条、可编辑的绘制区与错误提示。
 func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 	if !a.cv.canvasOpen {
 		return
@@ -136,7 +125,7 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 	}
 	height := clampF(a.contentWidth()*0.55, 420, 760)
 	ui.Modal(c, &a.cv.canvasOpen, func() {
-		ui.Column(c).Width(width).Gap(10).Children(func() {
+		ui.Column(c).Width(width).Gap(8).Children(func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, icons.Chart).TextColor(t.Accent)
 				ui.Text(c, title).Bold().SingleLine().Grow(1).MinWidth(0).Tooltip(title)
@@ -145,7 +134,14 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 					a.cv.canvasOpen = false
 				}
 			})
-			body := ui.Column(c).Height(height).Clip().Background(t.Background).BorderWidth(1).BorderColor(t.Border)
+			if a.cv.canvasErr != "" {
+				ui.Text(c, a.cv.canvasErr).FontSize(a.fs(textCaption)).TextColor(t.Danger)
+			}
+			a.canvasStyleBar(c, t)
+			body := ui.Column(c).Height(height).Clip().Background(t.Background).BorderWidth(1).BorderColor(t.Border).Label(a.tr("canvas.surface")).Focusable().FocusRing(false)
+			if a.cv.canvasEditing == "" {
+				body.Focus()
+			}
 			switch {
 			case !ok:
 				body.Children(func() {
@@ -159,47 +155,39 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 				})
 			default:
 				body.Draw(func(p *ui.Painter, r ui.Rect) {
-					drawCanvas(p, r, canvas, t, 24)
+					geom := canvasGeometry(r, canvas, 24)
+					if a.cv.canvasDrag != nil && a.cv.canvasGeom.ok {
+						geom = a.cv.canvasGeom
+					}
+					a.cv.canvasGeom = geom
+					drawCanvasScene(p, canvas, t, geom, a.cv.canvasSel)
 				})
+				body.HandleInput(a.canvasInput)
+				if a.cv.canvasEditing != "" {
+					a.canvasTextOverlay(c, t)
+				}
 			}
 		})
 	})
 }
 
-// drawCanvas 把文档按内容边界等比缩放后画进 r。
+// drawCanvas 把文档按内容边界等比缩放后画进 r（缩略图用）。
 func drawCanvas(p *ui.Painter, r ui.Rect, canvas conversation.Canvas, t *ui.Theme, padding float32) {
-	if len(canvas.Nodes) == 0 {
+	drawCanvasScene(p, canvas, t, canvasGeometry(r, canvas, padding), "")
+}
+
+// drawCanvasScene 用给定的几何画连线与节点；选中框与手柄单独画在最上层。
+func drawCanvasScene(p *ui.Painter, canvas conversation.Canvas, t *ui.Theme, g canvasGeom, selected string) {
+	if !g.ok {
 		return
-	}
-	minX, minY := math.Inf(1), math.Inf(1)
-	maxX, maxY := math.Inf(-1), math.Inf(-1)
-	for _, node := range canvas.Nodes {
-		minX = math.Min(minX, node.X)
-		minY = math.Min(minY, node.Y)
-		maxX = math.Max(maxX, node.X+node.W)
-		maxY = math.Max(maxY, node.Y+node.H)
-	}
-	if !isFiniteRect(minX, minY, maxX, maxY) || maxX <= minX || maxY <= minY {
-		return
-	}
-	scale := math.Min(
-		float64(r.W-2*padding)/math.Max(1, maxX-minX),
-		float64(r.H-2*padding)/math.Max(1, maxY-minY),
-	)
-	if scale <= 0 || math.IsInf(scale, 0) || math.IsNaN(scale) {
-		return
-	}
-	originX := r.X + padding + float32((float64(r.W-2*padding)-(maxX-minX)*scale)/2)
-	originY := r.Y + padding + float32((float64(r.H-2*padding)-(maxY-minY)*scale)/2)
-	at := func(x, y float64) (float32, float32) {
-		return originX + float32((x-minX)*scale), originY + float32((y-minY)*scale)
-	}
-	center := func(node conversation.CanvasNode) (float32, float32) {
-		return at(node.X+node.W/2, node.Y+node.H/2)
 	}
 	byID := make(map[string]conversation.CanvasNode, len(canvas.Nodes))
 	for _, node := range canvas.Nodes {
 		byID[node.ID] = node
+	}
+	center := func(node conversation.CanvasNode) (float32, float32) {
+		rect := g.nodeRects[node.ID]
+		return rect.X + rect.W/2, rect.Y + rect.H/2
 	}
 	// 先画连线，节点覆盖在端点上。
 	for _, edge := range canvas.Edges {
@@ -210,39 +198,118 @@ func drawCanvas(p *ui.Painter, r ui.Rect, canvas conversation.Canvas, t *ui.Them
 		}
 		x0, y0 := center(from)
 		x1, y1 := center(to)
-		p.Line(x0, y0, x1, y1, 1.2, t.TextMuted)
-		if edge.Label != "" && float32(scale) > 0.45 {
-			p.Text((x0+x1)/2, (y0+y1)/2-4, edge.Label, 11, t.TextMuted)
+		width := float32(1.2)
+		color := t.TextMuted
+		if edge.Style.Border != "" && edge.Style.Border != "default" {
+			color = roleColor(edge.Style.Border, t)
+			width = 1.6
+		}
+		p.Line(x0, y0, x1, y1, width, color)
+		if edge.Label != "" && g.scale > 0.45 {
+			p.Text((x0+x1)/2, (y0+y1)/2-4, edge.Label, clampF(11*g.scale, 8, 13), t.TextMuted)
 		}
 	}
 	for _, node := range canvas.Nodes {
-		x, y := at(node.X, node.Y)
-		w, h := float32(node.W)*float32(scale), float32(node.H)*float32(scale)
-		if w < 2 || h < 2 {
+		rect, ok := g.nodeRects[node.ID]
+		if !ok || rect.W < 2 || rect.H < 2 {
 			continue
 		}
 		fill, border := canvasColors(node.Style, t)
 		switch node.Kind {
 		case "ellipse":
-			p.Fill(ui.Rect{X: x, Y: y, W: w, H: h}, fill, minF(w, h)/2)
-			p.Stroke(ui.Rect{X: x, Y: y, W: w, H: h}, border, minF(w, h)/2, 1)
+			p.Fill(rect, fill, minF(rect.W, rect.H)/2)
+			p.Stroke(rect, border, minF(rect.W, rect.H)/2, 1)
 		case "diamond":
 			var path ui.Path
-			path.MoveTo(x+w/2, y).LineTo(x+w, y+h/2).LineTo(x+w/2, y+h).LineTo(x, y+h/2).Close()
+			path.MoveTo(rect.X+rect.W/2, rect.Y).LineTo(rect.X+rect.W, rect.Y+rect.H/2).LineTo(rect.X+rect.W/2, rect.Y+rect.H).LineTo(rect.X, rect.Y+rect.H/2).Close()
 			p.FillPath(&path, fill)
 			p.StrokePath(&path, 1, border)
 		default:
-			radius := radiusCard * float32(scale)
+			radius := radiusCard * g.scale
 			if node.Kind == "rect" {
 				radius = 2
 			}
-			p.Fill(ui.Rect{X: x, Y: y, W: w, H: h}, fill, radius)
-			p.Stroke(ui.Rect{X: x, Y: y, W: w, H: h}, border, radius, 1)
+			p.Fill(rect, fill, radius)
+			p.Stroke(rect, border, radius, 1)
 		}
-		if node.Text != "" && float32(scale) > 0.35 {
-			size := clampF(13*float32(scale), 8, 15)
-			p.Text(x+6*float32(scale), y+size+6*float32(scale), truncateText(node.Text, w, size), size, textColor(node.Style, t))
+		if node.Text != "" && g.scale > 0.35 {
+			drawCanvasNodeText(p, rect, node, g.scale, t)
 		}
+	}
+	if selected != "" {
+		if rect, ok := g.nodeRects[selected]; ok {
+			drawCanvasSelection(p, rect, t)
+		}
+	}
+}
+
+func drawCanvasNodeText(p *ui.Painter, rect ui.Rect, node conversation.CanvasNode, scale float32, t *ui.Theme) {
+	size := float32(node.FontSize)
+	if size <= 0 {
+		size = 14
+	}
+	size = clampF(size*scale, 6, 24)
+	lineHeight := size * 1.3
+	x := rect.X + 7*scale
+	y := rect.Y + size + 6*scale
+	lines := wrapCanvasText(node.Text, rect.W-14*scale, size)
+	for _, line := range lines {
+		if y > rect.Y+rect.H-size/2 {
+			break
+		}
+		p.Text(x, y, line, size, textColor(node.Style, t))
+		y += lineHeight
+	}
+}
+
+// wrapCanvasText 按字号粗略断行；CJK 字符按一个字号宽，其余按半宽。
+func wrapCanvasText(text string, width, size float32) []string {
+	if width <= 0 || size <= 0 {
+		return nil
+	}
+	var out []string
+	for _, raw := range strings.Split(text, "\n") {
+		line, used := "", float32(0)
+		for _, r := range raw {
+			advance := size * 0.55
+			if r > 0x2e80 {
+				advance = size
+			}
+			if used+advance > width && line != "" {
+				out = append(out, line)
+				line, used = "", 0
+			}
+			line += string(r)
+			used += advance
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func drawCanvasSelection(p *ui.Painter, rect ui.Rect, t *ui.Theme) {
+	p.Stroke(rect, t.Accent, 2, 1.5)
+	handleFill := t.Background
+	for _, handle := range handleRects(rect) {
+		p.Fill(handle, handleFill, 0)
+		p.Stroke(handle, t.Accent, 0, 1)
+	}
+}
+
+func roleColor(role string, t *ui.Theme) ui.Color {
+	switch role {
+	case "accent":
+		return t.Accent
+	case "success":
+		return t.Success
+	case "warning":
+		return t.Warning
+	case "danger":
+		return t.Danger
+	case "muted":
+		return t.TextMuted
+	default:
+		return t.Border
 	}
 }
 

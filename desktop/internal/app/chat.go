@@ -54,6 +54,17 @@ type chatView struct {
 	// canvases 是本会话的画布文档，按 id 索引；canvasCalls 记录已完成的画布工具数，用于重新读取。
 	canvases    map[string]conversation.Canvas
 	canvasCalls int
+	// 画布编辑状态：当前选中节点、文字编辑、指针手势与最近一次绘制几何。
+	canvasSel     string
+	canvasEditing string
+	canvasDraft   string
+	canvasDrag    *canvasDrag
+	canvasGeom    canvasGeom
+	canvasErr     string
+	canvasPending bool
+	// 撤销/重做按画布保存；只存在内存里，切换画布保留、重启不保留。
+	canvasUndo map[string][]canvasHistory
+	canvasRedo map[string][]canvasHistory
 
 	// 斜杠命令目录（command.list）。
 	commands []service.Command
@@ -147,6 +158,9 @@ func (v *chatView) resetConversation() {
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
 	v.canvasOpen, v.canvasID = false, ""
 	v.canvases, v.canvasCalls = nil, -1
+	v.canvasSel, v.canvasEditing, v.canvasDraft = "", "", ""
+	v.canvasDrag, v.canvasGeom, v.canvasErr, v.canvasPending = nil, canvasGeom{}, "", false
+	v.canvasUndo, v.canvasRedo = nil, nil
 	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0
 	v.composerSeen, v.wantFocus, v.blurSince, v.menuOpen = false, false, time.Time{}, false
 	v.ttftStart, v.ttft, v.ttftSeen = time.Time{}, 0, nil

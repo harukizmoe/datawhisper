@@ -14,6 +14,8 @@ export const CANVAS_LIMITS = {
   text: 2000,
   title: 120,
   identifier: 64,
+  fontMin: 8,
+  fontMax: 48,
 } as const;
 
 export const CANVAS_NODE_KINDS = ["rect", "round", "ellipse", "diamond", "text", "note", "container"] as const;
@@ -45,6 +47,7 @@ export type CanvasNode = {
   parent: string;
   pinned: boolean;
   style: CanvasStyle;
+  fontSize: number;
 };
 
 export type CanvasEdge = {
@@ -123,6 +126,7 @@ export function normalizeNode(input: CanvasNodeInput, index: number): CanvasNode
     parent: typeof input.parent === "string" ? input.parent : "",
     pinned: input.pinned === true,
     style: { fill: role(style.fill), border: role(style.border), text: role(style.text) },
+    fontSize: Math.min(CANVAS_LIMITS.fontMax, Math.max(CANVAS_LIMITS.fontMin, finite(input.fontSize, 14))),
   };
 }
 
@@ -179,6 +183,9 @@ export function validateCanvas(canvas: CanvasRecord): string | null {
     if (![node.x, node.y, node.w, node.h].every(Number.isFinite)) return `node ${node.id} has a non-finite position`;
     if (node.w < 20 || node.h < 20) return `node ${node.id} is too small`;
     if (node.text.length > CANVAS_LIMITS.text) return `node ${node.id} text is too long`;
+    if (!Number.isFinite(node.fontSize) || node.fontSize < CANVAS_LIMITS.fontMin || node.fontSize > CANVAS_LIMITS.fontMax) {
+      return `node ${node.id} has an invalid font size`;
+    }
     for (const roleName of [node.style.fill, node.style.border, node.style.text]) {
       if (!CANVAS_ROLES.includes(roleName)) return `node ${node.id} has an invalid style role`;
     }
