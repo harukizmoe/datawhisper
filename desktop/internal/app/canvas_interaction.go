@@ -1,11 +1,12 @@
 package app
 
 // 画布编辑的几何、手势与持久化。绘制区只负责显示；这里把指针位置映射回文档坐标，
-// 每次手势结束才提交一次 update_node，拖动过程只改本地副本。
+// 每次手势结束才提交一次批量操作，拖动过程只改本地副本。
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -27,19 +28,29 @@ type canvasGeom struct {
 }
 
 type canvasDrag struct {
-	kind   string // move / resize
+	kind   string // move / resize / marquee
 	handle string // nw, n, ne, e, se, s, sw, w
-	id     string
-	before conversation.CanvasNode
+	ids    []string
+	before map[string]conversation.CanvasNode
 	startX float32
 	startY float32
 	moved  bool
 }
 
-type canvasHistory struct {
-	id     string
+type canvasNodeChange struct {
 	before conversation.CanvasNode
 	after  conversation.CanvasNode
+}
+
+type canvasHistory struct {
+	changes []canvasNodeChange
+}
+
+// canvasClipboard 是应用内剪贴板；粘贴在目标画布上重新生成 id，所以可以跨画布。
+type canvasClipboard struct {
+	nodes  []conversation.CanvasNode
+	edges  []conversation.CanvasEdge
+	pastes int
 }
 
 func canvasGeometry(r ui.Rect, canvas conversation.Canvas, padding float32) canvasGeom {
@@ -100,6 +111,10 @@ func pointInRect(r ui.Rect, x, y float32) bool {
 	return x >= r.X && x <= r.X+r.W && y >= r.Y && y <= r.Y+r.H
 }
 
+func rectsIntersect(a, b ui.Rect) bool {
+	return a.X < b.X+b.W && a.X+a.W > b.X && a.Y < b.Y+b.H && a.Y+a.H > b.Y
+}
+
 // handleRects 返回八个缩放手柄；只有单选时可用。
 func handleRects(r ui.Rect) map[string]ui.Rect {
 	const size float32 = 8
@@ -132,23 +147,61 @@ func snap(value float64, enabled bool) float64 {
 	return math.Round(value/8) * 8
 }
 
-func clamped(value, low, high float64) float64 {
-	if value < low {
-		return low
+func (a *app) isSelected(id string) bool {
+	return a.cv.canvasSel != nil && a.cv.canvasSel[id]
+}
+
+func (a *app) selectOnly(id string) {
+	a.cv.canvasSel = map[string]bool{id: true}
+}
+
+func (a *app) toggleSelected(id string) {
+	if a.cv.canvasSel == nil {
+		a.cv.canvasSel = map[string]bool{}
 	}
-	if value > high {
-		return high
+	if a.cv.canvasSel[id] {
+		delete(a.cv.canvasSel, id)
+	} else {
+		a.cv.canvasSel[id] = true
 	}
-	return value
+}
+
+// selectedIDs 按文档顺序返回选中节点，保证批量操作与历史记录稳定。
+func (a *app) selectedIDs() []string {
+	canvas, ok := a.cv.canvases[a.cv.canvasID]
+	if !ok {
+		return nil
+	}
+	var ids []string
+	for _, node := range canvas.Nodes {
+		if a.isSelected(node.ID) {
+			ids = append(ids, node.ID)
+		}
+	}
+	return ids
+}
+
+func (a *app) selectedNodes() []conversation.CanvasNode {
+	canvas, ok := a.cv.canvases[a.cv.canvasID]
+	if !ok {
+		return nil
+	}
+	var nodes []conversation.CanvasNode
+	for _, node := range canvas.Nodes {
+		if a.isSelected(node.ID) {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes
 }
 
 func (a *app) selectedCanvas() (conversation.Canvas, conversation.CanvasNode, bool) {
 	canvas, ok := a.cv.canvases[a.cv.canvasID]
-	if !ok {
+	if !ok || len(a.cv.canvasSel) != 1 {
 		return conversation.Canvas{}, conversation.CanvasNode{}, false
 	}
 	for _, node := range canvas.Nodes {
-		if node.ID == a.cv.canvasSel {
+		if a.isSelected(node.ID) {
 			return canvas, node, true
 		}
 	}
@@ -181,10 +234,7 @@ func (a *app) commitCanvasEdit() {
 		after := node
 		after.Text = text
 		after.H = math.Max(node.H, float64(canvasTextHeight(text, node.W, node.FontSize)))
-		a.updateCanvasNode(node, after, func(canvasID string) {
-			a.pushCanvasHistory(canvasID, canvasHistory{id: node.ID, before: node, after: after}, false)
-			delete(a.cv.canvasRedo, canvasID)
-		})
+		a.commitCanvasNode(node, after)
 	}
 	a.cancelCanvasEdit()
 }
@@ -215,11 +265,24 @@ func canvasTextHeight(text string, width, fontSize float64) float32 {
 }
 
 func canvasNodePatch(node conversation.CanvasNode) map[string]any {
+	return canvasNodeObject(node)
+}
+
+func canvasNodeObject(node conversation.CanvasNode) map[string]any {
 	return map[string]any{
+		"id": node.ID, "kind": node.Kind,
 		"x": node.X, "y": node.Y, "w": node.W, "h": node.H,
 		"text": node.Text, "parent": node.Parent, "pinned": node.Pinned,
 		"fontSize": node.FontSize,
 		"style":    map[string]any{"fill": node.Style.Fill, "border": node.Style.Border, "text": node.Style.Text},
+	}
+}
+
+func canvasEdgeObject(edge conversation.CanvasEdge) map[string]any {
+	return map[string]any{
+		"id": edge.ID, "from": edge.From, "to": edge.To,
+		"route": edge.Route, "arrow": edge.Arrow, "dashed": edge.Dashed, "label": edge.Label,
+		"style": map[string]any{"fill": edge.Style.Fill, "border": edge.Style.Border, "text": edge.Style.Text},
 	}
 }
 
@@ -238,47 +301,83 @@ func (a *app) setCanvasNodeLocal(id string, node conversation.CanvasNode) {
 	}
 }
 
-// updateCanvasNode 乐观更新并提交一次；成功后替换为服务端返回的文档，失败时回滚。
-func (a *app) updateCanvasNode(before, after conversation.CanvasNode, record func(canvasID string)) {
-	canvas, ok := a.cv.canvases[a.cv.canvasID]
-	if !ok || a.cv.canvasPending {
-		return
+func (a *app) setCanvasNodesLocal(changes []canvasNodeChange, before bool) {
+	for _, change := range changes {
+		if before {
+			a.setCanvasNodeLocal(change.before.ID, change.before)
+		} else {
+			a.setCanvasNodeLocal(change.after.ID, change.after)
+		}
 	}
-	a.setCanvasNodeLocal(after.ID, after)
-	a.saveCanvasNode(canvas.ID, canvas.Revision, before, after, record)
 }
 
-func (a *app) saveCanvasNode(canvasID string, baseRevision int, before, after conversation.CanvasNode, record func(canvasID string)) {
+func (a *app) nodeUpdateOps(changes []canvasNodeChange) []map[string]any {
+	ops := make([]map[string]any, 0, len(changes))
+	for _, change := range changes {
+		ops = append(ops, map[string]any{"op": "update_node", "id": change.after.ID, "patch": canvasNodePatch(change.after)})
+	}
+	return ops
+}
+
+// updateCanvasNodes 乐观更新并提交一批 update_node；成功后替换为服务端文档，失败回滚。
+func (a *app) updateCanvasNodes(changes []canvasNodeChange, record func(canvasID string)) {
+	canvas, ok := a.cv.canvases[a.cv.canvasID]
+	if !ok || len(changes) == 0 || a.cv.canvasPending {
+		return
+	}
+	a.setCanvasNodesLocal(changes, false)
+	a.saveCanvasOps(canvas.ID, canvas.Revision, a.nodeUpdateOps(changes), func(canvasID string) {
+		if record != nil {
+			record(canvasID)
+		}
+	}, func() { a.setCanvasNodesLocal(changes, true) })
+}
+
+func (a *app) updateCanvasNode(before, after conversation.CanvasNode, record func(canvasID string)) {
+	a.updateCanvasNodes([]canvasNodeChange{{before: before, after: after}}, record)
+}
+
+func (a *app) commitCanvasNode(before, after conversation.CanvasNode) {
+	a.updateCanvasNode(before, after, func(canvasID string) {
+		a.pushCanvasHistory(canvasID, canvasHistory{changes: []canvasNodeChange{{before: before, after: after}}}, false)
+		delete(a.cv.canvasRedo, canvasID)
+	})
+}
+
+// saveCanvasOps 提交一批操作；onFailure 把本地乐观修改恢复，冲突时重新读取服务端快照。
+func (a *app) saveCanvasOps(canvasID string, baseRevision int, ops []map[string]any, onSuccess func(canvasID string), onFailure func()) {
 	client, conv := a.client, a.conv
 	if client == nil || conv == 0 {
-		a.setCanvasNodeLocal(before.ID, before)
+		if onFailure != nil {
+			onFailure()
+		}
 		return
 	}
 	a.cv.canvasPending, a.cv.canvasErr = true, ""
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		updated, err := client.ApplyCanvas(ctx, conv, canvasID, baseRevision, []map[string]any{
-			{"op": "update_node", "id": after.ID, "patch": canvasNodePatch(after)},
-		})
+		updated, err := client.ApplyCanvas(ctx, conv, canvasID, baseRevision, ops)
 		a.post(func() {
 			if client != a.client || a.conv != conv {
 				return
 			}
 			a.cv.canvasPending = false
 			if err != nil {
-				a.setCanvasNodeLocal(before.ID, before)
+				if onFailure != nil {
+					onFailure()
+				}
 				if errors.Is(err, service.ErrCanvasConflict) {
 					a.cv.canvasErr = a.tr("canvas.conflict")
-					a.loadCanvases() // 服务端快照覆盖本地视图
+					a.loadCanvases()
 				} else {
 					a.cv.canvasErr = a.tr("canvas.saveFailed")
 				}
 				return
 			}
 			a.cv.canvasErr = ""
-			if record != nil {
-				record(canvasID)
+			if onSuccess != nil {
+				onSuccess(canvasID)
 			}
 			a.mergeCanvas(updated)
 		})
@@ -293,21 +392,17 @@ func (a *app) mergeCanvas(updated service.Canvas) {
 	a.cv.canvases[updated.ID] = canvasFromService(updated)
 }
 
-// pushCanvasHistory 在提交成功后记一步；撤销/重做只保留当前会话内存。
 func (a *app) pushCanvasHistory(canvasID string, entry canvasHistory, redo bool) {
 	if a.cv.canvasUndo == nil {
 		a.cv.canvasUndo, a.cv.canvasRedo = map[string][]canvasHistory{}, map[string][]canvasHistory{}
 	}
+	target := &a.cv.canvasUndo
 	if redo {
-		a.cv.canvasRedo[canvasID] = append(a.cv.canvasRedo[canvasID], entry)
-		if len(a.cv.canvasRedo[canvasID]) > 50 {
-			a.cv.canvasRedo[canvasID] = a.cv.canvasRedo[canvasID][1:]
-		}
-		return
+		target = &a.cv.canvasRedo
 	}
-	a.cv.canvasUndo[canvasID] = append(a.cv.canvasUndo[canvasID], entry)
-	if len(a.cv.canvasUndo[canvasID]) > 50 {
-		a.cv.canvasUndo[canvasID] = a.cv.canvasUndo[canvasID][1:]
+	(*target)[canvasID] = append((*target)[canvasID], entry)
+	if len((*target)[canvasID]) > 50 {
+		(*target)[canvasID] = (*target)[canvasID][1:]
 	}
 }
 
@@ -318,12 +413,19 @@ func (a *app) undoCanvas() {
 		return
 	}
 	entry := stack[len(stack)-1]
-	a.setCanvasNodeLocal(entry.id, entry.before)
-	a.saveCanvasNode(canvasID, a.cv.canvases[canvasID].Revision, entry.after, entry.before, func(savedID string) {
+	reverse := make([]canvasNodeChange, 0, len(entry.changes))
+	for _, change := range entry.changes {
+		reverse = append(reverse, canvasNodeChange{before: change.after, after: change.before})
+	}
+	a.setCanvasNodesLocal(reverse, false)
+	a.cv.canvasSel = map[string]bool{}
+	for _, change := range entry.changes {
+		a.cv.canvasSel[change.after.ID] = true
+	}
+	a.saveCanvasOps(canvasID, a.cv.canvases[canvasID].Revision, a.nodeUpdateOps(reverse), func(savedID string) {
 		a.cv.canvasUndo[savedID] = stack[:len(stack)-1]
 		a.pushCanvasHistory(savedID, entry, true)
-		a.cv.canvasSel = entry.id
-	})
+	}, func() { a.setCanvasNodesLocal(reverse, true) })
 }
 
 func (a *app) redoCanvas() {
@@ -333,11 +435,256 @@ func (a *app) redoCanvas() {
 		return
 	}
 	entry := stack[len(stack)-1]
-	a.setCanvasNodeLocal(entry.id, entry.after)
-	a.saveCanvasNode(canvasID, a.cv.canvases[canvasID].Revision, entry.before, entry.after, func(savedID string) {
+	a.setCanvasNodesLocal(entry.changes, false)
+	a.cv.canvasSel = map[string]bool{}
+	for _, change := range entry.changes {
+		a.cv.canvasSel[change.after.ID] = true
+	}
+	a.saveCanvasOps(canvasID, a.cv.canvases[canvasID].Revision, a.nodeUpdateOps(entry.changes), func(savedID string) {
 		a.cv.canvasRedo[savedID] = stack[:len(stack)-1]
 		a.pushCanvasHistory(savedID, entry, false)
-		a.cv.canvasSel = entry.id
+	}, func() { a.setCanvasNodesLocal(entry.changes, true) })
+}
+
+// copyCanvasSelection 把选中节点与两端都在选区内的连线放进应用内剪贴板。
+func (a *app) copyCanvasSelection() {
+	canvas, ok := a.cv.canvases[a.cv.canvasID]
+	if !ok {
+		return
+	}
+	ids := a.selectedIDs()
+	if len(ids) == 0 {
+		return
+	}
+	selected := map[string]bool{}
+	clip := &canvasClipboard{}
+	for _, node := range canvas.Nodes {
+		if a.isSelected(node.ID) {
+			selected[node.ID] = true
+			clip.nodes = append(clip.nodes, node)
+		}
+	}
+	for _, edge := range canvas.Edges {
+		if selected[edge.From] && selected[edge.To] {
+			clip.edges = append(clip.edges, edge)
+		}
+	}
+	if len(clip.nodes) > 0 {
+		a.cv.canvasClipboard = clip
+	}
+}
+
+func (a *app) pasteCanvasClipboard() {
+	clip := a.cv.canvasClipboard
+	canvas, ok := a.cv.canvases[a.cv.canvasID]
+	if clip == nil || len(clip.nodes) == 0 || !ok || a.cv.canvasPending {
+		return
+	}
+	clip.pastes++
+	offset := float64(16 * clip.pastes)
+	suffix := time.Now().UnixNano()
+	used := map[string]bool{}
+	for _, node := range canvas.Nodes {
+		used[node.ID] = true
+	}
+	remap := map[string]string{}
+	for i, node := range clip.nodes {
+		id := fmt.Sprintf("n_%d_%d", suffix, i)
+		for used[id] {
+			suffix++
+			id = fmt.Sprintf("n_%d_%d", suffix, i)
+		}
+		used[id] = true
+		remap[node.ID] = id
+	}
+	var newNodes []conversation.CanvasNode
+	ops := make([]map[string]any, 0, len(clip.nodes)+len(clip.edges))
+	for _, node := range clip.nodes {
+		copy := node
+		copy.ID = remap[node.ID]
+		copy.X += offset
+		copy.Y += offset
+		if node.Parent != "" {
+			copy.Parent = remap[node.Parent]
+		} else {
+			copy.Parent = ""
+		}
+		newNodes = append(newNodes, copy)
+		ops = append(ops, map[string]any{"op": "add_node", "node": canvasNodeObject(copy)})
+	}
+	var newEdges []conversation.CanvasEdge
+	edgeIDs := map[string]bool{}
+	for _, edge := range canvas.Edges {
+		edgeIDs[edge.ID] = true
+	}
+	for i, edge := range clip.edges {
+		id := fmt.Sprintf("e_%d_%d", suffix, i)
+		for edgeIDs[id] {
+			suffix++
+			id = fmt.Sprintf("e_%d_%d", suffix, i)
+		}
+		edgeIDs[id] = true
+		copy := edge
+		copy.ID = id
+		copy.From = remap[edge.From]
+		copy.To = remap[edge.To]
+		if copy.From == "" || copy.To == "" {
+			continue
+		}
+		newEdges = append(newEdges, copy)
+		ops = append(ops, map[string]any{"op": "add_edge", "edge": canvasEdgeObject(copy)})
+	}
+	// 先本地预览，id 与服务端提交的一致；失败就重新读取。
+	canvas.Nodes = append(canvas.Nodes, newNodes...)
+	canvas.Edges = append(canvas.Edges, newEdges...)
+	a.cv.canvases[canvas.ID] = canvas
+	a.cv.canvasSel = map[string]bool{}
+	for _, node := range newNodes {
+		a.cv.canvasSel[node.ID] = true
+	}
+	a.saveCanvasOps(canvas.ID, canvas.Revision, ops, nil, func() { a.loadCanvases() })
+}
+
+func (a *app) duplicateCanvasSelection() {
+	a.copyCanvasSelection()
+	a.pasteCanvasClipboard()
+}
+
+// alignCanvasSelection 把对齐/分布作为一次批量提交。
+func (a *app) alignCanvasSelection(mode string) {
+	nodes := a.selectedNodes()
+	if len(nodes) < 2 || a.cv.canvasPending {
+		return
+	}
+	if (mode == "hdistribute" || mode == "vdistribute") && len(nodes) < 3 {
+		return
+	}
+	after := make([]conversation.CanvasNode, len(nodes))
+	copy(after, nodes)
+	switch mode {
+	case "left":
+		minX := nodes[0].X
+		for _, node := range nodes[1:] {
+			minX = math.Min(minX, node.X)
+		}
+		for i := range after {
+			after[i].X = minX
+		}
+	case "right":
+		maxRight := nodes[0].X + nodes[0].W
+		for _, node := range nodes[1:] {
+			maxRight = math.Max(maxRight, node.X+node.W)
+		}
+		for i := range after {
+			after[i].X = maxRight - after[i].W
+		}
+	case "hcenter":
+		sum := 0.0
+		for _, node := range nodes {
+			sum += node.X + node.W/2
+		}
+		center := sum / float64(len(nodes))
+		for i := range after {
+			after[i].X = center - after[i].W/2
+		}
+	case "top":
+		minY := nodes[0].Y
+		for _, node := range nodes[1:] {
+			minY = math.Min(minY, node.Y)
+		}
+		for i := range after {
+			after[i].Y = minY
+		}
+	case "bottom":
+		maxBottom := nodes[0].Y + nodes[0].H
+		for _, node := range nodes[1:] {
+			maxBottom = math.Max(maxBottom, node.Y+node.H)
+		}
+		for i := range after {
+			after[i].Y = maxBottom - after[i].H
+		}
+	case "vcenter":
+		sum := 0.0
+		for _, node := range nodes {
+			sum += node.Y + node.H/2
+		}
+		center := sum / float64(len(nodes))
+		for i := range after {
+			after[i].Y = center - after[i].H/2
+		}
+	case "hdistribute":
+		sortNodesBy(after, true)
+		minLeft, maxRight, total := after[0].X, after[0].X+after[0].W, 0.0
+		for _, node := range after {
+			minLeft = math.Min(minLeft, node.X)
+			maxRight = math.Max(maxRight, node.X+node.W)
+			total += node.W
+		}
+		gap := (maxRight - minLeft - total) / float64(len(after)-1)
+		cursor := minLeft
+		for i := range after {
+			after[i].X = cursor
+			cursor += after[i].W + gap
+		}
+	case "vdistribute":
+		sortNodesBy(after, false)
+		minTop, maxBottom, total := after[0].Y, after[0].Y+after[0].H, 0.0
+		for _, node := range after {
+			minTop = math.Min(minTop, node.Y)
+			maxBottom = math.Max(maxBottom, node.Y+node.H)
+			total += node.H
+		}
+		gap := (maxBottom - minTop - total) / float64(len(after)-1)
+		cursor := minTop
+		for i := range after {
+			after[i].Y = cursor
+			cursor += after[i].H + gap
+		}
+	default:
+		return
+	}
+	changes := make([]canvasNodeChange, 0, len(nodes))
+	for i := range nodes {
+		if nodes[i].X != after[i].X || nodes[i].Y != after[i].Y {
+			changes = append(changes, canvasNodeChange{before: nodes[i], after: after[i]})
+		}
+	}
+	a.updateCanvasNodes(changes, func(canvasID string) {
+		a.pushCanvasHistory(canvasID, canvasHistory{changes: changes}, false)
+		delete(a.cv.canvasRedo, canvasID)
+	})
+}
+
+func sortNodesBy(nodes []conversation.CanvasNode, horizontal bool) {
+	for i := 1; i < len(nodes); i++ {
+		for j := i; j > 0; j-- {
+			less := nodes[j].X < nodes[j-1].X
+			if !horizontal {
+				less = nodes[j].Y < nodes[j-1].Y
+			}
+			if !less {
+				break
+			}
+			nodes[j], nodes[j-1] = nodes[j-1], nodes[j]
+		}
+	}
+}
+
+func (a *app) nudgeCanvasSelection(dx, dy float64) {
+	nodes := a.selectedNodes()
+	if len(nodes) == 0 || a.cv.canvasPending {
+		return
+	}
+	changes := make([]canvasNodeChange, 0, len(nodes))
+	for _, node := range nodes {
+		after := node
+		after.X += dx
+		after.Y += dy
+		changes = append(changes, canvasNodeChange{before: node, after: after})
+	}
+	a.updateCanvasNodes(changes, func(canvasID string) {
+		a.pushCanvasHistory(canvasID, canvasHistory{changes: changes}, false)
+		delete(a.cv.canvasRedo, canvasID)
 	})
 }
 
@@ -365,16 +712,21 @@ func canvasFromService(item service.Canvas) conversation.Canvas {
 
 const canvasRoles = "default accent success warning danger muted"
 
-// canvasStyleBar 是选中节点的语义样式条：只提供主题角色，不接受任意颜色。
+// canvasStyleBar 是选中节点的语义样式条；多选时显示对齐/分布。
 func (a *app) canvasStyleBar(c *ui.Context, t *ui.Theme) {
-	_, node, ok := a.selectedCanvas()
-	if !ok {
+	nodes := a.selectedNodes()
+	if len(nodes) == 0 {
 		// 固定高度：选中时插入按钮不能改变绘制区位置，否则指针捕获会在重建时丢失。
 		ui.Column(c).Height(92).Children(func() {
 			ui.Text(c, a.tr("canvas.noSelection")).FontSize(a.fs(textCaption)).TextColor(t.TextMuted)
 		})
 		return
 	}
+	if len(nodes) > 1 {
+		a.canvasMultiToolbar(c, t, nodes)
+		return
+	}
+	node := nodes[0]
 	roleButton := func(kind, role string, child func()) {
 		label := a.tr("canvas.styleRole", "kind", kind, "role", role)
 		if ui.Button(c, "").Label(label).Tooltip(label).Children(child).Clicked() {
@@ -416,6 +768,29 @@ func (a *app) canvasStyleBar(c *ui.Context, t *ui.Theme) {
 	})
 }
 
+func (a *app) canvasMultiToolbar(c *ui.Context, t *ui.Theme, nodes []conversation.CanvasNode) {
+	align := func(label string, mode string) {
+		if ui.Button(c, "").Label(label).Tooltip(label).Clicked() {
+			a.alignCanvasSelection(mode)
+		}
+	}
+	ui.Column(c).Height(92).Gap(4).Children(func() {
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, a.tr("canvas.selectedCount", "count", itoa(len(nodes)))).FontSize(a.fs(textCaption)).TextColor(t.TextMuted).Width(64)
+			align(a.tr("canvas.alignLeft"), "left")
+			align(a.tr("canvas.alignRight"), "right")
+			align(a.tr("canvas.alignCenterH"), "hcenter")
+			align(a.tr("canvas.alignTop"), "top")
+			align(a.tr("canvas.alignBottom"), "bottom")
+			align(a.tr("canvas.alignCenterV"), "vcenter")
+		})
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+			align(a.tr("canvas.distributeH"), "hdistribute")
+			align(a.tr("canvas.distributeV"), "vdistribute")
+		})
+	})
+}
+
 func (a *app) setCanvasStyle(node conversation.CanvasNode, kind, role string) {
 	after := node
 	switch kind {
@@ -438,21 +813,41 @@ func (a *app) setCanvasFontSize(node conversation.CanvasNode, size float64) {
 	a.commitCanvasNode(node, after)
 }
 
-func (a *app) commitCanvasNode(before, after conversation.CanvasNode) {
-	a.updateCanvasNode(before, after, func(canvasID string) {
-		a.pushCanvasHistory(canvasID, canvasHistory{id: after.ID, before: before, after: after}, false)
-		delete(a.cv.canvasRedo, canvasID)
-	})
-}
-
 // canvasInput 处理绘制区的指针与键盘。拖动过程只改本地副本，释放时才提交。
 func (a *app) canvasInput(ev ui.InputEvent) bool {
 	if ev.Kind == ui.InputKeyDown && a.cv.canvasEditing == "" {
-		if ev.Mods&(ui.Ctrl|ui.Super) != 0 && ev.Key == ui.KeyZ {
+		command := ev.Mods&(ui.Ctrl|ui.Super) != 0
+		switch {
+		case command && ev.Key == ui.KeyZ:
 			if ev.Mods&ui.Shift != 0 {
 				a.redoCanvas()
 			} else {
 				a.undoCanvas()
+			}
+			return true
+		case command && ev.Key == ui.KeyC:
+			a.copyCanvasSelection()
+			return true
+		case command && ev.Key == ui.KeyV:
+			a.pasteCanvasClipboard()
+			return true
+		case command && ev.Key == ui.KeyD:
+			a.duplicateCanvasSelection()
+			return true
+		case ev.Key == ui.KeyLeft || ev.Key == ui.KeyRight || ev.Key == ui.KeyUp || ev.Key == ui.KeyDown:
+			step := 1.0
+			if ev.Mods&ui.Shift != 0 {
+				step = 10
+			}
+			switch ev.Key {
+			case ui.KeyLeft:
+				a.nudgeCanvasSelection(-step, 0)
+			case ui.KeyRight:
+				a.nudgeCanvasSelection(step, 0)
+			case ui.KeyUp:
+				a.nudgeCanvasSelection(0, -step)
+			case ui.KeyDown:
+				a.nudgeCanvasSelection(0, step)
 			}
 			return true
 		}
@@ -470,32 +865,50 @@ func (a *app) canvasInput(ev ui.InputEvent) bool {
 		if a.cv.canvasPending || !a.cv.canvasGeom.ok {
 			return false
 		}
-		if a.cv.canvasSel != "" {
-			if rect, exists := a.cv.canvasGeom.nodeRects[a.cv.canvasSel]; exists {
-				if handle, hit := handleAt(rect, ev.X, ev.Y); hit {
-					for _, node := range canvas.Nodes {
-						if node.ID == a.cv.canvasSel {
-							a.cv.canvasDrag = &canvasDrag{kind: "resize", handle: handle, id: node.ID, before: node, startX: ev.X, startY: ev.Y}
-							return true
+		if len(a.cv.canvasSel) == 1 {
+			_, node, single := a.selectedCanvas()
+			if single {
+				if rect, exists := a.cv.canvasGeom.nodeRects[node.ID]; exists {
+					if handle, hit := handleAt(rect, ev.X, ev.Y); hit {
+						a.cv.canvasDrag = &canvasDrag{
+							kind: "resize", handle: handle, ids: []string{node.ID},
+							before: map[string]conversation.CanvasNode{node.ID: node},
+							startX: ev.X, startY: ev.Y,
 						}
+						return true
 					}
 				}
 			}
 		}
 		node, hit := a.cv.canvasGeom.nodeAt(canvas, ev.X, ev.Y)
 		if !hit {
-			a.cv.canvasSel = ""
-			return false
+			if ev.Mods&ui.Shift == 0 {
+				a.cv.canvasSel = nil
+			}
+			a.cv.canvasDrag = &canvasDrag{kind: "marquee", startX: ev.X, startY: ev.Y}
+			a.cv.canvasMarquee = &ui.Rect{X: ev.X, Y: ev.Y}
+			return true
 		}
-		a.cv.canvasSel = node.ID
-		if ev.Clicks >= 2 {
+		if ev.Mods&ui.Shift != 0 {
+			a.toggleSelected(node.ID)
+			return true
+		}
+		if !a.isSelected(node.ID) {
+			a.selectOnly(node.ID)
+		}
+		if ev.Clicks >= 2 && len(a.cv.canvasSel) == 1 {
 			a.startCanvasEdit()
 			a.redraw()
 			return true
 		}
-		if !a.cv.canvasPending {
-			a.cv.canvasDrag = &canvasDrag{kind: "move", id: node.ID, before: node, startX: ev.X, startY: ev.Y}
+		ids := a.selectedIDs()
+		before := map[string]conversation.CanvasNode{}
+		for _, item := range canvas.Nodes {
+			if a.isSelected(item.ID) {
+				before[item.ID] = item
+			}
 		}
+		a.cv.canvasDrag = &canvasDrag{kind: "move", ids: ids, before: before, startX: ev.X, startY: ev.Y}
 		return true
 	case ui.InputPointerMove:
 		if a.cv.canvasDrag == nil {
@@ -509,21 +922,58 @@ func (a *app) canvasInput(ev ui.InputEvent) bool {
 		}
 		drag := *a.cv.canvasDrag
 		a.cv.canvasDrag = nil
+		a.cv.canvasMarquee = nil
+		if drag.kind == "marquee" {
+			return true
+		}
 		if drag.moved {
-			_, after, found := a.selectedCanvas()
-			if found && after.ID == drag.id {
-				a.commitCanvasNode(drag.before, after)
+			changes := make([]canvasNodeChange, 0, len(drag.ids))
+			for _, id := range drag.ids {
+				_, after, found := a.canvasNode(id)
+				if found && drag.before[id].ID != "" {
+					changes = append(changes, canvasNodeChange{before: drag.before[id], after: after})
+				}
 			}
+			a.updateCanvasNodes(changes, func(canvasID string) {
+				a.pushCanvasHistory(canvasID, canvasHistory{changes: changes}, false)
+				delete(a.cv.canvasRedo, canvasID)
+			})
 		}
 		return true
 	}
 	return false
 }
 
+func (a *app) canvasNode(id string) (conversation.Canvas, conversation.CanvasNode, bool) {
+	canvas, ok := a.cv.canvases[a.cv.canvasID]
+	if !ok {
+		return conversation.Canvas{}, conversation.CanvasNode{}, false
+	}
+	for _, node := range canvas.Nodes {
+		if node.ID == id {
+			return canvas, node, true
+		}
+	}
+	return canvas, conversation.CanvasNode{}, false
+}
+
 func (a *app) dragCanvasNode(ev ui.InputEvent) {
 	drag := a.cv.canvasDrag
 	geom := a.cv.canvasGeom
 	if drag == nil || !geom.ok {
+		return
+	}
+	if drag.kind == "marquee" {
+		x0, y0 := drag.startX, drag.startY
+		rect := ui.Rect{X: minF(x0, ev.X), Y: minF(y0, ev.Y), W: float32(math.Abs(float64(ev.X - x0))), H: float32(math.Abs(float64(ev.Y - y0)))}
+		a.cv.canvasMarquee = &rect
+		a.cv.canvasSel = map[string]bool{}
+		for id, r := range geom.nodeRects {
+			if rectsIntersect(rect, r) {
+				a.cv.canvasSel[id] = true
+			}
+		}
+		a.redraw()
 		return
 	}
 	dx := float64((ev.X - drag.startX) / geom.scale)
@@ -533,13 +983,22 @@ func (a *app) dragCanvasNode(ev ui.InputEvent) {
 	}
 	drag.moved = true
 	alt := ev.Mods&ui.Alt != 0
-	node := drag.before
 	if drag.kind == "move" {
-		node.X = snap(drag.before.X+dx, !alt)
-		node.Y = snap(drag.before.Y+dy, !alt)
+		first := drag.before[drag.ids[0]]
+		// 以主节点吸附，其余节点用同一位移，保持相对位置。
+		targetX := snap(first.X+dx, !alt)
+		targetY := snap(first.Y+dy, !alt)
+		shiftX, shiftY := targetX-first.X, targetY-first.Y
+		for _, id := range drag.ids {
+			node := drag.before[id]
+			node.X += shiftX
+			node.Y += shiftY
+			a.setCanvasNodeLocal(id, node)
+		}
 	} else {
-		left, top := drag.before.X, drag.before.Y
-		right, bottom := drag.before.X+drag.before.W, drag.before.Y+drag.before.H
+		node := drag.before[drag.ids[0]]
+		left, top := node.X, node.Y
+		right, bottom := node.X+node.W, node.Y+node.H
 		if strings.Contains(drag.handle, "w") {
 			left = snap(left+dx, !alt)
 		}
@@ -568,8 +1027,8 @@ func (a *app) dragCanvasNode(ev ui.InputEvent) {
 			}
 		}
 		node.X, node.Y, node.W, node.H = left, top, right-left, bottom-top
+		a.setCanvasNodeLocal(node.ID, node)
 	}
-	a.setCanvasNodeLocal(node.ID, node)
 	a.redraw()
 }
 

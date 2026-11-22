@@ -118,17 +118,26 @@ func applyFakeCanvasOps(doc map[string]any, raw any) {
 	nodes, _ := doc["nodes"].([]any)
 	for _, item := range ops {
 		op, _ := item.(map[string]any)
-		if op["op"] != "update_node" {
-			continue
-		}
-		id, _ := op["id"].(string)
-		patch, _ := op["patch"].(map[string]any)
-		for _, entry := range nodes {
-			node, _ := entry.(map[string]any)
-			if node["id"] == id {
-				for key, value := range patch {
-					node[key] = value
+		switch op["op"] {
+		case "update_node":
+			id, _ := op["id"].(string)
+			patch, _ := op["patch"].(map[string]any)
+			for _, entry := range nodes {
+				node, _ := entry.(map[string]any)
+				if node["id"] == id {
+					for key, value := range patch {
+						node[key] = value
+					}
 				}
+			}
+		case "add_node":
+			if node, ok := op["node"].(map[string]any); ok {
+				nodes = append(nodes, node)
+			}
+		case "add_edge":
+			if edge, ok := op["edge"].(map[string]any); ok {
+				edges, _ := doc["edges"].([]any)
+				doc["edges"] = append(edges, edge)
 			}
 		}
 	}

@@ -55,16 +55,20 @@ type chatView struct {
 	canvases    map[string]conversation.Canvas
 	canvasCalls int
 	// 画布编辑状态：当前选中节点、文字编辑、指针手势与最近一次绘制几何。
-	canvasSel     string
+	canvasSel     map[string]bool
 	canvasEditing string
 	canvasDraft   string
 	canvasDrag    *canvasDrag
+	// canvasMarquee 是框选时正在拖出的矩形（绘制区本地坐标）。
+	canvasMarquee *ui.Rect
 	canvasGeom    canvasGeom
 	canvasErr     string
 	canvasPending bool
 	// 撤销/重做按画布保存；只存在内存里，切换画布保留、重启不保留。
 	canvasUndo map[string][]canvasHistory
 	canvasRedo map[string][]canvasHistory
+	// clipboard 是应用内画布剪贴板，可跨画布粘贴；只存在内存里。
+	canvasClipboard *canvasClipboard
 
 	// 斜杠命令目录（command.list）。
 	commands []service.Command
@@ -158,7 +162,7 @@ func (v *chatView) resetConversation() {
 	v.openThinking, v.openOutputs, v.openRuns, v.prov = nil, nil, nil, nil
 	v.canvasOpen, v.canvasID = false, ""
 	v.canvases, v.canvasCalls = nil, -1
-	v.canvasSel, v.canvasEditing, v.canvasDraft = "", "", ""
+	v.canvasSel, v.canvasEditing, v.canvasDraft = nil, "", ""
 	v.canvasDrag, v.canvasGeom, v.canvasErr, v.canvasPending = nil, canvasGeom{}, "", false
 	v.canvasUndo, v.canvasRedo = nil, nil
 	v.tasks, v.tasksOpen, v.taskCalls = nil, false, 0

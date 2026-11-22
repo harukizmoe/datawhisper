@@ -270,3 +270,93 @@ func TestCanvasTextCommitByClickingBlank(t *testing.T) {
 		t.Fatalf("blank click did not commit: %q", got)
 	}
 }
+
+func TestCanvasShiftSelectionAndNudge(t *testing.T) {
+	a, tt, fs, q := openEditableCanvas(t)
+	ax, ay := canvasPoint(t, a, tt, "a")
+	bx, by := canvasPoint(t, a, tt, "b")
+	tt.Move(ax, ay)
+	tt.ClickAt(ax, ay)
+	tt.ClickAtWith(ui.Shift, bx, by)
+	tt.Frame()
+	if len(a.cv.canvasSel) != 2 {
+		t.Fatalf("selected %d", len(a.cv.canvasSel))
+	}
+	tt.Key(ui.Shift, ui.KeyRight)
+	q.pump(t, tt, "nudge save", func() bool { return len(fs.callsTo("canvas.apply")) == 1 && !a.cv.canvasPending })
+	canvas := a.cv.canvases["cv_1"]
+	if canvas.Revision != 3 {
+		t.Fatalf("revision %d", canvas.Revision)
+	}
+	if canvas.Nodes[0].X != 30 || canvas.Nodes[1].X != 230 {
+		t.Fatalf("nudge: %v %v", canvas.Nodes[0].X, canvas.Nodes[1].X)
+	}
+}
+
+func TestCanvasMarqueeSelectsNodes(t *testing.T) {
+	a, tt, _, _ := openEditableCanvas(t)
+	bx, by := canvasPoint(t, a, tt, "b")
+	body, _ := tt.Find(a.tr("canvas.surface"))
+	startX, startY := body.X+10, body.Y+10
+	tt.Move(startX, startY)
+	tt.Press(startX, startY)
+	tt.Move(bx+60, by+40)
+	tt.Release(bx+60, by+40)
+	tt.Frame()
+	if len(a.cv.canvasSel) != 2 {
+		t.Fatalf("marquee selected %d", len(a.cv.canvasSel))
+	}
+}
+
+func TestCanvasMultiDragKeepsOffsets(t *testing.T) {
+	a, tt, fs, q := openEditableCanvas(t)
+	ax, ay := canvasPoint(t, a, tt, "a")
+	bx, by := canvasPoint(t, a, tt, "b")
+	tt.Move(ax, ay)
+	tt.ClickAt(ax, ay)
+	tt.ClickAtWith(ui.Shift, bx, by)
+	tt.Move(ax, ay)
+	tt.Press(ax, ay)
+	tt.Move(ax+64, ay+32)
+	tt.Release(ax+64, ay+32)
+	q.pump(t, tt, "multi move", func() bool { return len(fs.callsTo("canvas.apply")) == 1 && !a.cv.canvasPending })
+	canvas := a.cv.canvases["cv_1"]
+	if canvas.Nodes[1].X-canvas.Nodes[0].X != 200 || canvas.Nodes[1].Y-canvas.Nodes[0].Y != 0 {
+		t.Fatalf("relative position changed: %+v", canvas.Nodes)
+	}
+}
+
+func TestCanvasCopyPasteCreatesOffsetCopies(t *testing.T) {
+	a, tt, fs, q := openEditableCanvas(t)
+	ax, ay := canvasPoint(t, a, tt, "a")
+	tt.Move(ax, ay)
+	tt.ClickAt(ax, ay)
+	tt.Key(ui.Ctrl, ui.KeyC)
+	tt.Key(ui.Ctrl, ui.KeyV)
+	q.pump(t, tt, "paste save", func() bool { return len(fs.callsTo("canvas.apply")) == 1 && !a.cv.canvasPending })
+	canvas := a.cv.canvases["cv_1"]
+	if canvas.Revision != 3 || len(canvas.Nodes) != 3 {
+		t.Fatalf("revision %d nodes %d", canvas.Revision, len(canvas.Nodes))
+	}
+	if canvas.Nodes[2].X <= canvas.Nodes[0].X {
+		t.Fatalf("paste not offset: %+v", canvas.Nodes[2])
+	}
+}
+
+func TestCanvasAlignSelectionIsOneRevision(t *testing.T) {
+	a, tt, fs, q := openEditableCanvas(t)
+	ax, ay := canvasPoint(t, a, tt, "a")
+	bx, by := canvasPoint(t, a, tt, "b")
+	tt.Move(ax, ay)
+	tt.ClickAt(ax, ay)
+	tt.ClickAtWith(ui.Shift, bx, by)
+	tt.Frame()
+	if err := tt.Click(a.tr("canvas.alignLeft")); err != nil {
+		t.Fatal(err)
+	}
+	q.pump(t, tt, "align save", func() bool { return len(fs.callsTo("canvas.apply")) == 1 && !a.cv.canvasPending })
+	canvas := a.cv.canvases["cv_1"]
+	if canvas.Revision != 3 || canvas.Nodes[0].X != canvas.Nodes[1].X {
+		t.Fatalf("align: revision %d nodes %+v", canvas.Revision, canvas.Nodes)
+	}
+}
