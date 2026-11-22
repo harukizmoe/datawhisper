@@ -65,8 +65,8 @@ func (a *app) loadCanvases() {
 func (a *app) openCanvas(ref conversation.CanvasRef) {
 	a.cv.canvasID = ref.ID
 	a.cv.canvasOpen = true
-	a.cv.canvasSel, a.cv.canvasEditing, a.cv.canvasDraft = "", "", ""
-	a.cv.canvasDrag, a.cv.canvasErr = nil, ""
+	a.cv.canvasSel, a.cv.canvasEditing, a.cv.canvasDraft = nil, "", ""
+	a.cv.canvasDrag, a.cv.canvasMarquee, a.cv.canvasErr = nil, nil, ""
 }
 
 // canvasCard 是对话工具结果下方的画布卡片：标题、缩略图与打开入口。
@@ -161,6 +161,10 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 					}
 					a.cv.canvasGeom = geom
 					drawCanvasScene(p, canvas, t, geom, a.cv.canvasSel)
+					if a.cv.canvasMarquee != nil {
+						p.Fill(*a.cv.canvasMarquee, t.Accent.Alpha(0.08), 0)
+						p.Stroke(*a.cv.canvasMarquee, t.Accent, 0, 1)
+					}
 				})
 				body.HandleInput(a.canvasInput)
 				if a.cv.canvasEditing != "" {
@@ -173,11 +177,11 @@ func (a *app) canvasModal(c *ui.Context, t *ui.Theme) {
 
 // drawCanvas 把文档按内容边界等比缩放后画进 r（缩略图用）。
 func drawCanvas(p *ui.Painter, r ui.Rect, canvas conversation.Canvas, t *ui.Theme, padding float32) {
-	drawCanvasScene(p, canvas, t, canvasGeometry(r, canvas, padding), "")
+	drawCanvasScene(p, canvas, t, canvasGeometry(r, canvas, padding), nil)
 }
 
 // drawCanvasScene 用给定的几何画连线与节点；选中框与手柄单独画在最上层。
-func drawCanvasScene(p *ui.Painter, canvas conversation.Canvas, t *ui.Theme, g canvasGeom, selected string) {
+func drawCanvasScene(p *ui.Painter, canvas conversation.Canvas, t *ui.Theme, g canvasGeom, selected map[string]bool) {
 	if !g.ok {
 		return
 	}
@@ -236,9 +240,17 @@ func drawCanvasScene(p *ui.Painter, canvas conversation.Canvas, t *ui.Theme, g c
 			drawCanvasNodeText(p, rect, node, g.scale, t)
 		}
 	}
-	if selected != "" {
-		if rect, ok := g.nodeRects[selected]; ok {
-			drawCanvasSelection(p, rect, t)
+	if len(selected) == 1 {
+		for id := range selected {
+			if rect, ok := g.nodeRects[id]; ok {
+				drawCanvasSelection(p, rect, t, true)
+			}
+		}
+	} else {
+		for id := range selected {
+			if rect, ok := g.nodeRects[id]; ok {
+				drawCanvasSelection(p, rect, t, false)
+			}
 		}
 	}
 }
@@ -287,8 +299,11 @@ func wrapCanvasText(text string, width, size float32) []string {
 	return out
 }
 
-func drawCanvasSelection(p *ui.Painter, rect ui.Rect, t *ui.Theme) {
+func drawCanvasSelection(p *ui.Painter, rect ui.Rect, t *ui.Theme, handles bool) {
 	p.Stroke(rect, t.Accent, 2, 1.5)
+	if !handles {
+		return
+	}
 	handleFill := t.Background
 	for _, handle := range handleRects(rect) {
 		p.Fill(handle, handleFill, 0)

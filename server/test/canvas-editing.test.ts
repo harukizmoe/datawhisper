@@ -44,6 +44,19 @@ test("拖动、缩放、文字、样式与字号在一次提交里生效", () =>
   expect(canvas.nodes[0]!.x).toBe(20);
 });
 
+test("新增节点与连线同批执行，一次 revision", () => {
+  const canvas = record();
+  const result = applyCanvasOps(canvas, [
+    { op: "add_node", node: { id: "c1", kind: "round", x: 40, y: 320, w: 120, h: 60, text: "C" } },
+    { op: "add_node", node: { id: "c2", kind: "rect", x: 260, y: 320, w: 120, h: 60, text: "D" } },
+    { op: "add_edge", edge: { from: "c1", to: "c2", label: "next" } },
+  ], NOW);
+  expect(result.createdNodeIds).toEqual(["c1", "c2"]);
+  expect(result.createdEdgeIds).toHaveLength(1);
+  expect(result.canvas.edges[0]!.from).toBe("c1");
+  expect(result.canvas.revision).toBe(2);
+});
+
 test("整批操作原子失败，不留下半步修改", () => {
   const canvas = record();
   expect(() => applyCanvasOps(canvas, [
