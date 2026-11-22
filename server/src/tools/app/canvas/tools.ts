@@ -122,6 +122,7 @@ export function createCanvasTools(deps: AppToolDeps): AppTool[] {
               text: { type: "string" },
               parent: { type: "string" },
               pinned: { type: "boolean" },
+              fontSize: { type: "number", description: "Font size in DIPs (8-48)." },
               style: { type: "object" },
             },
           },

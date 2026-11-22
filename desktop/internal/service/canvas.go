@@ -11,16 +11,17 @@ type CanvasStyle struct {
 
 // CanvasNode 是画布上的一个节点，坐标与尺寸使用画布文档坐标。
 type CanvasNode struct {
-	ID     string      `json:"id"`
-	Kind   string      `json:"kind"`
-	X      float64     `json:"x"`
-	Y      float64     `json:"y"`
-	W      float64     `json:"w"`
-	H      float64     `json:"h"`
-	Text   string      `json:"text"`
-	Parent string      `json:"parent"`
-	Pinned bool        `json:"pinned"`
-	Style  CanvasStyle `json:"style"`
+	ID       string      `json:"id"`
+	Kind     string      `json:"kind"`
+	X        float64     `json:"x"`
+	Y        float64     `json:"y"`
+	W        float64     `json:"w"`
+	H        float64     `json:"h"`
+	Text     string      `json:"text"`
+	Parent   string      `json:"parent"`
+	Pinned   bool        `json:"pinned"`
+	Style    CanvasStyle `json:"style"`
+	FontSize float64     `json:"fontSize"`
 }
 
 // CanvasEdge 是两个节点之间的连线。
@@ -53,4 +54,18 @@ func (c *Client) Canvases(ctx context.Context, conv int) ([]Canvas, error) {
 	}
 	err := c.callInto(ctx, "canvas.list", map[string]any{"conversationId": conv}, &out)
 	return out.Canvases, err
+}
+
+// ApplyCanvas 原子提交一批画布操作；baseRevision 过期时返回匹配 ErrCanvasConflict 的错误。
+func (c *Client) ApplyCanvas(ctx context.Context, conv int, canvasID string, baseRevision int, ops []map[string]any) (Canvas, error) {
+	var out struct {
+		Canvas Canvas `json:"canvas"`
+	}
+	err := c.callInto(ctx, "canvas.apply", map[string]any{
+		"conversationId": conv,
+		"canvasId":       canvasID,
+		"baseRevision":   baseRevision,
+		"ops":            ops,
+	}, &out)
+	return out.Canvas, err
 }

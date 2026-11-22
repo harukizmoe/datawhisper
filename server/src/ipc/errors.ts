@@ -7,7 +7,7 @@ export const INTERNAL_ERROR = -32603;
 export const APP_ERROR = -32000;
 
 /** 业务错误的细分，放在 `error.data.kind`；取值与旧 HTTP 版本的 `{"error": …}` 一一对应。 */
-export type ErrorKind = "invalid_input" | "not_found" | "no_model" | "model_unavailable" | "unknown_model" | "unsupported_thinking_level";
+export type ErrorKind = "invalid_input" | "not_found" | "no_model" | "model_unavailable" | "unknown_model" | "unsupported_thinking_level" | "canvas_conflict";
 
 export type RpcErrorData = { kind: ErrorKind; [key: string]: unknown };
 

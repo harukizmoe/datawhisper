@@ -76,6 +76,8 @@ var (
 	// ErrModelUnavailable 匹配 Submit 的 "model_unavailable"：会话的模型属于一个已被移除或停用的提供方。
 	// 应把用户引到模型设置，或调用 SetModel。
 	ErrModelUnavailable = errors.New("model unavailable")
+	// ErrCanvasConflict 表示画布提交的 baseRevision 已过期；界面应重新读取服务端快照。
+	ErrCanvasConflict = errors.New("canvas conflict")
 )
 
 // 服务端使用的错误码（server/src/ipc/errors.ts）。
@@ -89,6 +91,8 @@ func (e *Error) Is(target error) bool {
 		return e.Code == codeAppError && e.Kind == "no_model"
 	case ErrModelUnavailable:
 		return e.Code == codeAppError && e.Kind == "model_unavailable"
+	case ErrCanvasConflict:
+		return e.Code == codeAppError && e.Kind == "canvas_conflict"
 	}
 	return false
 }
